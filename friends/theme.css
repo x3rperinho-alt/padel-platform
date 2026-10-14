@@ -264,7 +264,7 @@ select[multiple] { height: auto; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .hero-id { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .hero-id .hero-name { word-break: break-word; }
-.plink { cursor: pointer; border-bottom: 1px dotted rgba(255,255,255,.25); }
+.plink { cursor: pointer; }
 .plink:active { color: var(--court); }
 .p-row { gap: 8px; }
 .p-row-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; cursor: pointer; }
@@ -294,3 +294,4 @@ select[multiple] { height: auto; }
 .btn.ghost.danger { color: var(--danger); }
 .pub-name { font-family: "Manrope", sans-serif; font-weight: 500; font-size: .72em; color: var(--ink-3); letter-spacing: 0; }
 .p-row-name .pub-name { font-size: 13px; }
+.match .pair .plink:active, .tbl .plink:active { color: var(--court); }

@@ -132,6 +132,7 @@ const DATA = BOOT.data;
     const p = byId(state.players, pid); if (!p || !p.userId) return "";
     const n = profileCache[p.userId] || ""; return n && n !== "?" && n.toLowerCase() !== p.name.toLowerCase() ? n : "";
   }
+  function pl(pid) { return `<span class="plink" data-act="open-profile" data-id="${pid}">${esc(playerName(pid))}</span>`; }
   function nameWithPublic(pid) { const n = publicName(pid); return esc(playerName(pid)) + (n ? ` <span class="pub-name">(${esc(n)})</span>` : ""); }
   async function initArtifact() {
     const u = BOOT.user;
@@ -1046,15 +1047,15 @@ const DATA = BOOT.data;
       <tr><th></th><th>Пара</th><th title="победы-ничьи-поражения">W-D-L</th><th>Очки</th><th>+/−</th></tr>
       ${teamTable(t, games).map((r,i) => `<tr>
         <td><span class="pos-badge ${i===0?'gold':''}">${i+1}</span></td>
-        <td style="white-space:normal;">${esc(playerName(r.players[0]))}${hasElo ? ` <span class="tiny">${dCell(r.players[0])}</span>` : ""} + ${esc(playerName(r.players[1]))}${hasElo ? ` <span class="tiny">${dCell(r.players[1])}</span>` : ""}</td>
-        <td>${r.w}-${r.d}-${r.l}</td><td><strong>${r.pts}</strong></td><td class="tiny">${(r.pts-r.pa)>=0?"+":""}${r.pts-r.pa}</td>
+        <td style="white-space:normal;">${pl(r.players[0])}${hasElo ? ` <span class="tiny">${dCell(r.players[0])}</span>` : ""} + ${pl(r.players[1])}${hasElo ? ` <span class="tiny">${dCell(r.players[1])}</span>` : ""}</td>
+        <td>${r.w}-${r.d}-${r.l}</td><td class="lb-elo">${r.pts}</td><td class="tiny">${(r.pts-r.pa)>=0?"+":""}${r.pts-r.pa}</td>
       </tr>`).join("")}
     </table>` : `<table class="tbl">
       <tr><th></th><th>Игрок</th><th>Очки</th><th title="победы-ничьи-поражения">W-D-L</th>${hasElo ? `<th title="изменение Эло за турнир">Эло</th>` : ""}${isSwiss ? `<th title="Buchholz — сумма очков соперников">Bh</th>` : ""}</tr>
       ${standings.map((s,i) => `<tr>
         <td><span class="pos-badge ${i===0?'gold':''}">${i+1}</span></td>
-        <td>${esc(playerName(s.id))}</td>
-        <td><strong>${s.pf}</strong>${own ? ` <span class="tiny">(${(sw.pts[s.id]||0)-(own.pts[s.id]||0)}+${own.pts[s.id]||0})</span>` : ""}</td>
+        <td>${pl(s.id)}</td>
+        <td><span class="lb-elo">${s.pf}</span>${own ? ` <span class="tiny">(${(sw.pts[s.id]||0)-(own.pts[s.id]||0)}+${own.pts[s.id]||0})</span>` : ""}</td>
         <td>${wl(s.id)}</td>
         ${hasElo ? `<td class="tiny" style="font-size:13px;">${dCell(s.id)}</td>` : ""}
         ${isSwiss ? `<td class="tiny" style="font-size:13px;">${sw.bh[s.id]||0}</td>` : ""}
@@ -1411,13 +1412,13 @@ const DATA = BOOT.data;
       <div class="match">
         <div class="court-lbl">Корт ${g.court}${g.label ? " · "+esc(g.label) : ""}${canWrite ? ` <button class="edit-pen" data-act="edit-game" data-gid="${g.id}" title="поменять состав">✎</button>` : ""}</div>
         <div class="mrow">
-          <div class="pair ${winA?'winner':''}">${esc(playerName(g.teamA[0]))}<small>${esc(playerName(g.teamA[1]))}</small></div>
+          <div class="pair ${winA?'winner':''}">${pl(g.teamA[0])}<small>${pl(g.teamA[1])}</small></div>
           <div class="score">
             <input type="number" min="0" max="99" data-act="score" data-gid="${g.id}" data-side="A" value="${a==null?"":a}"${canWrite?"":" disabled"}>
             <span class="colon">:</span>
             <input type="number" min="0" max="99" data-act="score" data-gid="${g.id}" data-side="B" value="${b==null?"":b}"${canWrite?"":" disabled"}>
           </div>
-          <div class="pair right ${winB?'winner':''}">${esc(playerName(g.teamB[0]))}<small>${esc(playerName(g.teamB[1]))}</small></div>
+          <div class="pair right ${winB?'winner':''}">${pl(g.teamB[0])}<small>${pl(g.teamB[1])}</small></div>
         </div>
       </div>`;
   }
