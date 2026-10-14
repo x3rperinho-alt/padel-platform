@@ -119,9 +119,20 @@ const DATA = BOOT.data;
       const d = await db.loadAll();
       state.players = d.players; state.clubs = d.clubs; state.bookings = d.bookings;
       state.tournaments = d.tournaments.slice().sort((a,b)=>(a.seq||0)-(b.seq||0)); state.games = d.games; state.log = d.log;
-      render();
+      render(); loadPublicNames();
     } catch(e) { console.error("reload failed", e); }
   }
+  // Публичные имена аккаунтов (как в Телеграме) для привязанных игроков — показываем в скобках рядом с именем в лиге
+  async function loadPublicNames() {
+    const ids = state.players.map(p => p.userId).filter(id => id && !(id in profileCache));
+    if (!ids.length) return;
+    try { const m = await db.profileNames(ids); let ch = false; ids.forEach(id => { profileCache[id] = m[id] || ""; if (m[id]) ch = true; }); if (ch) render(); } catch(e) {}
+  }
+  function publicName(pid) {
+    const p = byId(state.players, pid); if (!p || !p.userId) return "";
+    const n = profileCache[p.userId] || ""; return n && n !== "?" && n.toLowerCase() !== p.name.toLowerCase() ? n : "";
+  }
+  function nameWithPublic(pid) { const n = publicName(pid); return esc(playerName(pid)) + (n ? ` <span class="pub-name">(${esc(n)})</span>` : ""); }
   async function initArtifact() {
     const u = BOOT.user;
     canWrite = !!u && ["owner","admin","editor"].includes(u.role);
@@ -131,7 +142,7 @@ const DATA = BOOT.data;
     db.subscribe(() => { clearTimeout(reloadTimer); reloadTimer = setTimeout(reloadFromDb, 700); });
     const lo = document.getElementById("logoutBtn"); if (lo) lo.onclick = async () => { await db.signOut(); location.reload(); };
     const who = document.getElementById("whoami"); if (who && u) who.textContent = u.name || "";
-    updateSyncLabel(); render();
+    updateSyncLabel(); render(); loadPublicNames();
   }
   window.addEventListener("beforeunload", () => { if (dirty) saveNow(); });
 
@@ -391,7 +402,7 @@ const DATA = BOOT.data;
         <button class="btn sm primary" data-act="rename-save" data-id="${p.id}">Сохранить</button>
       </div>` : `
       <div class="link-row p-row">
-        <span class="p-row-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 36)}<span><span class="p-row-name">${esc(p.name)}</span>${p.active?"":' <span class="tiny">(не играет)</span>'}<br><span class="tiny">${playerRankLine(p.id)}</span></span></span>
+        <span class="p-row-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 36)}<span><span class="p-row-name">${nameWithPublic(p.id)}</span>${p.active?"":' <span class="tiny">(не играет)</span>'}<br><span class="tiny">${playerRankLine(p.id)}</span></span></span>
         <span class="p-row-side">${canWrite? `<button class="edit-pen" data-act="rename-player" data-id="${p.id}" title="переименовать">✎</button><button class="btn sm ${p.active?'':'primary'}" data-act="toggle-player" data-id="${p.id}">${p.active? "Убрать" : "Вернуть"}</button>` : ""}<span class="arrow" data-act="open-profile" data-id="${p.id}">&#8250;</span></span>
       </div>`).join("") || `<div class="empty"><div class="ic">&#128101;</div>нет игроков</div>`;
     return `
@@ -1560,7 +1571,7 @@ const DATA = BOOT.data;
     return `
       <div class="card hero">
         <div class="hero-top">
-          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(playerName(pid))}</div><div class="tiny">${rank >= 0 ? `#${rank+1} в лиге из ${board.length}` : "ещё не играл"}${p && !p.active ? " · не играет" : ""}</div>${canEditProfile(pid) ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="profile-edit" data-id="${pid}">✎ Редактировать</button>` : ""}</div></div>
+          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(playerName(pid))}${publicName(pid) ? ` <span class="pub-name">(${esc(publicName(pid))})</span>` : ""}</div><div class="tiny">${rank >= 0 ? `#${rank+1} в лиге из ${board.length}` : "ещё не играл"}${p && !p.active ? " · не играет" : ""}</div>${canEditProfile(pid) ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="profile-edit" data-id="${pid}">✎ Редактировать</button>` : ""}</div></div>
           <div class="hero-elo"><span>${Math.round(ratings[pid]||1500)}</span><small>Эло</small></div>
         </div>
         <div class="hero-grid">

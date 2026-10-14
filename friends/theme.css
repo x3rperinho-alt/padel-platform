@@ -292,3 +292,5 @@ select[multiple] { height: auto; }
 .role-tag { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 999px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: var(--ink-2); }
 .role-tag.owner { color: var(--court); border-color: rgba(255,122,26,.4); background: var(--orange-soft); }
 .btn.ghost.danger { color: var(--danger); }
+.pub-name { font-family: "Manrope", sans-serif; font-weight: 500; font-size: .72em; color: var(--ink-3); letter-spacing: 0; }
+.p-row-name .pub-name { font-size: 13px; }
