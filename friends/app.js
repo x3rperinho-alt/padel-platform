@@ -1470,15 +1470,17 @@ const DATA = BOOT.data;
         return (va !== vb) ? (va - vb) * sort.dir : base(a,b);
       });
     const active = all.filter(r => r.p.active), inactive = all.filter(r => !r.p.active);
+    // оранжевым подсвечивается столбец, по которому сейчас отсортировано
+    const hl = key => sort.key === key ? ' class="lb-hl"' : "";
     const row = (r, i) => `<tr>
           <td>${i==null? "" : `<span class="pos-badge ${i===0?'gold':''}">${i+1}</span>`}</td>
-          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.p.id}">${avatarHtml(r.p.id, 30)}<span class="plink">${esc(r.p.name)}</span></span>${streakTag(r.p.id)}</td>
-          <td class="lb-elo">${Math.round(r.elo)}</td>
-          <td>${r.prof.w}-${r.prof.d}-${r.prof.l}</td>
-          <td>${r.prof.gp}</td>
-          <td>${r.prof.winPct}%</td>
-          <td class="pts"><span>${r.prof.pf}</span> : <span>${r.prof.pa}</span></td>
-          <td><strong>${r.prof.diff>=0?"+":""}${r.prof.diff}</strong></td>
+          <td class="lb-name${sort.key==="name"?" lb-hl":""}"><span class="lb-p" data-act="open-profile" data-id="${r.p.id}">${avatarHtml(r.p.id, 30)}<span class="plink">${esc(r.p.name)}</span></span>${streakTag(r.p.id)}</td>
+          <td${hl("elo")}>${Math.round(r.elo)}</td>
+          <td${hl("wdl")}>${r.prof.w}-${r.prof.d}-${r.prof.l}</td>
+          <td${hl("gp")}>${r.prof.gp}</td>
+          <td${hl("pct")}>${r.prof.winPct}%</td>
+          <td class="pts${sort.key==="pf"?" lb-hl":""}"><span>${r.prof.pf}</span> : <span>${r.prof.pa}</span></td>
+          <td${hl("diff")}><strong>${r.prof.diff>=0?"+":""}${r.prof.diff}</strong></td>
         </tr>`;
     const th = (key, label, title) => `<th class="sortable ${sort.key===key?'on':''}" data-act="lb-sort" data-key="${key}"${title ? ` title="${title}"` : ""}>${label}<span class="arr">${sort.key===key ? (sort.dir<0?"▼":"▲") : "⇅"}</span></th>`;
     return `<div class="card">
