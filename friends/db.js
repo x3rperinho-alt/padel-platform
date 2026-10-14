@@ -116,8 +116,10 @@ export function createDb(cfg) {
   }
   async function profileNames(ids) {
     if (!ids.length) return {};
-    const { data } = await sb.from("public_profiles").select("user_id, display_name").in("user_id", ids);
-    return Object.fromEntries((data || []).map(p => [p.user_id, p.display_name]));
+    const { data, error } = await sb.rpc("member_names", { p_league: L });
+    if (error) throw error;
+    const want = new Set(ids);
+    return Object.fromEntries((data || []).filter(p => want.has(p.user_id)).map(p => [p.user_id, p.display_name]));
   }
   return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinLeague, claimPlayer, updateMyProfile, listMembers, setMemberRole, removeMember, setDisplayName, loadAll, sync, subscribe, profileNames };
 }
