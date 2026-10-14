@@ -1,0 +1,2 @@
+{ "name": "Padel Club", "short_name": "Padel Club", "start_url": ".", "display": "standalone", "background_color": "#0F1A16", "theme_color": "#0F1A16",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }] }
