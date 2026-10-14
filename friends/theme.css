@@ -315,3 +315,8 @@ table.tbl td.lb-hl.pts { font-size: 14px; }
 .bdg.personal .bdg-ic { color: #FFD1AD; }
 .bdg-name { font-family: "Unbounded", "Manrope", sans-serif; font-weight: 600; font-size: 11.5px; line-height: 1.2; }
 .bdg-desc { font-size: 10.5px; color: var(--ink-3); line-height: 1.25; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.nav-avatar { display: block; width: 24px; height: 24px; border-radius: 50%; overflow: hidden; margin: -1px auto 0; border: 1.5px solid rgba(255,255,255,.35); background: rgba(255,255,255,.08); transition: border-color .15s, box-shadow .15s; }
+.nav-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.nav-avatar.ph { display: flex; align-items: center; justify-content: center; }
+nav.tabs button .ic .nav-avatar.ph svg { width: 70%; height: 70%; fill: currentColor; stroke: none; margin-top: 10%; opacity: .85; }
+nav.tabs button.active .nav-avatar { border-color: var(--court); box-shadow: 0 0 10px rgba(255,122,26,.5); }

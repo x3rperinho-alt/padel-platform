@@ -385,6 +385,7 @@ const DATA = BOOT.data;
   // ---------------- render root ----------------
   function render() {
     document.querySelectorAll("nav.tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab===state.tab));
+    updateNavAvatar();
     const v = document.getElementById("view");
     if (state.tab==="players") v.innerHTML = viewPlayers();
     else if (state.tab==="bookings") v.innerHTML = viewBookings();
@@ -1499,6 +1500,15 @@ const DATA = BOOT.data;
     </div>` : ""}`;
   }
 
+  // Кнопка «Профиль» внизу: вместо иконки — фото игрока (или силуэт), пока он привязан к аккаунту
+  function updateNavAvatar() {
+    const ic = document.querySelector('nav.tabs button[data-tab="profile"] .ic'); if (!ic) return;
+    const pid = myPlayerId(); const p = pid && byId(state.players, pid);
+    const key = p && p.avatar ? "img:" + p.avatar.length + ":" + p.avatar.slice(-24) : "ph";
+    if (ic.dataset.key === key) return;
+    ic.dataset.key = key;
+    ic.innerHTML = p && p.avatar ? `<span class="nav-avatar"><img src="${p.avatar}" alt=""></span>` : `<span class="nav-avatar ph">${SILHOUETTE}</span>`;
+  }
   // ================= ПРОФИЛЬ =================
   function myPlayerId() { return BOOT.user && BOOT.user.playerId; }
   const SILHOUETTE = `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="24" r="12"/><path d="M8 60c2-14 12-22 24-22s22 8 24 22z"/></svg>`;
