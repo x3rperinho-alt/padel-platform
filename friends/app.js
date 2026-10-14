@@ -1524,7 +1524,7 @@ const DATA = BOOT.data;
     const my = myPlayerId();
     const pid = state.view.profilePid || my;
     const u = BOOT.user || {};
-    const viewingOther = !!state.view.profilePid && state.view.profilePid !== my;
+    const viewingOther = !!state.view.profilePid; // открыли из рейтинга/турнира/списка — показываем «Назад», даже если это свой профиль
     if (!pid || !byId(state.players, pid)) {
       state.view.profilePid = null;
       const free = state.players.filter(p => !p.userId || p.userId === u.id);
@@ -1541,13 +1541,14 @@ const DATA = BOOT.data;
     const head = viewingOther
       ? `<div class="section-head"><button class="btn ghost sm back" data-act="profile-back">‹ Назад</button><h2 style="flex:1;text-align:right;">Профиль</h2></div>`
       : `<div class="section-head"><h2>Профиль</h2>${my ? `<button class="btn ghost sm" data-act="claim-player" data-id="">Это не я</button>` : ""}</div>`;
+    const isMine = pid === my;
     return `
       ${head}
       ${state.view.profileEdit && canEditProfile(pid) ? profileEditHtml(pid) : profileHeroHtml(pid)}
       ${profileBadgesHtml(pid)}
       ${profileTournamentsHtml(pid)}
       ${profileBodyHtml(pid)}
-      ${viewingOther ? "" : accountCardHtml()}`;
+      ${isMine ? accountCardHtml() : ""}`;
   }
   function accountCardHtml() {
     const u = BOOT.user || {};
@@ -1848,27 +1849,17 @@ const DATA = BOOT.data;
       s.forEach(r => { if (r.g.tournamentId!==lastT) { run=0; lastT=r.g.tournamentId; } if (r.loss) run++; else if (r.win) { if (run>=3) cb = r.g; run=0; } });
       if (cb) addP(id, "🔄", "Камбэк", "победа после 3+ поражений подряд · "+gameLabel(cb));
       // непобедимый в паре
-      computeAllPairs().filter(p => p.ids.includes(id) && p.g>=3 && p.l===0).forEach(p => addP(id, "💪", "Непобедимый в паре", "с "+N(p.ids.find(x=>x!==id))+": "+p.w+"-0"));
+      const unb = computeAllPairs().filter(p => p.ids.includes(id) && p.g>=3 && p.l===0);
+      if (unb.length) addP(id, "💪", "Непобедимый в паре", unb.map(p => "с "+N(p.ids.find(x=>x!==id))+" "+p.w+"-0").join(", "));
       // качели
       let alt=1, bestAlt=1;
       for (let i=1;i<s.length;i++) { const a=s[i-1], b=s[i]; if ((a.win&&b.loss)||(a.loss&&b.win)) { alt++; bestAlt=Math.max(bestAlt,alt); } else alt=1; }
       if (bestAlt>=5) addP(id, "🎢", "Качели", bestAlt+" игр подряд победа/поражение по очереди");
       // ноль
       ts.forEach(t => { const tb = tables[t.id]; if ((tb.gp[id]||0)>=3 && !(tb.wins[id]||0)) addP(id, "🚫", "Ноль", "турнир без побед · "+t.name); });
-      // железный / гастролёр
-      const tPlayed = ts.filter(t => (tables[t.id].gp[id]||0)>0).length;
-      if (ts.length>=2 && tPlayed===ts.length) addP(id, "🪖", "Железный", "сыграл все " + plural(ts.length, "турнир", "турнира", "турниров") + " лиги");
-      if (ts.length>=2 && tPlayed===1) addP(id, "🎭", "Гастролёр", "сыграл только 1 турнир");
       // сбалансированный
       const w = s.filter(r=>r.win).length, l = s.filter(r=>r.loss).length;
       if (s.length>=10 && w===l) addP(id, "⚖️", "Сбалансированный", "ровно "+w+"-"+l);
-      // вехи
-      if (w>=1) addM(id, "🏅", "Первая кровь", "первая победа в лиге");
-      if (w>=10) addM(id, "🔟", "10 побед", w+" побед всего");
-      if (w>=25) addM(id, "🥈", "25 побед", w+" побед всего");
-      if (w>=50) addM(id, "🥇", "50 побед", w+" побед всего");
-      const bestT = ts.map(t => ({t, v: tables[t.id].pts[id]||0})).sort((a,b)=>b.v-a.v)[0];
-      if (bestT && bestT.v>=100) addM(id, "💯", "Сотня", bestT.v+" очков за турнир · "+bestT.t.name);
     });
 
     // --- рекорды (зал славы)
@@ -1906,27 +1897,50 @@ const DATA = BOOT.data;
       <div class="badge-body"><div class="badge-name">${esc(b.name)}</div><div class="tiny">${esc(b.desc)}</div>${hs}</div>
     </div>`;
   }
-  function statBadges() {
-    if (!state.games.length) return `<div class="empty">нет сыгранных игр</div>`;
-    const A = computeAchievements();
-    const personalList = state.players.filter(p => (A.personal[p.id]||[]).length || (A.milestones[p.id]||[]).length)
-      .map(p => `<div class="badge-person"><strong>${esc(p.name)}</strong><div class="wrap-tags" style="margin-top:6px;">${
-        (A.personal[p.id]||[]).concat(A.milestones[p.id]||[]).map(b => `<span class="chip badge-chip" title="${esc(b.desc)}">${b.icon} ${esc(b.name)}<small>${esc(b.desc)}</small></span>`).join("")
-      }</div></div>`).join("");
-    return `
-      <p class="tiny" style="margin:0 0 10px;">Все ачивки живые: пересчитываются из результатов, титул переходит, как только его перебили.</p>
-      <div class="card"><h3>Титулы</h3><div class="badge-list">${A.titles.map(badgeRow).join("")}</div></div>
-      <div class="card"><h3>Антититулы</h3><p class="tiny">Пропадают, как только исправился</p><div class="badge-list">${A.anti.map(badgeRow).join("")}</div></div>
-      <div class="card"><h3>Личные и вехи</h3><div class="stack" style="margin-top:8px;">${personalList || '<div class="tiny">пока пусто</div>'}</div></div>`;
-  }
+  // Значки ачивок — линейные иконки (не смайлики). Ключ — название ачивки.
+  const BI = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const BADGE_ICON = {
+    "Король": BI('<path d="M3 18h18M4 17l-1-9 5 4 4-7 4 7 5-4-1 9z"/>'),
+    "Серия": BI('<path d="M12 3c1 4 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3 1-6 1-9z"/>'),
+    "Идеальная пара": BI('<circle cx="8" cy="12" r="5"/><circle cx="16" cy="12" r="5"/>'),
+    "Чемпион": BI('<path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4M12 14v4M8 21h8M9 18h6"/>'),
+    "Ракета": BI('<path d="M14 4c3 0 6 3 6 6l-8 8-4-4z"/><path d="M8 14l-4 1 3-5M10 16l-1 4 5-3M15 9h.01"/>'),
+    "Мясник": BI('<path d="M4 20l4-4M8 16l8-8 4 4-8 8H8z"/><path d="M14 6l4 4"/>'),
+    "Клатч": BI('<path d="M13 2L5 14h6l-1 8 9-13h-6z"/>'),
+    "Стартер": BI('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>'),
+    "Финишер": BI('<path d="M5 21V4h12l-2 4 2 4H5"/>'),
+    "Заморозка": BI('<path d="M12 3v18M4 7l16 10M4 17L20 7M12 3l-2 2M12 3l2 2M12 21l-2-2M12 21l2-2"/>'),
+    "Токсичная пара": BI('<circle cx="8" cy="12" r="5"/><circle cx="16" cy="12" r="5"/><path d="M4 4l16 16"/>'),
+    "Деревянная ложка": BI('<ellipse cx="9" cy="8" rx="5" ry="5.5"/><path d="M12 12l7 8"/>'),
+    "Невезучий": BI('<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="8.5" cy="8.5" r="1"/><circle cx="15.5" cy="8.5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="8.5" cy="15.5" r="1"/><circle cx="15.5" cy="15.5" r="1"/>'),
+    "Долго запрягает": BI('<path d="M6 3h12M6 21h12M7 3c0 5 5 6 5 9s-5 4-5 9M17 3c0 5-5 6-5 9s5 4 5 9"/>'),
+    "Сдулся": BI('<path d="M3 17l5-6 4 4 4-6 5 7"/><path d="M15 9h6v6"/>'),
+    "В огне": BI('<path d="M12 3c1 4 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3 1-6 1-9z"/><path d="M4 5l1 2M20 5l-1 2"/>'),
+    "Чёрная полоса": BI('<path d="M7 15a4 4 0 0 1 1-7.9A5 5 0 0 1 17.5 9 3.5 3.5 0 0 1 17 15H7z"/><path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3"/>'),
+    "Камбэк": BI('<path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v5h5"/>'),
+    "Непобедимый в паре": BI('<path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M9 12l2 2 4-4"/>'),
+    "Качели": BI('<path d="M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0"/>'),
+    "Ноль": BI('<circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/>'),
+    "Сбалансированный": BI('<path d="M12 3v18M4 21h16M12 6l-6 7h12z"/><path d="M3 13a3 3 0 0 0 6 0M15 13a3 3 0 0 0 6 0"/>'),
+  };
   function profileBadgesHtml(pid) {
     if (!state.games.length) return "";
     const A = computeAchievements();
-    const held = A.titles.filter(t => t.holders.some(h => h.label===playerName(pid) || h.label.includes(playerName(pid)+" +") || h.label.includes("+ "+playerName(pid))))
-      .concat(A.anti.filter(t => t.holders.some(h => h.label===playerName(pid) || h.label.includes(playerName(pid)+" +") || h.label.includes("+ "+playerName(pid)))));
-    const all = held.map(b => ({icon:b.icon, name:b.name, desc:b.desc})).concat(A.personal[pid]||[], A.milestones[pid]||[]);
-    if (!all.length) return "";
-    return `<div class="card"><h3>Ачивки</h3><div class="wrap-tags" style="margin-top:8px;">${all.map(b => `<span class="chip badge-chip">${b.icon} ${esc(b.name)}<small>${esc(b.desc)}</small></span>`).join("")}</div></div>`;
+    const mine = h => h.label===playerName(pid) || h.label.includes(playerName(pid)+" +") || h.label.includes("+ "+playerName(pid));
+    const list = A.titles.filter(t => t.holders.some(mine)).map(b => ({ ...b, kind: "title", sub: (b.holders.find(mine)||{}).sub }))
+      .concat(A.anti.filter(t => t.holders.some(mine)).map(b => ({ ...b, kind: "anti", sub: (b.holders.find(mine)||{}).sub })))
+      .concat((A.personal[pid]||[]).map(b => ({ ...b, kind: b.name==="Чёрная полоса"||b.name==="Ноль" ? "anti" : "personal" })));
+    const open = state.view.badgesOpen === pid;
+    const body = !list.length ? `<p class="tiny" style="margin:10px 0 0;">Пока ничего — ачивки живые и появляются сами по результатам.</p>`
+      : `<div class="badge-grid">${list.map(b => `<div class="bdg ${b.kind}" title="${esc(b.desc)}">
+          <div class="bdg-ic">${BADGE_ICON[b.name] || `<span>${b.icon}</span>`}</div>
+          <div class="bdg-name">${esc(b.name)}</div>
+          <div class="bdg-desc">${esc(b.sub || b.desc)}</div>
+        </div>`).join("")}</div>`;
+    return `<div class="card bdg-card ${open?'open':''}">
+      <div class="row bdg-head" data-act="toggle-badges" data-id="${pid}"><h3>Ачивки <span class="tiny">· ${list.length}</span></h3><span class="chev">›</span></div>
+      ${open ? body : ""}
+    </div>`;
   }
 
   // ================= ФАКТЫ ТУРНИРА / ЛИГИ =================
@@ -2307,6 +2321,7 @@ const DATA = BOOT.data;
       else if (act==="add-player") el.onclick = addPlayer;
       else if (act==="set-role") el.onchange = () => setMemberRole(el.dataset.id, el.value);
       else if (act==="remove-member") el.onclick = () => removeMember(el.dataset.id);
+      else if (act==="toggle-badges") el.onclick = () => { state.view.badgesOpen = state.view.badgesOpen === el.dataset.id ? null : el.dataset.id; render(); };
       else if (act==="open-profile") el.onclick = (ev) => { ev.stopPropagation(); openProfile(el.dataset.id); };
       else if (act==="profile-back") el.onclick = () => { const back = state.view.profileBack || "players"; state.view.profilePid = null; state.view.profileEdit = false; state._pf = null; state.tab = back === "profile" ? "players" : back; render(); };
       else if (act==="profile-edit") el.onclick = () => { if (!canEditProfile(el.dataset.id)) return; state.view.profileEdit = true; state._pf = null; render(); const i = document.getElementById("pfName"); if (i) i.focus(); };
