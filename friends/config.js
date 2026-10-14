@@ -2,6 +2,6 @@
 // права на данные проверяет сервер (политики в базе).
 export const CONFIG = {
   SUPABASE_URL: "https://unuisrosuztjtpdcchin.supabase.co",
-  SUPABASE_KEY: "ВСТАВЬ_PUBLISHABLE_KEY",   // Supabase → Project Settings → API Keys → Publishable key (sb_publishable_…)
+  SUPABASE_KEY: "sb_publishable_MXwVqeGOsAdPotehEgCVdA_4HE49pCK",   // Supabase → Project Settings → API Keys → Publishable key (sb_publishable_…)
   LEAGUE: "friends",
 };
