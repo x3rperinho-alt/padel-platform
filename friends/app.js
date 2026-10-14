@@ -406,7 +406,50 @@ const DATA = BOOT.data;
           <input type="text" id="newPlayerName" placeholder="Имя">
           <button class="btn primary" data-act="add-player" style="white-space:nowrap;">+ Добавить</button>
         </div>
-      </div>` : ""}`;
+      </div>` : ""}
+      ${membersCardHtml()}`;
+  }
+
+  // ================= АККАУНТЫ И РОЛИ (владелец / админ) =================
+  const ROLE_LABEL = { owner: "владелец", admin: "админ", editor: "редактор", player: "игрок", viewer: "зритель" };
+  function isAdminUser() { const u = BOOT.user; return !!u && (u.role === "owner" || u.role === "admin"); }
+  function membersCardHtml() {
+    if (!isAdminUser()) return "";
+    const u = BOOT.user;
+    if (!state._members) {
+      if (!state._membersLoading) { state._membersLoading = true; db.listMembers().then(m => { state._members = m; state._membersLoading = false; render(); }).catch(e => { state._membersLoading = false; state._members = []; toast("Не удалось загрузить участников"); }); }
+      return `<div class="card"><h3>Аккаунты и роли</h3><p class="tiny">загружаю…</p></div>`;
+    }
+    const order = { owner: 0, admin: 1, editor: 2, player: 3, viewer: 4 };
+    const ms = state._members.slice().sort((a,b) => (order[a.role]-order[b.role]) || (a.name||"").localeCompare(b.name||"", "ru"));
+    const canSet = (m) => m.userId !== u.id && m.role !== "owner" && !(u.role === "admin" && m.role === "admin");
+    const roleOpts = (m) => ["admin","editor","player","viewer"].filter(r => u.role === "owner" || r !== "admin")
+      .map(r => `<option value="${r}"${m.role===r?" selected":""}>${ROLE_LABEL[r]}</option>`).join("");
+    const rows = ms.map(m => `<div class="link-row p-row">
+        <span class="p-row-main" style="cursor:default;">${m.playerId ? avatarHtml(m.playerId, 36) : `<span class="avatar ph" style="width:36px;height:36px;">${SILHOUETTE}</span>`}<span><span class="p-row-name">${esc(m.name || "без имени")}${m.userId === u.id ? ' <span class="tiny">(ты)</span>' : ""}</span><br><span class="tiny">${m.playerId && byId(state.players, m.playerId) ? "игрок: " + esc(playerName(m.playerId)) : "не привязан к игроку"}</span></span></span>
+        <span class="p-row-side">${canSet(m)
+          ? `<select class="role-sel" data-act="set-role" data-id="${m.userId}">${roleOpts(m)}</select><button class="btn sm ghost danger" data-act="remove-member" data-id="${m.userId}" title="убрать из лиги">✕</button>`
+          : `<span class="role-tag ${m.role}">${ROLE_LABEL[m.role] || m.role}</span>`}</span>
+      </div>`).join("");
+    return `<div class="card">
+      <h3>Аккаунты и роли</h3>
+      <p class="tiny">Кто зашёл в лигу через приложение. <b>Админ</b> — всё, кроме ролей админов; <b>редактор</b> — вносит счёт и создаёт турниры; <b>игрок</b> — смотрит и ведёт свой профиль; <b>зритель</b> — только смотрит.</p>
+      <div style="margin-top:8px;">${rows || '<div class="tiny">пока никого</div>'}</div>
+    </div>`;
+  }
+  async function setMemberRole(userId, role) {
+    const m = (state._members||[]).find(x => x.userId === userId); if (!m) return;
+    const prev = m.role;
+    try { await db.setMemberRole(userId, role); m.role = role; toast(`${m.name || "Аккаунт"}: теперь ${ROLE_LABEL[role]}`); }
+    catch(e) { m.role = prev; toast("Не удалось: " + (e.message || e)); }
+    render();
+  }
+  async function removeMember(userId) {
+    const m = (state._members||[]).find(x => x.userId === userId); if (!m) return;
+    if (!confirm(`Убрать ${m.name || "аккаунт"} из лиги? Игрок и его статистика останутся, отвяжется только вход.`)) return;
+    try { await db.removeMember(userId); state._members = state._members.filter(x => x.userId !== userId); const p = state.players.find(x => x.userId === userId); if (p) p.userId = null; toast("Убрал из лиги"); }
+    catch(e) { toast("Не удалось: " + (e.message || e)); }
+    render();
   }
 
   // ================= BOOKINGS =================
@@ -2250,6 +2293,8 @@ const DATA = BOOT.data;
       const act = el.dataset.act;
       if (act==="toggle-player") el.onclick = () => togglePlayer(el.dataset.id);
       else if (act==="add-player") el.onclick = addPlayer;
+      else if (act==="set-role") el.onchange = () => setMemberRole(el.dataset.id, el.value);
+      else if (act==="remove-member") el.onclick = () => removeMember(el.dataset.id);
       else if (act==="open-profile") el.onclick = (ev) => { ev.stopPropagation(); openProfile(el.dataset.id); };
       else if (act==="profile-back") el.onclick = () => { const back = state.view.profileBack || "players"; state.view.profilePid = null; state.view.profileEdit = false; state._pf = null; state.tab = back === "profile" ? "players" : back; render(); };
       else if (act==="profile-edit") el.onclick = () => { if (!canEditProfile(el.dataset.id)) return; state.view.profileEdit = true; state._pf = null; render(); const i = document.getElementById("pfName"); if (i) i.focus(); };

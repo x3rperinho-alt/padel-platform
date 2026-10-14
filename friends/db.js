@@ -36,6 +36,14 @@ export function createDb(cfg) {
   async function joinLeague(code) { const { error } = await sb.rpc("join_league", { p_league: L, p_code: code }); if (error) throw error; }
   async function claimPlayer(playerId) { const { error } = await sb.rpc("claim_player", { p_league: L, p_player: playerId }); if (error) throw error; }
   async function updateMyProfile(name, avatar) { const { error } = await sb.rpc("update_my_profile", { p_league: L, p_name: name, p_avatar: avatar || null }); if (error) throw error; }
+  async function listMembers() {
+    const { data, error } = await sb.from("league_members").select("user_id, role, player_id").eq("league_id", L);
+    if (error) throw error;
+    const names = await profileNames((data || []).map(m => m.user_id));
+    return (data || []).map(m => ({ userId: m.user_id, role: m.role, playerId: m.player_id, name: names[m.user_id] || "" }));
+  }
+  async function setMemberRole(userId, role) { const { error } = await sb.rpc("set_member_role", { p_league: L, p_user: userId, p_role: role }); if (error) throw error; }
+  async function removeMember(userId) { const { error } = await sb.rpc("remove_member", { p_league: L, p_user: userId }); if (error) throw error; }
   async function setDisplayName(name) { const s = await session(); if (!s) return; const { error } = await sb.from("profiles").update({ display_name: name }).eq("user_id", s.user.id); if (error) throw error; }
 
   // ---------- загрузка ----------
@@ -111,5 +119,5 @@ export function createDb(cfg) {
     const { data } = await sb.from("public_profiles").select("user_id, display_name").in("user_id", ids);
     return Object.fromEntries((data || []).map(p => [p.user_id, p.display_name]));
   }
-  return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinLeague, claimPlayer, updateMyProfile, setDisplayName, loadAll, sync, subscribe, profileNames };
+  return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinLeague, claimPlayer, updateMyProfile, listMembers, setMemberRole, removeMember, setDisplayName, loadAll, sync, subscribe, profileNames };
 }
