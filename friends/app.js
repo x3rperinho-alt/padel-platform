@@ -84,10 +84,11 @@ const DATA = BOOT.data;
     } catch(e) {}
   }
   function updateSyncLabel() {
-    if (saving) setSync("сохраняю…");
-    else if (!canWrite) setSync("просмотр");
-    else if (dirty) setSync("не сохранено");
-    else setSync("сохранено");
+    const el = document.getElementById("syncStatus");
+    if (saving) { setSync("сохраняю…"); if (el) el.dataset.state = "saving"; }
+    else if (!canWrite) { setSync("просмотр"); if (el) el.dataset.state = "view"; }
+    else if (dirty) { setSync("не сохранено"); if (el) el.dataset.state = "dirty"; }
+    else { setSync("сохранено"); if (el) el.dataset.state = "saved"; }
     const btn = document.getElementById("saveNow");
     if (btn) btn.style.display = (canWrite && dirty && !saving) ? "inline-block" : "none";
   }
@@ -377,6 +378,7 @@ const DATA = BOOT.data;
     else if (state.tab==="bookings") v.innerHTML = viewBookings();
     else if (state.tab==="tournaments") v.innerHTML = viewTournaments();
     else if (state.tab==="stats") v.innerHTML = viewStats();
+    else if (state.tab==="profile") v.innerHTML = viewProfileTab();
     attachHandlers();
   }
 
@@ -388,14 +390,14 @@ const DATA = BOOT.data;
         <button class="btn sm" data-act="rename-cancel">Отмена</button>
         <button class="btn sm primary" data-act="rename-save" data-id="${p.id}">Сохранить</button>
       </div>` : `
-      <div class="link-row">
-        <span>${esc(p.name)}${p.active?"":' <span class="tiny">(не играет)</span>'}${canWrite ? ` <button class="edit-pen" data-act="rename-player" data-id="${p.id}" title="переименовать">✎</button>` : ""}</span>
-        ${canWrite? `<button class="btn sm ${p.active?'':'primary'}" data-act="toggle-player" data-id="${p.id}">${p.active? "Убрать" : "Вернуть"}</button>` : ""}
+      <div class="link-row p-row">
+        <span class="p-row-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 36)}<span><span class="p-row-name">${esc(p.name)}</span>${p.active?"":' <span class="tiny">(не играет)</span>'}<br><span class="tiny">${playerRankLine(p.id)}</span></span></span>
+        <span class="p-row-side">${canWrite? `<button class="edit-pen" data-act="rename-player" data-id="${p.id}" title="переименовать">✎</button><button class="btn sm ${p.active?'':'primary'}" data-act="toggle-player" data-id="${p.id}">${p.active? "Убрать" : "Вернуть"}</button>` : ""}<span class="arrow" data-act="open-profile" data-id="${p.id}">&#8250;</span></span>
       </div>`).join("") || `<div class="empty"><div class="ic">&#128101;</div>нет игроков</div>`;
     return `
       <div class="card">
         <h2>Игроки</h2>
-        <p class="tiny">Список группы. «Убрать» — не участвует в новых турнирах, история сохраняется. ✎ — переименовать: имя поменяется везде, вся статистика останется.</p>
+        <p class="tiny">Нажми на игрока — откроется его профиль.${canWrite ? " «Убрать» — не участвует в новых турнирах, история сохраняется." : ""}</p>
         <div style="margin-top:8px;">${rows}</div>
       </div>
       ${canWrite? `<div class="card">
@@ -412,7 +414,6 @@ const DATA = BOOT.data;
     const now = new Date();
     const upcoming = state.bookings.slice().sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time))
       .filter(b => (b.date+"T"+(b.timeEnd||b.time||"00:00")) >= now.toISOString().slice(0,16));
-    const past = state.bookings.length - upcoming.length;
     const typeLbl = {street:"уличный", covered:"крытый", indoor:"внутри"};
     const courtsLbl = c => { if (!c) return ""; const n = +c; if (!Number.isFinite(n) || String(c).trim()!==String(n)) return "· корт " + esc(c); const m = n%10, h = n%100; return "· " + n + (m===1 && h!==11 ? " корт" : (m>=2 && m<=4 && (h<10||h>=20)) ? " корта" : " кортов"); };
     const timeLbl = b => esc(b.time||"") + (b.timeEnd ? "–" + esc(b.timeEnd) : "");
@@ -425,7 +426,7 @@ const DATA = BOOT.data;
           </div>
           ${canWrite? `<span style="display:flex;gap:6px;"><button class="btn sm" data-act="edit-booking" data-id="${b.id}">Изменить</button><button class="btn sm danger" data-act="del-booking" data-id="${b.id}">Удалить</button></span>` : ""}
         </div>
-      </div>`).join("") || `<div class="empty"><div class="ic">&#128197;</div>будущих броней нет</div>`;
+      </div>`).join("") || `<div class="empty"><div class="ic">&#128197;</div>броней пока нет</div>`;
 
     const clubOptions = (state.clubs.length? state.clubs : CLUB_LIST_DEFAULT)
       .map(n => `<option value="${esc(n)}"${state._bkClubSel===n?" selected":""}>${esc(n)}</option>`).join("");
@@ -433,7 +434,6 @@ const DATA = BOOT.data;
     return `
       <div class="section-head"><h2>Ближайшие брони</h2></div>
       ${rows}
-      ${past>0? `<p class="tiny" style="text-align:center;margin-top:4px;">+ ${past} прошедших</p>`:""}
 
       ${canWrite? `<div class="card" id="bkForm" style="margin-top:16px;${state._bkEdit?'border-color:var(--court);':''}">
         <div class="row"><h3>${state._bkEdit ? "Изменить бронь" : "Добавить бронь"}</h3>${state._bkEdit ? `<button class="btn ghost sm" data-act="cancel-edit-booking">Отмена</button>` : ""}</div>
@@ -474,14 +474,16 @@ const DATA = BOOT.data;
       const gs = linkedParent(t) ? stageGames(t) : state.games.filter(g=>g.tournamentId===t.id);
       const gcount = gs.filter(g=>g.scoreA!=null).length;
       const total = gs.length;
-      return `<div class="link-row" data-act="open-tournament" data-id="${t.id}">
-        <span><strong>${esc(t.name)}</strong><br><span class="tiny">${fmtDate(t.date)} · ${tLabel(t)} · ${gcount}/${total} игр внесено</span></span>
-        <span class="arrow">&#8250;</span>
+      const st = total>0 && gcount===total ? "done" : gcount>0 ? "live" : "planned";
+      const stLabel = { done: "завершён", live: "текущий", planned: "запланирован" }[st];
+      return `<div class="tile t-tile" data-act="open-tournament" data-id="${t.id}">
+        <div class="t-tile-main"><div class="t-tile-name">${esc(t.name)}</div><div class="tiny">${fmtDate(t.date)} · ${tLabel(t)}</div></div>
+        <div class="t-tile-side"><span class="t-status ${st}"><i></i>${stLabel}</span><span class="arrow">&#8250;</span></div>
       </div>`;
-    }).join("") || `<div class="empty"><div class="ic">&#127934;</div>турниров ещё нет</div>`;
+    }).join("") || `<div class="card"><div class="empty"><div class="ic">&#127934;</div>турниров ещё нет</div></div>`;
     return `
       <div class="section-head"><h2>Турниры</h2>${canWrite? `<button class="btn primary sm" data-act="new-tournament">+ Новый</button>` : ""}</div>
-      <div class="card">${rows}</div>`;
+      <div class="stack">${rows}</div>`;
   }
 
   // ================= PHRASE OF THE DAY =================
@@ -1023,20 +1025,19 @@ const DATA = BOOT.data;
     `).join("");
 
     return `
-      <div class="section-head"><h2>${esc(t.name)}</h2><span style="display:flex;gap:6px;">${canWrite ? `<button class="btn sm${state.view.editT===tid?' primary':''}" data-act="edit-tournament" data-id="${tid}">Редактировать</button>` : ""}<button class="btn ghost" data-act="close-tournament">Назад</button></span></div>
+      <div class="section-head" style="margin-bottom:4px;"><button class="btn ghost sm" data-act="close-tournament" style="padding-left:0;">‹ Турниры</button>${canWrite ? `<button class="btn sm${state.view.editT===tid?' primary':''}" data-act="edit-tournament" data-id="${tid}">Редактировать</button>` : ""}</div>
+      <h2 style="font-size:24px;line-height:1.15;margin:0 0 4px;">${esc(t.name)}</h2>
       <p class="tiny">${fmtDate(t.date)} · ${tLabel(t)}${formatInfo(tFormatKey(t)) && formatInfo(tFormatKey(t)).desc ? ` <button type="button" class="fmt-info${state.view.formatInfo===tFormatKey(t)?' on':''}" data-act="format-info" data-val="${tFormatKey(t)}" title="что это за формат">i</button>` : ""} · ${scoringLabel(t)}</p>
       ${state.view.formatInfo === tFormatKey(t) ? formatInfoHtml(tFormatKey(t)) : ""}
       ${stageNote}
       ${canWrite && state.view.editT === tid ? tournamentEditHtml(t) : ""}
 
       <div class="card">
-        <div class="row"><h3>Таблица</h3>
-          <span style="display:flex;gap:6px;">
-            ${anyScored ? `<button class="btn sm${state.view.tFacts===tid?' primary':''}" data-act="t-facts" data-id="${tid}" title="интересное за турнир">Факты</button>` : ""}
-            ${Object.keys(ed.perGame).length ? `<button class="btn sm${state.view.eloDetail===tid?' primary':''}" data-act="elo-detail" data-id="${tid}" title="сколько Эло дал каждый матч">Эло</button>` : ""}
-            <button class="btn sm" data-act="copy-summary" data-id="${tid}">Итоги в чат</button>
-            ${canWrite ? `<button class="btn sm" data-act="table-png" data-id="${tid}">PNG</button>` : ""}
-          </span>
+        <h3>Таблица</h3>
+        <div class="toolbar">
+          ${anyScored ? `<button class="btn sm${state.view.tFacts===tid?' primary':''}" data-act="t-facts" data-id="${tid}" title="интересное за турнир">Факты</button>` : ""}
+          ${Object.keys(ed.perGame).length ? `<button class="btn sm${state.view.eloDetail===tid?' primary':''}" data-act="elo-detail" data-id="${tid}" title="сколько Эло дал каждый матч">Эло</button>` : ""}
+          ${canWrite ? `<button class="btn sm" data-act="copy-summary" data-id="${tid}">Итоги в чат</button><button class="btn sm" data-act="table-png" data-id="${tid}">PNG</button>` : ""}
         </div>
         <div style="margin-top:6px;">${standingsRows}</div>
         ${Object.keys(ed.perGame).length ? `<p class="tiny" style="margin:6px 0 0;">Эло — изменение за этот турнир по сравнению с рейтингом до его начала${isSwiss ? "; Bh — Buchholz, сумма очков соперников" : ""}${own ? "; в скобках — очки этап 1 + этап 2" : ""}.</p>` : ""}
@@ -1281,22 +1282,22 @@ const DATA = BOOT.data;
     const W = 720, rowH = 46, top = 120, H = top + rowH*ranked.length + 40;
     const c = document.createElement("canvas"); c.width = W*2; c.height = H*2;
     const x = c.getContext("2d"); x.scale(2,2);
-    x.fillStyle = "#0F1A16"; x.fillRect(0,0,W,H);
-    x.fillStyle = "#D9E84A"; x.beginPath(); x.arc(34, 40, 9, 0, Math.PI*2); x.fill();
-    x.fillStyle = "#EEF3F0"; x.font = "800 30px 'Barlow Semi Condensed', 'Arial Narrow', sans-serif"; x.fillText(t.name, 54, 50);
-    x.fillStyle = "#9DB0A7"; x.font = "500 15px Barlow, Arial, sans-serif"; x.fillText(fmtDate(t.date) + "  ·  " + tLabel(t) + (scoringLabel(t) ? "  ·  " + scoringLabel(t) : ""), 54, 74);
-    x.fillStyle = "#64766E"; x.font = "600 12px Barlow, Arial, sans-serif";
+    x.fillStyle = "#0A0A0B"; x.fillRect(0,0,W,H);
+    x.fillStyle = "#FF7A1A"; x.beginPath(); x.arc(34, 40, 9, 0, Math.PI*2); x.fill();
+    x.fillStyle = "#F4F1EC"; x.font = "800 24px 'Unbounded', 'Manrope', sans-serif"; x.fillText(t.name, 54, 50);
+    x.fillStyle = "#B5B0A8"; x.font = "500 15px Manrope, Arial, sans-serif"; x.fillText(fmtDate(t.date) + "  ·  " + tLabel(t) + (scoringLabel(t) ? "  ·  " + scoringLabel(t) : ""), 54, 74);
+    x.fillStyle = "#78746E"; x.font = "600 12px Manrope, Arial, sans-serif";
     x.fillText("МЕСТО", 28, top-14); x.fillText("ИГРОК", 90, top-14); x.textAlign = "right"; x.fillText("ОЧКИ", W-140, top-14); x.fillText("W-D-L", W-40, top-14); x.textAlign = "left";
     ranked.forEach((r, i) => {
       const y = top + i*rowH;
-      x.fillStyle = i%2 ? "#182722" : "#152420"; x.fillRect(16, y, W-32, rowH);
-      x.fillStyle = i===0 ? "#D9E84A" : "#1E2F29"; x.beginPath(); x.arc(44, y+rowH/2, 14, 0, Math.PI*2); x.fill();
-      x.fillStyle = i===0 ? "#1B2600" : "#9DB0A7"; x.font = "700 14px Barlow, Arial, sans-serif"; x.textAlign = "center"; x.fillText(String(i+1), 44, y+rowH/2+5); x.textAlign = "left";
-      x.fillStyle = "#EEF3F0"; x.font = "600 19px 'Barlow Semi Condensed', 'Arial Narrow', sans-serif"; x.fillText(r.name, 90, y+rowH/2+7);
-      x.textAlign = "right"; x.font = "700 20px 'Barlow Semi Condensed', 'Arial Narrow', sans-serif"; x.fillText(String(r.pts), W-140, y+rowH/2+7);
-      x.fillStyle = "#9DB0A7"; x.font = "500 15px Barlow, Arial, sans-serif"; x.fillText(r.wl, W-40, y+rowH/2+6); x.textAlign = "left";
+      x.fillStyle = i%2 ? "#141417" : "#101013"; x.fillRect(16, y, W-32, rowH);
+      x.fillStyle = i===0 ? "#FF7A1A" : "#1C1C20"; x.beginPath(); x.arc(44, y+rowH/2, 14, 0, Math.PI*2); x.fill();
+      x.fillStyle = i===0 ? "#0A0A0B" : "#B5B0A8"; x.font = "700 14px Manrope, Arial, sans-serif"; x.textAlign = "center"; x.fillText(String(i+1), 44, y+rowH/2+5); x.textAlign = "left";
+      x.fillStyle = "#F4F1EC"; x.font = "600 15px 'Unbounded', 'Manrope', sans-serif"; x.fillText(r.name, 90, y+rowH/2+7);
+      x.textAlign = "right"; x.font = "700 17px 'Unbounded', 'Manrope', sans-serif"; x.fillText(String(r.pts), W-140, y+rowH/2+7);
+      x.fillStyle = "#B5B0A8"; x.font = "500 15px Manrope, Arial, sans-serif"; x.fillText(r.wl, W-40, y+rowH/2+6); x.textAlign = "left";
     });
-    x.fillStyle = "#64766E"; x.font = "500 12px Barlow, Arial, sans-serif"; x.fillText("Padel Club", 28, H-14);
+    x.fillStyle = "#78746E"; x.font = "500 12px Manrope, Arial, sans-serif"; x.fillText("Padel Club", 28, H-14);
     const filename = (t.name || "tournament").replace(/[^\wа-яА-ЯёЁ\- ]+/g, "").trim().replace(/\s+/g, "_") + ".png";
     const blob = await new Promise(res => c.toBlob(res, "image/png"));
     try {
@@ -1381,16 +1382,17 @@ const DATA = BOOT.data;
     // «Журнал» — только владельцу (редактору): там имена профилей Claude тех, кто вносил правки
     if (state.view.stat === "log" && !canWrite) state.view.stat = "leaderboard";
     const sub = state.view.stat;
-    const tabs = [["leaderboard","Рейтинг"],["badges","Ачивки"],["hall","Зал славы"],["money","Финансы"],["profile","Профиль"],["h2h","Личные встречи"],["pairs","Пары"],["heatmap","Тепловая карта"],["dyn","По турнирам"]].concat(canWrite ? [["log","Журнал"]] : []);
-    const segHtml = `<div class="wrap-tags" style="margin-bottom:14px;">${tabs.map(([k,l])=>`<span class="chip ${sub===k?'active':''}" data-act="stat-tab" data-val="${k}">${l}</span>`).join("")}</div>`;
+    if (sub === "badges" || sub === "profile") state.view.stat = "leaderboard";
+    // В лиге друзей финансы видят все (в коммьюнити — только админы, там свой интерфейс); журнал — только редакторам
+    const tabs = [["leaderboard","Рейтинг"],["hall","Зал славы"],["h2h","Встречи"],["pairs","Пары"],["heatmap","Тепловая карта"],["dyn","По турнирам"],["money","Финансы"]].concat(canWrite ? [["log","Журнал"]] : []);
+    const cur = state.view.stat;
+    const segHtml = `<div class="chips-wrap" style="margin-bottom:12px;">${tabs.map(([k,l])=>`<span class="chip sm ${cur===k?'active':''}" data-act="stat-tab" data-val="${k}">${l}</span>`).join("")}</div>`;
     let body = "";
     if (sub==="leaderboard") body = statLeaderboard();
-    else if (sub==="profile") body = statProfile();
     else if (sub==="h2h") body = statH2H();
     else if (sub==="pairs") body = statPairs();
     else if (sub==="heatmap") body = statHeatmap();
     else if (sub==="form") body = statForm();
-    else if (sub==="badges") body = statBadges();
     else if (sub==="hall") body = statHall();
     else if (sub==="money") body = statMoney();
     else if (sub==="dyn") body = statDynamics();
@@ -1415,8 +1417,8 @@ const DATA = BOOT.data;
     const active = all.filter(r => r.p.active), inactive = all.filter(r => !r.p.active);
     const row = (r, i) => `<tr>
           <td>${i==null? "" : `<span class="pos-badge ${i===0?'gold':''}">${i+1}</span>`}</td>
-          <td>${esc(r.p.name)}${streakTag(r.p.id)}</td>
-          <td><strong>${Math.round(r.elo)}</strong></td>
+          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.p.id}">${avatarHtml(r.p.id, 30)}<span class="plink">${esc(r.p.name)}</span></span>${streakTag(r.p.id)}</td>
+          <td class="lb-elo">${Math.round(r.elo)}</td>
           <td>${r.prof.w}-${r.prof.d}-${r.prof.l}</td>
           <td>${r.prof.gp}</td>
           <td>${r.prof.winPct}%</td>
@@ -1440,37 +1442,169 @@ const DATA = BOOT.data;
     </div>` : ""}`;
   }
 
-  function statProfile() {
-    const pid = state.view.profileId || (state.players[0] && state.players[0].id);
-    const options = state.players.map(p=>`<option value="${p.id}"${p.id===pid?" selected":""}>${esc(p.name)}</option>`).join("");
-    if (!pid) return `<div class="empty">нет игроков</div>`;
+  // ================= ПРОФИЛЬ =================
+  function myPlayerId() { return BOOT.user && BOOT.user.playerId; }
+  const SILHOUETTE = `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="24" r="12"/><path d="M8 60c2-14 12-22 24-22s22 8 24 22z"/></svg>`;
+  function initials(name) { return (name||"?").trim().split(/\s+/).slice(0,2).map(w => w[0]).join("").toUpperCase(); }
+  function avatarHtml(pid, size) {
+    const p = byId(state.players, pid); const sz = size || 44;
+    if (p && p.avatar) return `<span class="avatar" style="width:${sz}px;height:${sz}px;"><img src="${p.avatar}" alt=""></span>`;
+    return `<span class="avatar ph" style="width:${sz}px;height:${sz}px;">${SILHOUETTE}</span>`;
+  }
+  function leagueBoard() {
+    const { ratings } = computeElo();
+    return { ratings, board: state.players.filter(p => computeProfile(p.id).gp > 0 && p.active).sort((a,b) => (ratings[b.id]||1500)-(ratings[a.id]||1500)) };
+  }
+  function playerRankLine(pid) {
+    const { ratings, board } = leagueBoard(); const i = board.findIndex(p => p.id === pid);
+    return i >= 0 ? `#${i+1} · Эло ${Math.round(ratings[pid]||1500)}` : "ещё не играл";
+  }
+  function canEditProfile(pid) { return canWrite || (pid && pid === myPlayerId()); }
+  function openProfile(pid) {
+    state.view.profileBack = state.tab === "profile" ? state.view.profileBack : state.tab;
+    state.view.profilePid = pid; state.view.profileEdit = false; state._pf = null;
+    state.tab = "profile"; window.scrollTo(0, 0); render();
+  }
+  function viewProfileTab() {
+    const my = myPlayerId();
+    const pid = state.view.profilePid || my;
+    const u = BOOT.user || {};
+    const viewingOther = !!state.view.profilePid && state.view.profilePid !== my;
+    if (!pid || !byId(state.players, pid)) {
+      state.view.profilePid = null;
+      const free = state.players.filter(p => !p.userId || p.userId === u.id);
+      return `
+        <div class="section-head"><h2>Профиль</h2></div>
+        <div class="card">
+          <h3>Кто ты в этой лиге?</h3>
+          <p class="tiny" style="margin:6px 0 12px;">Выбери себя из списка игроков — профиль привяжется к твоему аккаунту. Поменять потом можно.</p>
+          <div class="wrap-tags">${free.map(p => `<span class="chip" data-act="claim-player" data-id="${p.id}">${esc(p.name)}</span>`).join("") || `<span class="tiny">все игроки уже заняты — попроси организатора</span>`}</div>
+          ${state.players.some(p => p.userId && p.userId !== u.id) ? `<p class="tiny" style="margin:10px 0 0;">Не в списке: ${state.players.filter(p => p.userId && p.userId !== u.id).map(p => esc(p.name)).join(", ")} — уже привязаны к другим аккаунтам.</p>` : ""}
+        </div>
+        ${accountCardHtml()}`;
+    }
+    const head = viewingOther
+      ? `<div class="section-head"><button class="btn ghost sm back" data-act="profile-back">‹ Назад</button><h2 style="flex:1;text-align:right;">Профиль</h2></div>`
+      : `<div class="section-head"><h2>Профиль</h2>${my ? `<button class="btn ghost sm" data-act="claim-player" data-id="">Это не я</button>` : ""}</div>`;
+    return `
+      ${head}
+      ${state.view.profileEdit && canEditProfile(pid) ? profileEditHtml(pid) : profileHeroHtml(pid)}
+      ${profileBadgesHtml(pid)}
+      ${profileTournamentsHtml(pid)}
+      ${profileBodyHtml(pid)}
+      ${viewingOther ? "" : accountCardHtml()}`;
+  }
+  function accountCardHtml() {
+    const u = BOOT.user || {};
+    return `<div class="card">
+      <h3>Аккаунт</h3>
+      <div class="stack" style="margin-top:8px;">
+        <div class="row"><span class="muted">Имя в журнале</span><span style="display:flex;gap:6px;align-items:center;"><input type="text" id="dispName" value="${esc(u.name||"")}" style="width:150px;padding:7px 10px;font-size:14px;"><button class="btn sm" data-act="save-name">Сохранить</button></span></div>
+        <div class="row"><span class="muted">Роль в лиге</span><strong>${({owner:"владелец",admin:"админ",editor:"редактор",player:"игрок",viewer:"зритель"})[u.role] || u.role || "—"}</strong></div>
+        <p class="tiny" style="margin:0;">Один аккаунт работает во всех лигах, где ты есть; рейтинг и статистика у каждой лиги свои.</p>
+      </div>
+    </div>`;
+  }
+  function profileHeroHtml(pid) {
+    const { ratings, board } = leagueBoard();
+    const prof = computeProfile(pid);
+    const rank = board.findIndex(p => p.id === pid);
+    const ts = leagueTournaments().filter(t => tournamentTable(t.id).order.includes(pid));
+    const places = ts.map(t => { const r = rankedForPrizes(t); const i = r.findIndex(x => x.id === pid); return { t, place: i+1, n: r.length }; });
+    const podium = places.filter(p => p.place >= 1 && p.place <= 3).length, wins = places.filter(p => p.place === 1).length;
+    const s = streakInfo(playerSeqs()[pid]||[]);
+    const p = byId(state.players, pid);
+    return `
+      <div class="card hero">
+        <div class="hero-top">
+          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(playerName(pid))}</div><div class="tiny">${rank >= 0 ? `#${rank+1} в лиге из ${board.length}` : "ещё не играл"}${p && !p.active ? " · не играет" : ""}</div>${canEditProfile(pid) ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="profile-edit" data-id="${pid}">✎ Редактировать</button>` : ""}</div></div>
+          <div class="hero-elo"><span>${Math.round(ratings[pid]||1500)}</span><small>Эло</small></div>
+        </div>
+        <div class="hero-grid">
+          <div><strong>${prof.gp}</strong><span>игр</span></div>
+          <div><strong>${prof.w}-${prof.d}-${prof.l}</strong><span>W-D-L</span></div>
+          <div><strong>${prof.winPct}%</strong><span>побед</span></div>
+          <div><strong>${wins}</strong><span>титулов</span></div>
+          <div><strong>${podium}</strong><span>подиумов</span></div>
+          <div><strong>${s.curW>=2 ? "🔥 "+s.curW : s.curL>=2 ? "🥶 "+s.curL : "—"}</strong><span>серия</span></div>
+        </div>
+      </div>`;
+  }
+  function profileTournamentsHtml(pid) {
+    const ts = leagueTournaments().filter(t => tournamentTable(t.id).order.includes(pid));
+    const places = ts.map(t => { const r = rankedForPrizes(t); const i = r.findIndex(x => x.id === pid); return { t, place: i+1, n: r.length }; });
+    if (!places.length) return "";
+    return `<div class="card"><h3>Турниры</h3><div class="stack" style="margin-top:8px;">${places.slice().reverse().map(p => `<div class="row" style="cursor:pointer;" data-act="open-tournament-tab" data-id="${p.t.id}"><span>${esc(p.t.name)}<br><span class="tiny">${fmtDate(p.t.date)} · ${tLabel(p.t)}</span></span><strong>${p.place===1?"🥇":p.place===2?"🥈":p.place===3?"🥉":""} ${p.place}<span class="tiny">/${p.n}</span></strong></div>`).join("")}</div></div>`;
+  }
+  function profileEditHtml(pid) {
+    const p = byId(state.players, pid);
+    const pf = state._pf || (state._pf = { name: p.name, avatar: undefined });
+    const av = pf.avatar === undefined ? p.avatar : pf.avatar;
+    const preview = av ? `<span class="avatar" style="width:88px;height:88px;"><img src="${av}" alt=""></span>` : `<span class="avatar ph" style="width:88px;height:88px;">${SILHOUETTE}</span>`;
+    return `
+      <div class="card hero">
+        <div class="pf-edit">
+          <label class="pf-avatar-pick" title="выбрать фото">${preview}<input type="file" id="pfPhoto" accept="image/*" hidden><span class="pf-cam">📷</span></label>
+          <div class="pf-fields">
+            <label class="field"><span class="lbl">Имя</span><input type="text" id="pfName" value="${esc(pf.name)}" maxlength="40"></label>
+            <div class="pf-actions">
+              <button class="btn sm" data-act="pf-photo">${av ? "Сменить фото" : "Добавить фото"}</button>
+              ${av ? `<button class="btn sm ghost" data-act="pf-photo-clear">Убрать фото</button>` : ""}
+            </div>
+          </div>
+        </div>
+        <p class="tiny" style="margin:10px 0 0;">Фото обрежется в квадрат и ужмётся — хранится только маленькая картинка.</p>
+        <div class="pf-actions" style="margin-top:12px;justify-content:flex-end;">
+          <button class="btn sm" data-act="pf-cancel">Отмена</button>
+          <button class="btn sm primary" data-act="pf-save" data-id="${pid}">Сохранить</button>
+        </div>
+      </div>`;
+  }
+  function readAvatarFile(file) {
+    return new Promise((res, rej) => {
+      const img = new Image(); const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const S = 256, c = document.createElement("canvas"); c.width = S; c.height = S;
+        const x = c.getContext("2d"); const m = Math.min(img.naturalWidth, img.naturalHeight);
+        x.drawImage(img, (img.naturalWidth-m)/2, (img.naturalHeight-m)/2, m, m, 0, 0, S, S);
+        URL.revokeObjectURL(url); res(c.toDataURL("image/jpeg", .82));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("bad image")); };
+      img.src = url;
+    });
+  }
+  async function saveProfileEdit(pid) {
+    const p = byId(state.players, pid); const inp = document.getElementById("pfName"); if (!p || !inp) return;
+    const name = inp.value.trim();
+    if (!name) { toast("Имя не может быть пустым"); return; }
+    if (state.players.some(x => x.id !== pid && x.name.toLowerCase() === name.toLowerCase())) { toast("Такое имя уже есть"); return; }
+    const pf = state._pf || {}; const avatar = pf.avatar === undefined ? (p.avatar || null) : pf.avatar;
+    if (canWrite) {
+      if (name !== p.name) addLog("Переименовал игрока: " + p.name + " → " + name);
+      if ((avatar||null) !== (p.avatar||null)) addLog((avatar ? "Обновил фото: " : "Убрал фото: ") + name);
+      p.name = name; p.avatar = avatar; commit(500);
+    } else if (pid === myPlayerId()) {
+      try { await db.updateMyProfile(name, avatar); } catch(e) { toast(/taken/.test(String(e.message)) ? "Такое имя уже есть" : "Не удалось сохранить: " + e.message); return; }
+      p.name = name; p.avatar = avatar;
+    } else return;
+    state.view.profileEdit = false; state._pf = null; toast("Профиль сохранён"); render();
+  }
+  function profileBodyHtml(pid) {
     const { ratings } = computeElo();
     const prof = computeProfile(pid);
     const { bestWin, worstLoss } = extremeGames(pid);
     return `
-      <label class="field"><select id="profileSelect">${options}</select></label>
       <div class="card">
-        <h3>${esc(playerName(pid))}</h3>
-        <div class="stack" style="margin-top:10px;">
-          <div class="row"><span class="muted">Эло-рейтинг</span><strong>${Math.round(ratings[pid]||1500)}</strong></div>
-          <div class="row"><span class="muted">Игр всего</span><strong>${prof.gp}</strong></div>
-          <div class="row"><span class="muted">Победы / ничьи / поражения</span><strong>${prof.w}-${prof.d}-${prof.l}</strong></div>
-          <div class="row"><span class="muted">Винрейт</span><strong>${prof.winPct}%</strong></div>
-          <div class="row"><span class="muted">Очки за / против</span><strong>${prof.pf} : ${prof.pa}</strong></div>
-          <div class="row"><span class="muted">Разница мячей</span><strong>${prof.diff>=0?"+":""}${prof.diff}</strong></div>
+        <div class="stack">
+          <div class="row"><span class="muted">Очки за / против</span><strong>${prof.pf} : ${prof.pa} <span class="tiny">${prof.diff>=0?"+":""}${prof.diff}</span></strong></div>
           <div class="row"><span class="muted">Лучший партнёр</span><strong>${prof.bestPartner? esc(playerName(prof.bestPartner)) + ` <span class="tiny">${(prof.bestPartnerNet>=0?"+":"")+prof.bestPartnerNet.toFixed(1)}/игру</span>` : "—"}</strong></div>
           <div class="row"><span class="muted">Заклятый партнёр</span><strong>${prof.worstPartner && prof.worstPartner!==prof.bestPartner ? esc(playerName(prof.worstPartner)) + ` <span class="tiny">${(prof.worstPartnerNet>=0?"+":"")+prof.worstPartnerNet.toFixed(1)}/игру</span>` : "—"}</strong></div>
           <div class="row"><span class="muted">Самый неудобный соперник</span><strong>${prof.worstOpp? esc(playerName(prof.worstOpp)) : "—"}</strong></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="stack">
           ${extremeHtml("Самая разгромная победа", bestWin, pid)}
           ${extremeHtml("Самое разгромное поражение", worstLoss, pid)}
         </div>
       </div>
-      ${profileMoneyHtml(pid)}
-      ${profileBadgesHtml(pid)}`;
+      ${profileMoneyHtml(pid)}`;
   }
   function profileMoneyHtml(pid) {
     const f = playerFinance(pid);
@@ -1885,7 +2019,7 @@ const DATA = BOOT.data;
     const rows = state.players.map(p => ({ p, f: playerFinance(p.id) })).filter(r => r.f.tournaments>0)
       .sort((a,b) => b.f.total - a.f.total);
     const any = rows.some(r => r.f.courts || r.f.fees || r.f.won);
-    if (!any) return `<div class="empty"><div class="ic">&#128176;</div>Финансы ещё не заполнены — откройте турнир и укажите оплату за корты и призовой фонд</div>`;
+    if (!any) return `<div class="empty"><div class="ic">&#128176;</div>${canWrite ? "Финансы ещё не заполнены — откройте турнир и укажите оплату за корты и призовой фонд" : "Финансы ещё не заполнены"}</div>`;
     const sign = v => `<strong style="color:${v>0?'var(--court)':v<0?'var(--danger)':'inherit'}">${v>0?"+":""}${fmtMoney(v)}</strong>`;
     const tot = rows.reduce((a,r) => ({ courts: a.courts+r.f.courts, fees: a.fees+r.f.fees, won: a.won+r.f.won }), {courts:0,fees:0,won:0});
     return `<div class="card">
@@ -1910,7 +2044,7 @@ const DATA = BOOT.data;
     const played = state.players.filter(p => places[p.id]);
     const sel = state.view.dynSel.length ? state.view.dynSel : played.filter(p=>p.active).slice(0,4).map(p=>p.id);
     const chips = played.map(p => `<span class="chip ${sel.includes(p.id)?'active':''}" data-act="toggle-dyn" data-id="${p.id}" style="font-size:12.5px;padding:5px 10px;">${esc(p.name)}</span>`).join("");
-    const colors = ["#1F4FA3","#D9E84A","#B23A3A","#55665F","#8B5CF6","#0EA5A4","#E58A3D","#3D74D1"];
+    const colors = ["#FF7A1A","#F4F1EC","#FF5C5C","#8E8A84","#FFB05C","#3BB2A0","#C96BFF","#5CA8FF"];
     const maxN = Math.max(...ts.map(t => tournamentTable(t.id).order.length));
     const W=340, H=180, padL=26, padR=14, padT=12, padB=24;
     const x = ti => padL + (W-padL-padR) * (ts.length===1 ? 0.5 : ti/(ts.length-1));
@@ -2077,9 +2211,9 @@ const DATA = BOOT.data;
     // 0% -> court blue, 50% -> neutral surface, 100% -> ball lime
     const t = pct/100;
     function mix(c1,c2,f){ return c1.map((v,i)=>Math.round(v+(c2[i]-v)*f)); }
-    const blue=[31,79,163], neutral=[230,233,230], lime=[190,205,60];
+    const blue=[40,40,46], neutral=[110,106,100], lime=[255,122,26];
     let rgb = t<0.5 ? mix(blue,neutral,t/0.5) : mix(neutral,lime,(t-0.5)/0.5);
-    const fg = pct>=35 && pct<=70 ? "#33402f" : "#fff";
+    const fg = pct>=70 ? "#0A0A0B" : "#F4F1EC";
     return { bg: `rgb(${rgb.join(",")})`, fg };
   }
 
@@ -2087,7 +2221,7 @@ const DATA = BOOT.data;
     const { history } = computeElo();
     const sel = state.view.formSel.length? state.view.formSel : state.players.filter(p=>p.active).slice(0,3).map(p=>p.id);
     const chips = state.players.map(p => `<span class="chip ${sel.includes(p.id)?'active':''}" data-act="toggle-form" data-id="${p.id}" style="font-size:12.5px;padding:5px 10px;">${esc(p.name)}</span>`).join("");
-    const colors = ["#1F4FA3","#D9E84A","#B23A3A","#55665F","#8B5CF6","#0EA5A4","#E58A3D","#3D74D1"];
+    const colors = ["#FF7A1A","#F4F1EC","#FF5C5C","#8E8A84","#FFB05C","#3BB2A0","#C96BFF","#5CA8FF"];
     const maxI = Math.max(1, ...sel.map(id => (history[id]||[]).length-1));
     const allR = sel.flatMap(id => (history[id]||[]).map(h=>h.r));
     const minR = Math.min(1300, ...allR), maxR = Math.max(1700, ...allR);
@@ -2109,13 +2243,23 @@ const DATA = BOOT.data;
 
   // ---------------- event handling ----------------
   function attachHandlers() {
-    document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { state.tab=b.dataset.tab; state.view.create=false; state.view.tournament=null; render(); });
+    document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { state.tab=b.dataset.tab; state.view.create=false; state.view.tournament=null; if (b.dataset.tab === "profile") { state.view.profilePid = null; state.view.profileEdit = false; state._pf = null; } render(); });
 
     const v = document.getElementById("view");
     v.querySelectorAll("[data-act]").forEach(el => {
       const act = el.dataset.act;
       if (act==="toggle-player") el.onclick = () => togglePlayer(el.dataset.id);
       else if (act==="add-player") el.onclick = addPlayer;
+      else if (act==="open-profile") el.onclick = (ev) => { ev.stopPropagation(); openProfile(el.dataset.id); };
+      else if (act==="profile-back") el.onclick = () => { const back = state.view.profileBack || "players"; state.view.profilePid = null; state.view.profileEdit = false; state._pf = null; state.tab = back === "profile" ? "players" : back; render(); };
+      else if (act==="profile-edit") el.onclick = () => { if (!canEditProfile(el.dataset.id)) return; state.view.profileEdit = true; state._pf = null; render(); const i = document.getElementById("pfName"); if (i) i.focus(); };
+      else if (act==="pf-cancel") el.onclick = () => { state.view.profileEdit = false; state._pf = null; render(); };
+      else if (act==="pf-save") el.onclick = () => saveProfileEdit(el.dataset.id);
+      else if (act==="pf-photo") el.onclick = () => { const f = document.getElementById("pfPhoto"); if (f) f.click(); };
+      else if (act==="pf-photo-clear") el.onclick = () => { const n = document.getElementById("pfName"); if (state._pf && n) state._pf.name = n.value; (state._pf || (state._pf = {})).avatar = null; render(); };
+      else if (act==="claim-player") el.onclick = async () => { try { await db.claimPlayer(el.dataset.id || null); BOOT.user.playerId = el.dataset.id || null; const d = await db.loadAll(); state.players = d.players; toast(el.dataset.id ? "Профиль привязан" : "Привязка снята"); render(); } catch(e) { toast(/claimed/.test(String(e.message)) ? "Этот игрок уже занят" : "Не удалось: " + e.message); } };
+      else if (act==="save-name") el.onclick = async () => { const v = (document.getElementById("dispName")||{}).value; const name = (v||"").trim(); if (!name) return; try { await db.setDisplayName(name); BOOT.user.name = name; profileCache[BOOT.user.id] = name; const w = document.getElementById("whoami"); if (w) w.textContent = name; toast("Имя сохранено"); } catch(e) { toast("Не удалось сохранить имя"); } };
+      else if (act==="open-tournament-tab") el.onclick = () => { state.tab = "tournaments"; state.view.tournament = el.dataset.id; state.view.create = false; render(); };
       else if (act==="rename-player") el.onclick = () => { state.view.renamePlayer = el.dataset.id; render(); const i = document.getElementById("renameInput"); if (i) { i.focus(); i.select(); } };
       else if (act==="rename-cancel") el.onclick = () => { state.view.renamePlayer = null; render(); };
       else if (act==="rename-save") el.onclick = () => renamePlayer(el.dataset.id);
@@ -2216,8 +2360,8 @@ const DATA = BOOT.data;
     const sTarget = document.getElementById("scoringTarget"); if (sTarget) sTarget.oninput = () => { getDraft().scoringTarget = sTarget.value; refreshGenerateBtn(); };
     const sMin = document.getElementById("scoringMinutes"); if (sMin) sMin.oninput = () => { getDraft().scoringMinutes = +sMin.value; refreshGenerateBtn(); };
 
-    const profSel = document.getElementById("profileSelect");
-    if (profSel) profSel.onchange = () => { state.view.profileId = profSel.value; render(); };
+    const pfPhoto = document.getElementById("pfPhoto");
+    if (pfPhoto) pfPhoto.onchange = async () => { const f = pfPhoto.files && pfPhoto.files[0]; if (!f) return; try { const n = document.getElementById("pfName"); if (state._pf && n) state._pf.name = n.value; (state._pf || (state._pf = {})).avatar = await readAvatarFile(f); render(); } catch(e) { toast("Не удалось прочитать фото"); } };
     const h2hA = document.getElementById("h2hA"); if (h2hA) h2hA.onchange = () => { state.view.h2h[0]=h2hA.value; render(); };
     const h2hB = document.getElementById("h2hB"); if (h2hB) h2hB.onchange = () => { state.view.h2h[1]=h2hB.value; render(); };
     const et = state._editT;

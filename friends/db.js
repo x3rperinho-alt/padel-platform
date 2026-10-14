@@ -34,10 +34,13 @@ export function createDb(cfg) {
     await sb.from("profiles").upsert({ user_id: s.user.id, display_name: name || s.user.user_metadata?.name || s.user.email || "" }, { onConflict: "user_id", ignoreDuplicates: true });
   }
   async function joinLeague(code) { const { error } = await sb.rpc("join_league", { p_league: L, p_code: code }); if (error) throw error; }
+  async function claimPlayer(playerId) { const { error } = await sb.rpc("claim_player", { p_league: L, p_player: playerId }); if (error) throw error; }
+  async function updateMyProfile(name, avatar) { const { error } = await sb.rpc("update_my_profile", { p_league: L, p_name: name, p_avatar: avatar || null }); if (error) throw error; }
+  async function setDisplayName(name) { const s = await session(); if (!s) return; const { error } = await sb.from("profiles").update({ display_name: name }).eq("user_id", s.user.id); if (error) throw error; }
 
   // ---------- загрузка ----------
   const rowsToState = (r) => ({
-    players: r.players.map(p => ({ id: p.id, name: p.name, active: p.active })),
+    players: r.players.map(p => ({ id: p.id, name: p.name, active: p.active, userId: p.user_id || null, avatar: p.avatar || null })),
     clubs: r.clubs.slice().sort((a,b)=>a.sort-b.sort).map(c => c.name),
     bookings: r.bookings.map(b => ({ id: b.id, date: b.date, time: b.time_start || "", timeEnd: b.time_end || "", club: b.club || "", court: b.courts || "", type: b.court_type || null })),
     tournaments: r.tournaments.slice().sort((a,b)=>a.seq-b.seq).map(t => ({
@@ -49,7 +52,7 @@ export function createDb(cfg) {
     log: r.logs.map(l => ({ t: new Date(l.at).getTime(), who: l.user_id, a: l.action, _id: l.id })),
   });
   const stateToRows = (s) => ({
-    players: s.players.map(p => ({ id: p.id, league_id: L, name: p.name, active: !!p.active })),
+    players: s.players.map(p => ({ id: p.id, league_id: L, name: p.name, active: !!p.active, user_id: p.userId || null, avatar: p.avatar || null })),
     clubs: s.clubs.map((n, i) => ({ league_id: L, name: n, sort: i })),
     bookings: s.bookings.map(b => ({ id: b.id, league_id: L, date: b.date, time_start: b.time || null, time_end: b.timeEnd || null, club: b.club || null, courts: b.court != null ? String(b.court) : null, court_type: b.type || null })),
     tournaments: s.tournaments.map(t => ({ id: t.id, league_id: L, seq: t.seq || 0, name: t.name, date: t.date || null, status: t.status || "scheduled", format: t.format, courts: t.courts || null, participant_ids: t.participantIds || [], teams: t.teams || [],
@@ -108,5 +111,5 @@ export function createDb(cfg) {
     const { data } = await sb.from("public_profiles").select("user_id, display_name").in("user_id", ids);
     return Object.fromEntries((data || []).map(p => [p.user_id, p.display_name]));
   }
-  return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinLeague, loadAll, sync, subscribe, profileNames };
+  return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinLeague, claimPlayer, updateMyProfile, setDisplayName, loadAll, sync, subscribe, profileNames };
 }
