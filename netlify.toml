@@ -1,0 +1,10 @@
+# Два сайта из одного репозитория: friends и community. В Netlify у каждого сайта свой "Base directory".
+[build]
+  publish = "."
+  command = ""
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "ALLOWALL"
+    Content-Security-Policy = "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org"
