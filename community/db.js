@@ -2,13 +2,35 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
 export function createDb(cfg) {
-  const sb = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  // Хранилище сессии: память + localStorage. В Telegram на iPhone localStorage иногда не сохраняет данные,
+  // и при возврате в приложение (свернул → открыл) библиотека «теряла» вход. Память держит сессию, пока открыто приложение.
+  const mem = {};
+  const storage = {
+    getItem: k => { if (k in mem) return mem[k]; try { return localStorage.getItem(k); } catch (e) { return null; } },
+    setItem: (k, v) => { mem[k] = v; try { localStorage.setItem(k, v); } catch (e) {} },
+    removeItem: k => { delete mem[k]; try { localStorage.removeItem(k); } catch (e) {} },
+  };
+  const sb = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage } });
   const L = cfg.LEAGUE;
-  const rpc = async (fn, args) => { const { data, error } = await sb.rpc(fn, { p_league: L, ...args }); if (error) throw error; return data; };
+  // Подстраховка: если сессия всё же пропала, а мы внутри Telegram — тихо входим заново тем же initData и повторяем действие
+  let tgInitData = null;
+  async function ensureSession() {
+    const { data } = await sb.auth.getSession(); if (data.session) return data.session;
+    if (tgInitData) { try { await signInTelegram(tgInitData); } catch (e) {} const r = await sb.auth.getSession(); return r.data.session; }
+    return null;
+  }
+  const authLost = e => /not signed in|JWT|jwt|not a member/.test(String((e && e.message) || ""));
+  const rpc = async (fn, args) => {
+    await ensureSession();
+    let { data, error } = await sb.rpc(fn, { p_league: L, ...args });
+    if (error && authLost(error) && tgInitData) { try { await signInTelegram(tgInitData); } catch (e) {} ({ data, error } = await sb.rpc(fn, { p_league: L, ...args })); }
+    if (error) throw error; return data;
+  };
 
   // ---------- вход ----------
   async function session() { const { data } = await sb.auth.getSession(); return data.session; }
   async function signInTelegram(initData) {
+    tgInitData = initData;
     const { data, error } = await sb.functions.invoke("telegram-auth", { body: { initData, league: L } });
     if (error || !data || !data.session) throw new Error((data && data.error) || (error && error.message) || "telegram auth failed");
     await sb.auth.setSession({ access_token: data.session.access_token, refresh_token: data.session.refresh_token });
@@ -37,6 +59,7 @@ export function createDb(cfg) {
   const toGame = g => ({ id: g.id, tournamentId: g.tournament_id, round: g.round, court: g.court, teamA: g.team_a, teamB: g.team_b, scoreA: g.score_a, scoreB: g.score_b, label: g.label || null });
   const toReg = r => ({ tournamentId: r.tournament_id, playerId: r.player_id, status: r.status, paid: !!r.paid, at: r.created_at, team: r.team_no ?? null, approval: r.approval || "ok", addedBy: r.added_by || null });
   async function loadAll() {
+    await ensureSession();
     const q = t => sb.from(t).select("*").eq("league_id", L);
     const [players, tournaments, games, regs] = await Promise.all([q("players"), q("tournaments_public"), q("games"), q("registrations")]);
     for (const r of [players, tournaments, games, regs]) if (r.error) throw r.error;
@@ -58,20 +81,20 @@ export function createDb(cfg) {
   async function reviewRegistration(tid, pid, action) { return rpc("review_registration", { p_tournament: tid, p_player: pid, p_action: action }); }
   async function promoteReserve(tid) { return rpc("promote_reserve", { p_tournament: tid }); }
   async function unregister(tid) { return rpc("unregister_tournament", { p_tournament: tid }); }
-  async function setDisplayName(name) { const s = await session(); if (!s) return; const { error } = await sb.from("profiles").update({ display_name: name }).eq("user_id", s.user.id); if (error) throw error; }
+  async function setDisplayName(name) { await ensureSession(); const s = await session(); if (!s) return; const { error } = await sb.from("profiles").update({ display_name: name }).eq("user_id", s.user.id); if (error) throw error; }
 
   // ---------- админ ----------
-  async function saveTournament(t) {
+  async function saveTournament(t) { await ensureSession();
     const row = { id: t.id, league_id: L, seq: t.seq || 0, name: t.name, date: t.date || null, status: t.status || "scheduled", format: t.format || "americano", courts: t.courts || null,
       participant_ids: t.participantIds || [], teams: t.teams || [], scoring: t.scoring || {}, rounds: t.rounds || null, settings: t.s || {} };
     if (t.money) row.money = t.money;
     const { error } = await sb.from("tournaments").upsert(row, { onConflict: "league_id,id" }); if (error) throw error;
   }
-  async function deleteTournament(tid) { const { error } = await sb.from("tournaments").delete().eq("league_id", L).eq("id", tid); if (error) throw error; }
-  async function setRegistration(tid, pid, patch) { const { error } = await sb.from("registrations").update(patch).eq("league_id", L).eq("tournament_id", tid).eq("player_id", pid); if (error) throw error; }
-  async function removeRegistration(tid, pid) { const { error } = await sb.from("registrations").delete().eq("league_id", L).eq("tournament_id", tid).eq("player_id", pid); if (error) throw error; }
-  async function addRegistration(tid, pid, status, team) { const { error } = await sb.from("registrations").upsert({ league_id: L, tournament_id: tid, player_id: pid, status: status || "main", paid: false, team_no: team ?? null, approval: "ok", created_at: new Date().toISOString() }, { onConflict: "league_id,tournament_id,player_id" }); if (error) throw error; }
-  async function updatePlayer(pid, patch) {
+  async function deleteTournament(tid) { await ensureSession(); const { error } = await sb.from("tournaments").delete().eq("league_id", L).eq("id", tid); if (error) throw error; }
+  async function setRegistration(tid, pid, patch) { await ensureSession(); const { error } = await sb.from("registrations").update(patch).eq("league_id", L).eq("tournament_id", tid).eq("player_id", pid); if (error) throw error; }
+  async function removeRegistration(tid, pid) { await ensureSession(); const { error } = await sb.from("registrations").delete().eq("league_id", L).eq("tournament_id", tid).eq("player_id", pid); if (error) throw error; }
+  async function addRegistration(tid, pid, status, team) { await ensureSession(); const { error } = await sb.from("registrations").upsert({ league_id: L, tournament_id: tid, player_id: pid, status: status || "main", paid: false, team_no: team ?? null, approval: "ok", created_at: new Date().toISOString() }, { onConflict: "league_id,tournament_id,player_id" }); if (error) throw error; }
+  async function updatePlayer(pid, patch) { await ensureSession();
     const row = {}; if ("level" in patch) row.level = patch.level; if ("eloStart" in patch) row.elo_start = patch.eloStart; if ("confirmed" in patch) row.elo_confirmed = patch.confirmed; if ("active" in patch) row.active = patch.active; if ("name" in patch) row.name = patch.name; if ("levelStatus" in patch) row.level_status = patch.levelStatus;
     const { error } = await sb.from("players").update(row).eq("league_id", L).eq("id", pid); if (error) throw error;
   }
