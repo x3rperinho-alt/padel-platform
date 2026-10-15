@@ -2,7 +2,7 @@
 import { CONFIG } from "./config.js";
 import { createDb } from "./db.js";
 import { bootstrap } from "./auth.js";
-import { t, setLang, getLang, detectLang, LANGS, dateFmt, quiz, quizLevel, QUIZ_MAX } from "./i18n.js";
+import { t, setLang, getLang, detectLang, LANGS, dateFmt, quiz, quizLevel, quizElo } from "./i18n.js";
 
 setLang(detectLang(null));
 const db = createDb(CONFIG);
@@ -10,7 +10,8 @@ const BOOT = await bootstrap(db);
 setLang(detectLang(BOOT.tgLang));
 
 (() => {
-  const CONFIRM_N = 3, K = 32;
+  // 1 уровень = 1000 Эло, поэтому делитель и K в 5 раз больше классических (400 и 32): поведение то же, что было
+  const CONFIRM_N = 3, K = 160, ELO_DIV = 2000;
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const byId = (arr, id) => arr.find(x => x.id === id);
   const today = () => new Date().toISOString().slice(0, 10);
@@ -23,8 +24,21 @@ setLang(detectLang(BOOT.tgLang));
   const myPlayer = () => state.players.find(p => p.userId === U.id) || null;
 
   // ---------- уровни ----------
-  const letter = lv => lv == null ? "—" : lv < 1 ? "E" : lv < 2 ? "D" : lv < 2.5 ? "D+" : lv < 3 ? "C-" : lv < 4 ? "C" : lv < 4.5 ? "C+" : lv < 5.5 ? "B-" : lv < 6 ? "B" : "A";
-  const levelElo = lv => lv == null ? 1500 : lv < 1 ? 1200 : lv < 2 ? 1300 : lv < 2.5 ? 1350 : lv < 3 ? 1400 : lv < 3.5 ? 1500 : lv < 4 ? 1600 : lv < 4.5 ? 1700 : lv < 5 ? 1800 : lv < 5.5 ? 1900 : lv < 6 ? 2000 : lv < 6.5 ? 2100 : lv < 7 ? 2150 : 2200;
+    // Буквы по шкале Raketo (уровень = Эло / 1000). Выше B+ (4.5) Raketo границ не дал — A-, A, A+ взяты с шагом как у B+.
+  const letter = lv => lv == null ? "—" : lv < 1.9 ? "D-" : lv < 2.2 ? "D" : lv < 2.5 ? "D+" : lv < 2.75 ? "C-" : lv < 3.1 ? "C" : lv < 3.5 ? "C+" : lv < 3.75 ? "B-" : lv < 4 ? "B" : lv < 4.5 ? "B+" : lv < 5 ? "A-" : lv < 6 ? "A" : "A+";
+  // кусочно-линейный перевод по опорным точкам [из, в]
+  const interp = (pts, v) => { if (v <= pts[0][0]) return pts[0][1]; for (let k = 1; k < pts.length; k++) { const [x0, y0] = pts[k - 1], [x1, y1] = pts[k]; if (v <= x1) return y0 + (y1 - y0) * (v - x0) / (x1 - x0); } return pts[pts.length - 1][1]; };
+  // Перевод «буква в букву»: границы букв чужого приложения → те же буквы в шкале Raketo, внутри буквы — пропорционально
+  const PADO_ELO = [[0, 1], [750, 1.9], [1000, 2.2], [1300, 2.5], [1600, 2.75], [1900, 3.1], [2200, 3.5], [2500, 3.75], [2800, 4], [3100, 4.5], [3400, 5], [3700, 6], [4000, 7]];
+  const PADO_IND = [[0, 1], [1, 1.9], [1.5, 2.2], [2, 2.5], [2.5, 2.75], [3, 3.1], [3.5, 3.5], [4, 3.75], [4.5, 4], [5, 4.5], [5.5, 5], [6.5, 6], [7, 7]];
+  // Playtomic: E→D-, D→D, D+→D+, C→C-…C, C+→C+, B→B-…B+, A→A-…A+
+  const PLAYTOMIC = [[0, 1], [1, 1.9], [2, 2.2], [2.5, 2.5], [4, 3.1], [5, 3.5], [6, 4.5], [7, 7]];
+  const toRaketo = (src, v) => { if (v == null || v === "" || isNaN(+v)) return null; v = +v;
+    const r = src === "pado" ? (v > 7 ? interp(PADO_ELO, Math.min(v, 4000)) : interp(PADO_IND, v)) : src === "playtomic" ? interp(PLAYTOMIC, Math.min(v, 7)) : v;
+    return Math.round(r * 1000) / 1000; };
+  // шкала как в Raketo: Эло = уровень × 1000 (2.434 → 2434). Pado / Playtomic тоже просто × 1000.
+  const levelElo = lv => lv == null ? 2500 : Math.round(+lv * 1000);
+  const fmtLv = lv => lv == null || lv === "" ? "—" : String(+(+lv).toFixed(3));
   const letterClass = l => !l || l === "—" ? "" : "lv-" + l[0].toLowerCase();
   const levelBadge = (lv, size) => `<span class="lvb ${letterClass(letter(lv))} ${size || ""}" title="${lv ?? ""}">${letter(lv)}</span>`;
   const rangeLabel = s => { const a = s.level_min != null ? letter(+s.level_min) : null, b = s.level_max != null ? letter(+s.level_max) : null; return !a && !b ? t("all_levels") : a && b ? (a === b ? a : a + " – " + b) : a ? a + "+" : "≤ " + b; };
@@ -41,7 +55,7 @@ setLang(detectLang(BOOT.tgLang));
     const avg = ids => ids.reduce((a, id) => a + (r[id] ?? 1500), 0) / ids.length;
     orderedGames().forEach(g => {
       if (g.scoreA == null || g.scoreB == null) return; const total = g.scoreA + g.scoreB; if (total <= 0) return;
-      const rA = avg(g.teamA), rB = avg(g.teamB), eA = 1 / (1 + Math.pow(10, (rB - rA) / 400)), sA = g.scoreA / total;
+      const rA = avg(g.teamA), rB = avg(g.teamB), eA = 1 / (1 + Math.pow(10, (rB - rA) / ELO_DIV)), sA = g.scoreA / total;
       const dA = sA - eA, dB = (1 - sA) - (1 - eA);
       const delta = {}; g.teamA.forEach(id => delta[id] = r[id] == null ? 0 : kFor(id) * dA); g.teamB.forEach(id => delta[id] = r[id] == null ? 0 : kFor(id) * dB);
       Object.keys(delta).forEach(id => { if (r[id] != null) r[id] += delta[id]; });
@@ -78,7 +92,7 @@ setLang(detectLang(BOOT.tgLang));
     const d = state._onb || (state._onb = { name: (U.name && U.name !== "?" ? U.name : ""), source: "playtomic", level: "", ig: "", step: null, answers: [] });
     if (d.step != null) return viewQuiz(d);
     const isQuiz = d.source === "quiz";
-    const lv = isQuiz ? null : d.level === "" ? null : +d.level;
+    const lv = isQuiz ? null : toRaketo(d.source, d.level);
     return `
       <div class="section-head"><h2>${t("welcome")}</h2></div>
       <div class="card">
@@ -90,8 +104,8 @@ setLang(detectLang(BOOT.tgLang));
         <div class="quiz-intro"><div class="quiz-intro-ic">?</div><p>${t("quiz_intro")}</p></div>
         <button class="btn primary block" data-act="quiz-start">${t("quiz_start")} →</button>` : `
         <label class="field"><span class="lbl">${t("app_nick", { app: t("src_" + d.source) })}</span><input type="text" id="obNick" value="${esc(d.nick || "")}" placeholder="nick / ID" maxlength="40"></label>
-        <label class="field"><span class="lbl">${t("level_value")}</span><input type="number" id="obLevel" inputmode="decimal" min="0" max="7" step="0.05" value="${esc(d.level)}" placeholder="2.5"></label>
-        <div class="ob-preview ${lv==null?'dim':''}">${levelBadge(lv, "big")}<div><div class="tiny">${t("letter")} · ${t("start_elo")}</div><div class="ob-elo">${lv==null?"—":letter(lv)+" · "+levelElo(lv)}</div></div></div>
+        <label class="field"><span class="lbl">${t("lv_in_" + d.source)}</span><input type="number" id="obLevel" inputmode="decimal" min="0" max="${d.source === "pado" ? 4000 : 7}" step="${d.source === "pado" ? "any" : "0.001"}" value="${esc(d.level)}" placeholder="${{ raketo: "2.434", pado: "1450", playtomic: "3.25" }[d.source]}"></label>
+        <div class="ob-preview ${lv==null?'dim':''}">${levelBadge(lv, "big")}<div><div class="tiny">${d.source === "raketo" ? "" : t("as_raketo") + " · "}${t("letter")} · ${t("start_elo")}</div><div class="ob-elo">${lv==null?"—":(d.source === "raketo" ? "" : fmtLv(lv) + " · ") + letter(lv)+" · "+levelElo(lv)}</div></div></div>
         <div class="review-note">${t("review_note", { app: t("src_" + d.source) })}</div>
         <button class="btn primary block" style="margin-top:14px;" data-act="ob-save" ${d.name.trim().length<2||lv==null||lv<0||lv>7||!(d.nick||"").trim()?"disabled":""}>${t("send_review")}</button>`}
       </div>`;
@@ -99,12 +113,12 @@ setLang(detectLang(BOOT.tgLang));
   function viewQuiz(d) {
     const Q = quiz(), n = Q.length;
     if (d.step >= n) {
-      const score = d.answers.reduce((a, x) => a + x, 0), lv = quizLevel(score);
+      const lv = quizLevel(d.answers);
       return `<div class="section-head"><h2>${t("quiz_result")}</h2></div>
         <div class="card quiz-result">
           <div class="qr-badge">${levelBadge(lv, "huge")}</div>
           <div class="qr-elo">${letter(lv)} · ${levelElo(lv)} Elo</div>
-          <div class="tiny" style="text-align:center;">${t("level_value")} ${lv} · ${score}/${QUIZ_MAX}</div>
+          <div class="tiny" style="text-align:center;">${t("level_value")} ${fmtLv(lv)}</div>
           <p class="tiny" style="margin:14px 0;">${t("quiz_note")}</p>
           <p class="tiny" style="margin:0 0 12px;">${t("quiz_adjust_hint")}</p>
           <button class="btn primary block" data-act="quiz-save">${t("done")}</button>
@@ -121,8 +135,8 @@ setLang(detectLang(BOOT.tgLang));
   async function saveOnboarding() {
     const d = state._onb; const ig = d.ig.trim().replace(/^@/, "");
     const isQuiz = d.source === "quiz"; const score = d.answers.reduce((a, x) => a + x, 0);
-    const lv = isQuiz ? quizLevel(score) : +d.level;
-    const extra = { ...(ig ? { instagram: ig } : {}), ...(isQuiz ? { quiz: d.answers.slice(), quiz_score: score } : { [d.source]: (d.nick || "").trim().replace(/^@/, "") }) };
+    const lv = isQuiz ? quizLevel(d.answers) : toRaketo(d.source, d.level);
+    const extra = { ...(ig ? { instagram: ig } : {}), ...(isQuiz ? { quiz: d.answers.slice() } : { [d.source]: (d.nick || "").trim().replace(/^@/, ""), level_raw: String(d.level).trim() }) };
     try {
       if (d.retest) await db.submitQuiz(d.answers.slice(), score);
       else await db.createMyPlayer(d.name.trim(), lv, d.source, extra);
@@ -134,7 +148,7 @@ setLang(detectLang(BOOT.tgLang));
     const me = myPlayer(); if (!me || me.levelStatus === "ok") return "";
     const src = (me.contacts || {}).level_source || "", app = t("src_" + src), nick = (me.contacts || {})[src];
     if (me.levelStatus === "pending") return `<div class="lv-banner pending"><div class="lv-banner-ic">⏳</div><div>
-      <b>${t("pending_title")}</b><p>${t("pending_text", { lv: me.levelClaim, letter: letter(me.levelClaim), app })}${nick ? ` (${esc(nick)})` : ""}.</p>
+      <b>${t("pending_title")}</b><p>${t("pending_text", { lv: fmtLv(me.levelClaim), letter: letter(me.levelClaim), app })}${nick ? ` (${esc(nick)})` : ""}.</p>
       <button class="btn sm" data-act="retest-start">${t("pending_quiz")}</button></div></div>`;
     return `<div class="lv-banner need"><div class="lv-banner-ic">!</div><div><b>${t("need_quiz_title")}</b><p>${t("need_quiz_text", { app })}</p>
       <button class="btn sm primary" data-act="retest-start">${t("quiz_start")} →</button></div></div>`;
@@ -175,7 +189,7 @@ setLang(detectLang(BOOT.tgLang));
     const row = (r, i) => `<div class="link-row p-row"><span class="p-row-main" data-act="open-profile" data-id="${r.playerId}">${avatarHtml(r.playerId, 34)}<span><span class="p-row-name">${esc(pname(r.playerId))}</span><br><span class="tiny">${letter((byId(state.players, r.playerId)||{}).level)}${isAdmin() ? " · " + (r.paid ? "✓ " + t("paid") : t("not_paid")) : ""}</span></span></span>
       <span class="p-row-side">${isAdmin() ? `<button class="btn sm ${r.paid?'primary':''}" data-act="reg-paid" data-tid="${tid}" data-pid="${r.playerId}">₴</button><button class="btn sm ghost" data-act="reg-move" data-tid="${tid}" data-pid="${r.playerId}" data-to="${r.status==='main'?'reserve':'main'}" title="${r.status==='main'?t('move_reserve'):t('move_main')}">${r.status==='main'?'↓':'↑'}</button><button class="btn sm ghost danger" data-act="reg-remove" data-tid="${tid}" data-pid="${r.playerId}">✕</button>` : `<span class="tiny">${i+1}</span>`}</span></div>`;
     const canReg = tt.s.reg_open && tt.status !== "played";
-    const regBtn = !me ? `<p class="tiny">${t("need_card")}</p>` : me.levelStatus !== "ok" ? `<p class="tiny">${t("reg_need_level")}</p>` : !mine && fitsLevel(tt) === false ? `<div class="nofit-note">${t(me.level < +(tt.s.level_min ?? -1) ? "level_too_low" : "level_too_high")} · ${letter(me.level)} ${me.level}</div>` : mine
+    const regBtn = !me ? `<p class="tiny">${t("need_card")}</p>` : me.levelStatus !== "ok" ? `<p class="tiny">${t("reg_need_level")}</p>` : !mine && fitsLevel(tt) === false ? `<div class="nofit-note">${t(me.level < +(tt.s.level_min ?? -1) ? "level_too_low" : "level_too_high")} · ${letter(me.level)} ${fmtLv(me.level)}</div>` : mine
       ? `<div class="row"><span class="ct-mine ${mine.status}">${mine.status === "main" ? t("registered_main") : t("you_in_reserve_pos", { n: res.findIndex(r => r.playerId === me.id) + 1 })}</span>${canReg ? `<button class="btn sm" data-act="unreg" data-id="${tid}">${t("unregister")}</button>` : ""}</div>`
       : canReg ? `<button class="btn primary block" data-act="reg" data-id="${tid}">${t("register")}${free != null ? ` · ${free ? t("free_slots", { n: free }) : t("reserve")}` : ""}</button>` : `<p class="tiny">${t("registration_closed")}</p>`;
     return `
@@ -224,7 +238,7 @@ setLang(detectLang(BOOT.tgLang));
     const close = tGames.filter(g => g !== big).sort((a, b) => Math.abs(a.scoreA - a.scoreB) - Math.abs(b.scoreA - b.scoreB))[0];
     if (close) facts.push([t("f_closest"), gl(close), Math.max(close.scoreA, close.scoreB) + ":" + Math.min(close.scoreA, close.scoreB) + " · " + t("round") + " " + close.round]);
     const eg = rows.map(x => ({ id: x.id, d: eloD(x.id) })).sort((a, b) => b.d - a.d)[0];
-    if (eg && eg.d > 0) facts.push([t("f_elo"), pl(eg.id), "+" + eg.d.toFixed(1) + " Elo"]);
+    if (eg && eg.d > 0) facts.push([t("f_elo"), pl(eg.id), "+" + Math.round(eg.d) + " Elo"]);
     const sbox = v => `<span class="sbox">${v}</span>`;
     const match = g => { const wa = g.scoreA > g.scoreB, wb = g.scoreB > g.scoreA; return `<div class="match">
         <div class="court-lbl">${t("court")} ${g.court || "—"}</div>
@@ -241,7 +255,7 @@ setLang(detectLang(BOOT.tgLang));
         ${rows.map((r, i) => { const d = eloD(r.id); return `<tr><td><span class="pos-badge ${medal(i)}">${i + 1}</span></td>
           <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span></span></td>
           <td class="lb-elo">${r.pts}</td><td>${r.w}-${r.l}${r.d ? "-" + r.d : ""}</td><td>${r.pts - r.pa >= 0 ? "+" : ""}${r.pts - r.pa}</td>
-          <td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${d >= 0 ? "+" : ""}${d.toFixed(1)}</td></tr>`; }).join("")}
+          <td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${d >= 0 ? "+" : ""}${Math.round(d)}</td></tr>`; }).join("")}
         </table></div>
       ${facts.length ? `<div class="card"><h3>${t("t_stats")}</h3><div class="facts">${facts.map(([k, who, sub]) => `<div class="fact"><div class="tiny">${k}</div><div class="fact-who">${who}</div><div class="fact-sub">${sub}</div></div>`).join("")}</div></div>` : ""}
       ${finished ? `<button class="rounds-toggle ${roundsOpen ? "open" : ""}" data-act="toggle-rounds" data-id="${tid}">${roundsOpen ? t("hide_rounds") : t("view_rounds", { n: rKeys.length })}<span class="chev">›</span></button>` : ""}
@@ -261,7 +275,7 @@ setLang(detectLang(BOOT.tgLang));
         ${inp("tfPlace", t("t_place"), s.place)}
         <div class="field"><span class="lbl">${t("t_format")}</span><div class="wrap-tags">${fmts.map(x => `<span class="chip ${f.format===x?'active':''}" data-act="tf-format" data-val="${x}">${t(x)}</span>`).join("")}</div></div>
         <div class="grid3">${inp("tfCourts", t("t_courts"), f.courts, "number", 'min="1" max="12"')}${inp("tfSlots", t("t_slots"), s.slots, "number", 'min="0" max="64"')}${inp("tfPrice", t("t_price"), s.price, "number", 'min="0"')}</div>
-        <div class="grid2">${inp("tfMin", t("t_level_min"), s.level_min, "number", 'min="0" max="7" step="0.5" inputmode="decimal"')}${inp("tfMax", t("t_level_max"), s.level_max, "number", 'min="0" max="7" step="0.5" inputmode="decimal"')}</div>
+        <div class="grid2">${inp("tfMin", t("t_level_min"), s.level_min, "number", 'min="0" max="7" step="0.001" inputmode="decimal"')}${inp("tfMax", t("t_level_max"), s.level_max, "number", 'min="0" max="7" step="0.001" inputmode="decimal"')}</div>
         <p class="tiny" style="margin:-6px 0 12px;">${t("level_range")}: <b>${esc(rangeLabel(s))}</b></p>
         ${inp("tfContact", t("t_contact"), s.contact, "url", 'placeholder="https://t.me/…"')}
         <label class="field"><span class="lbl">${t("t_note")}</span><textarea id="tfNote" rows="3">${esc(s.note || "")}</textarea></label>
@@ -288,8 +302,8 @@ setLang(detectLang(BOOT.tgLang));
   function viewRating() {
     const { E, list } = board();
     const grp = state.view.lvGroup || "all";
-    const groups = [["all", t("all_levels")], ["A", "A"], ["B", "B"], ["C", "C"], ["D", "D"], ["E", "E"]];
-    const rows = list.filter(p => grp === "all" || letter(p.level)[0] === grp);
+    const groups = [["all", t("all_levels")], ["A", "A"], ["B", "B"], ["C", "C"], ["D", "D"]];
+    const rows = list.filter(p => grp === "all" || letter(E.ratings[p.id] / 1000)[0] === grp);
     return `<div class="section-head"><h2>${t("rating")}</h2></div>
       <div class="chips-wrap" style="margin-bottom:12px;">${groups.map(([k, l]) => `<span class="chip sm ${grp===k?'active':''}" data-act="lv-group" data-val="${k}">${l}</span>`).join("")}</div>
       <div class="card">
@@ -298,7 +312,7 @@ setLang(detectLang(BOOT.tgLang));
         ${rows.map((p, i) => { const s = E.stats[p.id]; return `<tr>
           <td><span class="pos-badge ${i===0?'gold':''}">${i+1}</span></td>
           <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 30)}<span class="plink">${esc(p.name)}</span></span></td>
-          <td>${levelBadge(p.level)}</td>
+          <td>${levelBadge(E.ratings[p.id] / 1000)}</td>
           <td class="lb-elo ${E.unconfirmed[p.id]?'unc':''}">${Math.round(E.ratings[p.id])}</td>
           <td>${s.g}</td><td>${s.g ? s.w + "-" + s.l : "—"}</td></tr>`; }).join("")}
         </table></div>`;
@@ -357,15 +371,15 @@ setLang(detectLang(BOOT.tgLang));
     social: BI('<circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 20a5.5 5.5 0 0 1 11 0M13 20a4.5 4.5 0 0 1 9 0"/>'),
     unlucky: BI('<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="8.5" cy="8.5" r="1"/><circle cx="15.5" cy="15.5" r="1"/><circle cx="12" cy="12" r="1"/>'),
   };
-  const LETTERS = ["E", "D", "D+", "C-", "C", "C+", "B-", "B", "A"];
-  const eloLetter = e => e >= 2100 ? "A" : e >= 2000 ? "B" : e >= 1800 ? "B-" : e >= 1700 ? "C+" : e >= 1500 ? "C" : e >= 1400 ? "C-" : e >= 1350 ? "D+" : e >= 1300 ? "D" : "E";
+  const LETTERS = ["D-", "D", "D+", "C-", "C", "C+", "B-", "B", "B+", "A-", "A", "A+"];
+  const eloLetter = e => letter(e / 1000);
   function achievements(pid, E) {
     const s = E.seq[pid] || [], out = []; const add = (k, sub, kind) => out.push({ k, sub, kind: kind || "personal" });
     const tours = playedTournaments(pid, E);
     const wins = tours.filter(x => x.place === 1).length, pods = tours.filter(x => x.place >= 1 && x.place <= 3).length;
     if (wins) add("champion", t("a_champion_sub", { n: wins }), "title");
     else if (pods) add("podium", t("a_podium_sub", { n: pods }), "title");
-    const gk = s.filter(x => x.win && x.oppR - x.ownR >= 100);
+    const gk = s.filter(x => x.win && x.oppR - x.ownR >= 500);
     if (gk.length) add("giant", t("a_giant_sub", { d: Math.round(Math.max(...gk.map(x => x.oppR - x.ownR))), n: gk.length }));
     const cl = s.filter(x => x.win && x.own - x.opp === 1).length; if (cl >= 2) add("clutch", t("a_clutch_sub", { n: cl }));
     let run = 0, lastT = null, cb = null; s.forEach(x => { if (x.g.tournamentId !== lastT) { run = 0; lastT = x.g.tournamentId; } if (x.loss) run++; else if (x.win) { if (run >= 3) cb = run; run = 0; } });
@@ -376,7 +390,7 @@ setLang(detectLang(BOOT.tgLang));
     if (bl) add("blowout", bl.own + ":" + bl.opp + " · " + t("with_partner", { name: pname(bl.partner) }));
     const pr = {}; s.forEach(x => { const q = pr[x.partner] = pr[x.partner] || { g: 0, l: 0 }; q.g++; if (x.loss) q.l++; });
     const unb = Object.keys(pr).filter(k => pr[k].g >= 3 && !pr[k].l); if (unb.length) add("unbeaten", unb.map(k => pname(k) + " " + pr[k].g + "-0").join(", "));
-    const rk = tours.filter(x => x.d >= 40).sort((a, b) => b.d - a.d)[0]; if (rk) add("rocket", "+" + Math.round(rk.d) + " · " + rk.tt.name);
+    const rk = tours.filter(x => x.d >= 200).sort((a, b) => b.d - a.d)[0]; if (rk) add("rocket", "+" + Math.round(rk.d) + " · " + rk.tt.name);
     const p = byId(state.players, pid), from = letter(p.level), to = eloLetter(E.ratings[pid]);
     if (s.length && LETTERS.indexOf(to) > LETTERS.indexOf(from)) add("levelup", from + " → " + to);
     const partners = new Set(s.map(x => x.partner)).size; if (partners >= 8) add("social", t("a_social_sub", { n: partners }));
@@ -400,7 +414,7 @@ setLang(detectLang(BOOT.tgLang));
     const tours = playedTournaments(pid, E).reverse(); if (!tours.length) return "";
     const medal = n => n === 1 ? "🥇" : n === 2 ? "🥈" : n === 3 ? "🥉" : "";
     return `<div class="card"><h3>${t("played_tournaments")} <span class="tiny">· ${tours.length}</span></h3><div class="stack" style="margin-top:8px;">${tours.map(x => `
-      <div class="row" style="cursor:pointer;" data-act="open-t-tab" data-id="${x.tt.id}"><span>${esc(x.tt.name)}<br><span class="tiny">${dateFmt(x.tt.date)} · ${x.w}-${x.l} · ${x.pts} ${t("pts")} · <span class="${x.d >= 0 ? "up" : "down"}">${x.d >= 0 ? "+" : ""}${x.d.toFixed(1)} Elo</span></span></span>
+      <div class="row" style="cursor:pointer;" data-act="open-t-tab" data-id="${x.tt.id}"><span>${esc(x.tt.name)}<br><span class="tiny">${dateFmt(x.tt.date)} · ${x.w}-${x.l} · ${x.pts} ${t("pts")} · <span class="${x.d >= 0 ? "up" : "down"}">${x.d >= 0 ? "+" : ""}${Math.round(x.d)} Elo</span></span></span>
       <strong>${medal(x.place)} ${x.place}<span class="tiny">/${x.n}</span></strong></div>`).join("")}</div></div>`;
   }
   function matchHistoryHtml(pid, E) {
@@ -411,7 +425,7 @@ setLang(detectLang(BOOT.tgLang));
       <div class="mh-row ${x.win ? "win" : x.loss ? "loss" : "draw"}">
         <span class="mh-res">${x.win ? "W" : x.loss ? "L" : "D"}</span>
         <div class="mh-main"><div>${t("with_partner", { name: "" })}${x.partner ? pl(x.partner) : "—"}</div><div class="tiny">${t("vs")} ${x.opps.map(pl).join(" + ")}</div><div class="tiny dim">${esc(tn(x.g.tournamentId))} · ${t("round")} ${x.g.round}</div></div>
-        <div class="mh-score"><b>${x.own}:${x.opp}</b><span class="tiny ${x.d >= 0 ? "up" : "down"}">${x.d >= 0 ? "+" : ""}${x.d.toFixed(1)}</span></div>
+        <div class="mh-score"><b>${x.own}:${x.opp}</b><span class="tiny ${x.d >= 0 ? "up" : "down"}">${x.d >= 0 ? "+" : ""}${Math.round(x.d)}</span></div>
       </div>`).join("")}</div>
       ${all.length > 8 ? `<button class="btn sm ghost block" style="margin-top:8px;" data-act="mh-all" data-id="${pid}">${showAll ? t("show_less") : t("show_all", { n: all.length })}</button>` : ""}</div>`;
   }
@@ -428,7 +442,7 @@ setLang(detectLang(BOOT.tgLang));
     return `${head}${mine ? levelBannerHtml() : ""}
       <div class="card hero">
         <div class="hero-top">
-          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}</div><div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${levelBadge(p.level)} ${p.level ?? ""}</div>${mine || isAdmin() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}</button>` : ""}</div></div>
+          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}</div><div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${p.levelStatus === "ok" ? `${levelBadge(E.ratings[pid] / 1000)} ${fmtLv(Math.round(E.ratings[pid]) / 1000)}` : ""}</div>${mine || isAdmin() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}</button>` : ""}</div></div>
           ${p.levelStatus === "ok" ? `<div class="hero-elo"><span class="${E.unconfirmed[pid]?'unc':''}">${Math.round(E.ratings[pid])}</span><small>${E.unconfirmed[pid] ? t("unconfirmed") : t("confirmed")}</small></div>` : `<div class="hero-elo"><span class="pend">⏳</span><small>${p.levelStatus === "pending" ? t("pending_short") : t("need_quiz_short")}</small></div>`}
         </div>
         ${p.levelStatus === "ok" && E.unconfirmed[pid] ? `<p class="tiny" style="margin:8px 0 0;">${t("unconfirmed_hint", { n: CONFIRM_N - E.tcount[pid] })}</p>` : ""}
@@ -450,8 +464,8 @@ setLang(detectLang(BOOT.tgLang));
     const pf = state._pf || (state._pf = { name: p.name, avatar: undefined, bio: p.bio || "", c: Object.fromEntries(CONTACTS.map(([k]) => [k, (p.contacts || {})[k] || ""])) });
     const mine = myPlayer() && myPlayer().id === p.id;
     const c0 = p.contacts || {}, E0 = computeElo();
-    const canAdj = mine && c0.level_source === "quiz" && c0.quiz_score != null && !(E0.seq[p.id] || []).length;
-    const base = canAdj ? quizLevel(+c0.quiz_score) : null;
+    const canAdj = mine && c0.level_source === "quiz" && Array.isArray(c0.quiz) && !(E0.seq[p.id] || []).length;
+    const base = canAdj ? quizLevel(c0.quiz) : null;
     if (canAdj && pf.level == null) pf.level = p.level;
     const adjBlock = canAdj ? `<div class="lv-adj">
         <div class="row"><span class="lbl" style="margin:0;">${t("level_value")}</span><span class="tiny">${t("quiz_range", { a: (base - .3).toFixed(1), b: (base + .3).toFixed(1) })}</span></div>
@@ -513,9 +527,9 @@ setLang(detectLang(BOOT.tgLang));
       const rows = state.players.filter(p => !q || p.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
       body = `<div class="card"><p class="tiny" style="margin:0 0 8px;">${t("ratings_admin_hint")}</p><input type="search" id="admQ" placeholder="${t("search")}" value="${esc(state.view.q || "")}">
         <div style="margin-top:8px;">${rows.map(p => `<div class="adm-row ${p.active?'':'off'}">
-          <div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 34)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("src_"+((p.contacts||{}).level_source||"self"))}${(p.contacts||{}).quiz_score != null ? " " + p.contacts.quiz_score + "/" + QUIZ_MAX : ""} · Elo ${Math.round(E.ratings[p.id])} · ${E.tcount[p.id]} ${t("tournaments_played")}</span></span></div>
+          <div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 34)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("src_"+((p.contacts||{}).level_source||"self"))}${(p.contacts||{}).quiz_elo != null ? " " + p.contacts.quiz_elo : ""} · Elo ${Math.round(E.ratings[p.id])} · ${E.tcount[p.id]} ${t("tournaments_played")}</span></span></div>
           <div class="adm-ctl">
-            <label>${t("level_value")}<input type="number" step="0.05" min="0" max="7" data-act="adm-level" data-id="${p.id}" value="${p.level ?? ""}"></label>
+            <label>${t("level_value")}<input type="number" step="0.001" min="0" max="7" data-act="adm-level" data-id="${p.id}" value="${p.level ?? ""}"></label>
             <label>${t("start_elo")}<input type="number" step="10" data-act="adm-elo" data-id="${p.id}" value="${p.eloStart}"></label>
             <button class="btn sm ${p.confirmed?'primary':''}" data-act="adm-confirm" data-id="${p.id}">${p.confirmed ? "✓" : t("confirm")}</button>
             <button class="btn sm ghost" data-act="adm-active" data-id="${p.id}">${p.active ? "⏸" : "▶"}</button>
@@ -526,10 +540,10 @@ setLang(detectLang(BOOT.tgLang));
         const c = p.contacts || {}, src = c.level_source || "", nick = c[src];
         if (p.levelStatus === "quiz_required") return `<div class="card rv-card wait"><div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 40)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("rv_waiting_quiz")} · ${t("src_" + src)} ${p.levelClaim ?? ""}</span></span></div></div>`;
         return `<div class="card rv-card">
-          <div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 40)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("src_" + src)} · ${nick ? `<b class="rv-nick">${esc(nick)}</b>` : "—"}</span></span></div>
-          <div class="rv-claim">${levelBadge(p.levelClaim, "big")}<div><div class="tiny">${t("rv_claimed")}</div><div class="ob-elo">${p.levelClaim} · ${letter(p.levelClaim)} · ${levelElo(p.levelClaim)}</div></div></div>
+          <div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 40)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("src_" + src)} · ${nick ? `<b class="rv-nick">${esc(nick)}</b>` : "—"}${c.level_raw ? ` · ${t("rv_raw")}: <b>${esc(c.level_raw)}</b>` : ""}</span></span></div>
+          <div class="rv-claim">${levelBadge(p.levelClaim, "big")}<div><div class="tiny">${t("rv_claimed")}</div><div class="ob-elo">${fmtLv(p.levelClaim)} · ${letter(p.levelClaim)} · ${levelElo(p.levelClaim)}</div></div></div>
           <div class="rv-actions">
-            <label>${t("level_value")}<input type="number" step="0.1" min="0" max="7" inputmode="decimal" id="rv_${p.id}" value="${p.levelClaim ?? ""}"></label>
+            <label>${t("level_value")}<input type="number" step="0.001" min="0" max="7" inputmode="decimal" id="rv_${p.id}" value="${p.levelClaim ?? ""}"></label>
             <button class="btn sm primary" data-act="rv-approve" data-id="${p.id}">✓ ${t("rv_approve")}</button>
             <button class="btn sm" data-act="rv-quiz" data-id="${p.id}">${t("rv_ask_quiz")}</button>
           </div></div>`;
@@ -572,7 +586,7 @@ setLang(detectLang(BOOT.tgLang));
     v.querySelectorAll("[data-act]").forEach(el => {
       const a = el.dataset.act, id = el.dataset.id;
       const on = fn => { el.onclick = ev => { ev.stopPropagation(); fn(ev); }; };
-      if (a === "ob-source") on(() => { state._onb.source = el.dataset.val; keepOnb(); render(); });
+      if (a === "ob-source") on(() => { keepOnb(); if (state._onb.source !== el.dataset.val) state._onb.level = ""; state._onb.source = el.dataset.val; render(); });
       else if (a === "ob-save" || a === "quiz-save") on(saveOnboarding);
       else if (a === "quiz-start") on(() => { keepOnb(); if (state._onb.name.trim().length < 2) { toast(t("need_name")); return; } state._onb.step = 0; state._onb.answers = []; window.scrollTo(0, 0); render(); });
       else if (a === "quiz-ans") on(() => { const d = state._onb; d.answers[d.step] = +el.dataset.val; d.step++; window.scrollTo(0, 0); render(); });
@@ -621,9 +635,9 @@ setLang(detectLang(BOOT.tgLang));
     const keepOnb = () => { const n = document.getElementById("obName"), l = document.getElementById("obLevel"), i = document.getElementById("obIg"), k = document.getElementById("obNick"); if (n) state._onb.name = n.value; if (l) state._onb.level = l.value; if (i) state._onb.ig = i.value; if (k) state._onb.nick = k.value; };
     // ввод в анкете: страницу не перерисовываем (иначе курсор прыгает в начало) — обновляем только превью и кнопку
     ["obName", "obLevel", "obIg", "obNick"].forEach(id => { const el = document.getElementById(id); if (el) el.oninput = () => {
-      keepOnb(); const d = state._onb, lv = d.level === "" ? null : +d.level, ok = lv != null && lv >= 0 && lv <= 7;
+      keepOnb(); const d = state._onb, lv = toRaketo(d.source, d.level), ok = lv != null && lv >= 0 && lv <= 7;
       const pv = v.querySelector(".ob-preview");
-      if (pv && id === "obLevel") { pv.classList.toggle("dim", !ok); pv.innerHTML = `${levelBadge(ok ? lv : null, "big")}<div><div class="tiny">${t("letter")} · ${t("start_elo")}</div><div class="ob-elo">${ok ? letter(lv) + " · " + levelElo(lv) : "—"}</div></div>`; }
+      if (pv && id === "obLevel") { pv.classList.toggle("dim", !ok); pv.innerHTML = `${levelBadge(ok ? lv : null, "big")}<div><div class="tiny">${d.source === "raketo" ? "" : t("as_raketo") + " · "}${t("letter")} · ${t("start_elo")}</div><div class="ob-elo">${ok ? (d.source === "raketo" ? "" : fmtLv(lv) + " · ") + letter(lv) + " · " + levelElo(lv) : "—"}</div></div>`; }
       const b = v.querySelector('[data-act="ob-save"]'); if (b) b.disabled = d.name.trim().length < 2 || !ok || (d.source !== "quiz" && !(d.nick || "").trim());
     }; });
     const keepPf = () => { const n = document.getElementById("pfName"), b = document.getElementById("pfBio"); if (state._pf && n) { state._pf.name = n.value; state._pf.bio = b.value; CONTACTS.forEach(([k]) => { const el = document.getElementById("pfc_" + k); if (el) state._pf.c[k] = el.value; }); } };

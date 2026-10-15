@@ -13,7 +13,7 @@ const D = {
     register: "Записатися", unregister: "Знятися", registered_main: "Ти в основі", registered_reserve: "Ти в резерві", you_in_reserve_pos: "у резерві №{n}",
     organizer: "Організатор", write_organizer: "Написати організатору", main_list: "Основа", reserve_list: "Резерв", nobody_yet: "поки нікого", paid: "оплачено", not_paid: "не оплачено",
     level_too_low: "Твій рівень нижчий за допустимий для цього турніру", level_too_high: "Твій рівень вищий за допустимий для цього турніру", need_card: "Спочатку заповни анкету", registration_closed: "Запис закрито",
-    rating_hint: "Червоне Ело — ще не підтверджене (менше {n} турнірів). Натисни на гравця — відкриється профіль.", all_levels: "Всі", no_games_yet: "ще не грав",
+    rating_hint: "Ело як у Raketo: рейтинг × 1000 (2.434 = 2434). Червоне — ще не підтверджене (менше {n} турнірів). Натисни на гравця — відкриється профіль.", all_levels: "Всі", no_games_yet: "ще не грав",
     photo_add: "Додати фото", photo_change: "Змінити фото", photo_remove: "Прибрати фото", photo_hint: "Фото обріжеться у квадрат і стиснеться.", bio: "Про себе", contacts: "Контакти",
     language: "Мова", account: "Акаунт", role: "Роль", logout: "Вийти", my_tournaments: "Мої турніри", saved: "Збережено", error: "Не вдалося: {msg}",
     new_tournament: "+ Новий турнір", t_name: "Назва", t_date: "Дата", t_time: "Початок", t_place: "Місце (клуб)", t_format: "Формат", t_courts: "Кортів", t_slots: "Місць", t_price: "Внесок (грн)", t_level_min: "Рівень від", t_level_max: "Рівень до", t_contact: "Контакт організатора (посилання)", t_reg_open: "Запис відкрито", t_note: "Коментар (час збору, що взяти…)",
@@ -26,14 +26,14 @@ const D = {
     achievements: "Ачівки", a_none: "Поки нічого — ачівки живі й з'являються самі за результатами.",
     a_champion: "Чемпіон", a_champion_sub: "перемог у турнірах: {n}", a_champion_desc: "1-ше місце в турнірі",
     a_podium: "Подіум", a_podium_sub: "в трійці: {n}", a_podium_desc: "топ-3 в турнірі",
-    a_giant: "Гігант-кілер", a_giant_sub: "перемога над парою на +{d} Ело", a_giant_desc: "перемога над парою, сильнішою на 100+ Ело",
+    a_giant: "Гігант-кілер", a_giant_sub: "перемога над парою на +{d} Ело", a_giant_desc: "перемога над парою, сильнішою на 500+ Ело",
     a_clutch: "Клатч", a_clutch_sub: "перемог в 1 очко: {n}", a_clutch_desc: "2+ перемоги з різницею в одне очко",
     a_comeback: "Камбек", a_comeback_sub: "перемога після {n} поразок поспіль", a_comeback_desc: "виграв після 3+ поразок поспіль у турнірі",
     a_onfire: "У вогні", a_onfire_sub: "{n} перемог поспіль зараз", a_onfire_desc: "3+ перемоги поспіль прямо зараз",
     a_streak: "Серія", a_streak_sub: "рекорд: {n} поспіль", a_streak_desc: "4+ перемоги поспіль",
     a_blowout: "Рознос", a_blowout_desc: "перемога з 75%+ очок",
     a_unbeaten: "Непереможні", a_unbeaten_desc: "3+ ігри з партнером без поразок",
-    a_rocket: "Ракета", a_rocket_desc: "+40 Ело за один турнір",
+    a_rocket: "Ракета", a_rocket_desc: "+200 Ело за один турнір",
     a_levelup: "Новий рівень", a_levelup_desc: "Ело переросло рівень з анкети",
     a_social: "Душа компанії", a_social_sub: "{n} різних партнерів", a_social_desc: "грав з 8+ різними партнерами",
     a_unlucky: "Невдаха", a_unlucky_sub: "поразок в 1 очко: {n}", a_unlucky_desc: "3+ поразки з різницею в одне очко",
@@ -49,6 +49,7 @@ const D = {
     reg_need_level: "Записатися можна після підтвердження рейтингу або проходження тесту.",
     review_tab: "Перевірка", review_empty: "Нових заявок немає", review_hint: "Відкрий профіль гравця в застосунку за ніком і звір рейтинг. Можна підтвердити з поправкою.", rv_claimed: "Заявлено", rv_approve: "Підтвердити", rv_ask_quiz: "Попросити тест", rv_waiting_quiz: "чекаємо тест",
     not_your_level: "не твій рівень",
+    lv_in_raketo: "Рейтинг Raketo (наприклад 2.434)", lv_in_playtomic: "Рівень Playtomic (наприклад 3.25)", lv_in_pado: "Рейтинг Pado — Elo (наприклад 1450) або рівень Industry", as_raketo: "у шкалі Raketo", rv_raw: "ввів",
   },
   ru: {
     tournaments: "Турниры", rating: "Рейтинг", profile: "Профиль", admin: "Админ", players: "Игроки",
@@ -63,7 +64,7 @@ const D = {
     register: "Записаться", unregister: "Сняться", registered_main: "Ты в основе", registered_reserve: "Ты в резерве", you_in_reserve_pos: "в резерве №{n}",
     organizer: "Организатор", write_organizer: "Написать организатору", main_list: "Основа", reserve_list: "Резерв", nobody_yet: "пока никого", paid: "оплачено", not_paid: "не оплачено",
     level_too_low: "Твой уровень ниже допустимого для этого турнира", level_too_high: "Твой уровень выше допустимого для этого турнира", need_card: "Сначала заполни анкету", registration_closed: "Запись закрыта",
-    rating_hint: "Красное Эло — ещё не подтверждено (меньше {n} турниров). Нажми на игрока — откроется профиль.", all_levels: "Все", no_games_yet: "ещё не играл",
+    rating_hint: "Эло как в Raketo: рейтинг × 1000 (2.434 = 2434). Красное — ещё не подтверждено (меньше {n} турниров). Нажми на игрока — откроется профиль.", all_levels: "Все", no_games_yet: "ещё не играл",
     photo_add: "Добавить фото", photo_change: "Сменить фото", photo_remove: "Убрать фото", photo_hint: "Фото обрежется в квадрат и ужмётся.", bio: "О себе", contacts: "Контакты",
     language: "Язык", account: "Аккаунт", role: "Роль", logout: "Выйти", my_tournaments: "Мои турниры", saved: "Сохранено", error: "Не удалось: {msg}",
     new_tournament: "+ Новый турнир", t_name: "Название", t_date: "Дата", t_time: "Начало", t_place: "Место (клуб)", t_format: "Формат", t_courts: "Кортов", t_slots: "Мест", t_price: "Взнос (грн)", t_level_min: "Уровень от", t_level_max: "Уровень до", t_contact: "Контакт организатора (ссылка)", t_reg_open: "Запись открыта", t_note: "Комментарий (время сбора, что взять…)",
@@ -76,14 +77,14 @@ const D = {
     achievements: "Ачивки", a_none: "Пока ничего — ачивки живые и появляются сами по результатам.",
     a_champion: "Чемпион", a_champion_sub: "побед в турнирах: {n}", a_champion_desc: "1-е место в турнире",
     a_podium: "Подиум", a_podium_sub: "в тройке: {n}", a_podium_desc: "топ-3 в турнире",
-    a_giant: "Гигант-киллер", a_giant_sub: "победа над парой на +{d} Эло", a_giant_desc: "победа над парой сильнее на 100+ Эло",
+    a_giant: "Гигант-киллер", a_giant_sub: "победа над парой на +{d} Эло", a_giant_desc: "победа над парой сильнее на 500+ Эло",
     a_clutch: "Клатч", a_clutch_sub: "побед в 1 очко: {n}", a_clutch_desc: "2+ победы с разницей в одно очко",
     a_comeback: "Камбэк", a_comeback_sub: "победа после {n} поражений подряд", a_comeback_desc: "выиграл после 3+ поражений подряд в турнире",
     a_onfire: "В огне", a_onfire_sub: "{n} побед подряд сейчас", a_onfire_desc: "3+ победы подряд прямо сейчас",
     a_streak: "Серия", a_streak_sub: "рекорд: {n} подряд", a_streak_desc: "4+ победы подряд",
     a_blowout: "Разнос", a_blowout_desc: "победа с 75%+ очков",
     a_unbeaten: "Непобедимые", a_unbeaten_desc: "3+ игры с партнёром без поражений",
-    a_rocket: "Ракета", a_rocket_desc: "+40 Эло за один турнир",
+    a_rocket: "Ракета", a_rocket_desc: "+200 Эло за один турнир",
     a_levelup: "Новый уровень", a_levelup_desc: "Эло переросло уровень из анкеты",
     a_social: "Душа компании", a_social_sub: "{n} разных партнёров", a_social_desc: "играл с 8+ разными партнёрами",
     a_unlucky: "Невезучий", a_unlucky_sub: "поражений в 1 очко: {n}", a_unlucky_desc: "3+ поражения с разницей в одно очко",
@@ -99,6 +100,7 @@ const D = {
     reg_need_level: "Записаться можно после подтверждения рейтинга или прохождения теста.",
     review_tab: "Проверка", review_empty: "Новых заявок нет", review_hint: "Открой профиль игрока в приложении по нику и сверь рейтинг. Можно подтвердить с поправкой.", rv_claimed: "Заявлено", rv_approve: "Подтвердить", rv_ask_quiz: "Попросить тест", rv_waiting_quiz: "ждём тест",
     not_your_level: "не твой уровень",
+    lv_in_raketo: "Рейтинг Raketo (например 2.434)", lv_in_playtomic: "Уровень Playtomic (например 3.25)", lv_in_pado: "Рейтинг Pado — Elo (например 1450) или уровень Industry", as_raketo: "в шкале Raketo", rv_raw: "ввёл",
   },
   en: {
     tournaments: "Tournaments", rating: "Rating", profile: "Profile", admin: "Admin", players: "Players",
@@ -113,7 +115,7 @@ const D = {
     register: "Register", unregister: "Withdraw", registered_main: "You're in", registered_reserve: "You're on the waitlist", you_in_reserve_pos: "waitlist #{n}",
     organizer: "Organizer", write_organizer: "Message organizer", main_list: "Main list", reserve_list: "Waitlist", nobody_yet: "nobody yet", paid: "paid", not_paid: "not paid",
     level_too_low: "Your level is below this tournament's range", level_too_high: "Your level is above this tournament's range", need_card: "Fill in your player card first", registration_closed: "Registration is closed",
-    rating_hint: "Red Elo — not confirmed yet (fewer than {n} tournaments). Tap a player to open the profile.", all_levels: "All", no_games_yet: "no games yet",
+    rating_hint: "Elo as in Raketo: rating × 1000 (2.434 = 2434). Red — not confirmed yet (fewer than {n} tournaments). Tap a player to open the profile.", all_levels: "All", no_games_yet: "no games yet",
     photo_add: "Add photo", photo_change: "Change photo", photo_remove: "Remove photo", photo_hint: "The photo is cropped to a square and compressed.", bio: "About", contacts: "Contacts",
     language: "Language", account: "Account", role: "Role", logout: "Sign out", my_tournaments: "My tournaments", saved: "Saved", error: "Failed: {msg}",
     new_tournament: "+ New tournament", t_name: "Name", t_date: "Date", t_time: "Start", t_place: "Venue (club)", t_format: "Format", t_courts: "Courts", t_slots: "Slots", t_price: "Fee (UAH)", t_level_min: "Level from", t_level_max: "Level to", t_contact: "Organizer contact (link)", t_reg_open: "Registration open", t_note: "Note (meeting time, what to bring…)",
@@ -126,14 +128,14 @@ const D = {
     achievements: "Achievements", a_none: "Nothing yet — achievements are live and appear from results.",
     a_champion: "Champion", a_champion_sub: "tournament wins: {n}", a_champion_desc: "1st place in a tournament",
     a_podium: "Podium", a_podium_sub: "top-3 finishes: {n}", a_podium_desc: "top 3 in a tournament",
-    a_giant: "Giant killer", a_giant_sub: "beat a pair +{d} Elo", a_giant_desc: "beat a pair 100+ Elo stronger",
+    a_giant: "Giant killer", a_giant_sub: "beat a pair +{d} Elo", a_giant_desc: "beat a pair 500+ Elo stronger",
     a_clutch: "Clutch", a_clutch_sub: "1-point wins: {n}", a_clutch_desc: "2+ wins by a single point",
     a_comeback: "Comeback", a_comeback_sub: "win after {n} losses in a row", a_comeback_desc: "won after 3+ straight losses in a tournament",
     a_onfire: "On fire", a_onfire_sub: "{n} wins in a row now", a_onfire_desc: "3+ wins in a row right now",
     a_streak: "Streak", a_streak_sub: "record: {n} in a row", a_streak_desc: "4+ wins in a row",
     a_blowout: "Blowout", a_blowout_desc: "won with 75%+ of the points",
     a_unbeaten: "Unbeaten", a_unbeaten_desc: "3+ games with a partner, no losses",
-    a_rocket: "Rocket", a_rocket_desc: "+40 Elo in one tournament",
+    a_rocket: "Rocket", a_rocket_desc: "+200 Elo in one tournament",
     a_levelup: "Level up", a_levelup_desc: "Elo outgrew the questionnaire level",
     a_social: "Social", a_social_sub: "{n} different partners", a_social_desc: "played with 8+ different partners",
     a_unlucky: "Unlucky", a_unlucky_sub: "1-point losses: {n}", a_unlucky_desc: "3+ losses by a single point",
@@ -149,6 +151,7 @@ const D = {
     reg_need_level: "You can register once your rating is confirmed or you've taken the test.",
     review_tab: "Review", review_empty: "No new requests", review_hint: "Look the player up in the app by nick and check the rating. You can approve with a correction.", rv_claimed: "Claimed", rv_approve: "Approve", rv_ask_quiz: "Ask for test", rv_waiting_quiz: "waiting for test",
     not_your_level: "not your level",
+    lv_in_raketo: "Raketo rating (e.g. 2.434)", lv_in_playtomic: "Playtomic level (e.g. 3.25)", lv_in_pado: "Pado rating — Elo (e.g. 1450) or Industry level", as_raketo: "on the Raketo scale", rv_raw: "entered",
   },
 };
 export const LANGS = [["uk", "Українська"], ["ru", "Русский"], ["en", "English"]];
@@ -202,6 +205,9 @@ const QUIZ = {
   ],
 };
 export function quiz() { return QUIZ[cur] || QUIZ.uk; }
-export const QUIZ_MAX = 24;
-// сумма баллов → уровень (шкала Playtomic 0..7); тест сознательно не даёт выше 5 — дальше решают результаты и админ
-export function quizLevel(score) { const b = [[3, .5], [6, 1], [9, 1.5], [11, 2], [13, 2.5], [15, 3], [17, 3.5], [19, 4], [21, 4.5]]; for (const [max, lv] of b) if (score <= max) return lv; return 5; }
+// Очки Эло за каждый ответ (база 1060). Тот же расчёт делает сервер (quiz_elo) — подменить результат нельзя.
+// 3–12 мес · 2–3 р/нед · без ракеточного опыта · простые мячи от стенки · воллей · 5–10 ударов · дружеские американо = 1900.
+export const QUIZ_BASE = 1060;
+export const QUIZ_PTS = [[0, 80, 160, 260, 360], [0, 50, 110, 170, 220], [0, 80, 160, 250], [0, 140, 300, 450], [0, 140, 300, 450], [0, 150, 300, 450], [0, 80, 200, 330, 450]];
+export function quizElo(answers) { return QUIZ_BASE + answers.reduce((a, x, i) => a + (QUIZ_PTS[i][x] || 0), 0); }
+export function quizLevel(answers) { return quizElo(answers) / 1000; }
