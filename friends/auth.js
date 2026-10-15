@@ -52,6 +52,8 @@ export async function bootstrap(db) {
   const tg = window.Telegram && window.Telegram.WebApp;
   if (tg && tg.initData) {
     try { tg.ready(); tg.expand(); } catch (e) {}
+    // свайп вниз по странице не должен сворачивать мини-приложение — пусть он просто листает интерфейс
+    try { if (tg.disableVerticalSwipes) tg.disableVerticalSwipes(); } catch (e) {}
     try { await db.signInTelegram(tg.initData); }
     catch (e) { screen(`<h3>Не удалось войти через Telegram</h3><p class="tiny">${esc(e.message)}</p><p class="tiny">Попробуйте открыть приложение заново из бота.</p>`); throw e; }
   }

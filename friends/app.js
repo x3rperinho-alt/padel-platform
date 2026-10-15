@@ -1063,8 +1063,10 @@ const DATA = BOOT.data;
       </tr>`).join("")}
     </table>`;
     const eloPanel = state.view.eloDetail === tid ? eloDetailHtml(t, isSwiss ? stageGames(t) : games, ed) : "";
-    const factsPanel = state.view.tFacts === tid ? tournamentFactsHtml(t, isSwiss ? stageGames(t) : games, ed) : "";
-    const anyScored = (isSwiss ? stageGames(t) : games).some(g => g.scoreA!=null && g.scoreB!=null);
+    const allG = isSwiss ? stageGames(t) : games;
+    const anyScored = allG.some(g => g.scoreA!=null && g.scoreB!=null);
+    const finished = allG.length > 0 && allG.every(g => g.scoreA!=null && g.scoreB!=null); // все игры внесены — турнир прошёл
+    const factsPanel = state.view.tFacts === tid && !finished ? tournamentFactsHtml(t, allG, ed) : "";
     const stageNote = "";
     const p1Games = parent ? state.games.filter(g=>g.tournamentId===parent.id).sort((a,b)=> a.round-b.round || a.court-b.court) : [];
     const p1ByRound = {}; p1Games.forEach(g => { (p1ByRound[g.round] = p1ByRound[g.round]||[]).push(g); });
@@ -1091,7 +1093,7 @@ const DATA = BOOT.data;
       <div class="card">
         <h3>Таблица</h3>
         <div class="toolbar">
-          ${anyScored ? `<button class="btn sm${state.view.tFacts===tid?' primary':''}" data-act="t-facts" data-id="${tid}" title="интересное за турнир">Факты</button>` : ""}
+          ${anyScored && !finished ? `<button class="btn sm${state.view.tFacts===tid?' primary':''}" data-act="t-facts" data-id="${tid}" title="интересное за турнир">Факты</button>` : ""}
           ${Object.keys(ed.perGame).length ? `<button class="btn sm${state.view.eloDetail===tid?' primary':''}" data-act="elo-detail" data-id="${tid}" title="сколько Эло дал каждый матч">Эло</button>` : ""}
           ${canWrite ? `<button class="btn sm" data-act="copy-summary" data-id="${tid}">Итоги в чат</button><button class="btn sm" data-act="table-png" data-id="${tid}">PNG</button>` : ""}
         </div>
@@ -1100,8 +1102,10 @@ const DATA = BOOT.data;
         ${eloPanel}
         ${factsPanel}
       </div>
+      ${finished ? `<div class="card"><h3>Статистика турнира</h3>${linkedParent(t) ? `<p class="tiny" style="margin:4px 0 0;">По обоим этапам вместе.</p>` : ""}<div style="margin-top:8px;">${factsListHtml(gameFacts(allG, ed))}</div></div>` : ""}
 
-      ${roundsHtml}
+      ${finished ? `<button class="rounds-toggle ${state.view.roundsOpen === tid ? "open" : ""}" data-act="toggle-rounds" data-id="${tid}">${state.view.roundsOpen === tid ? "Скрыть раунды" : `Посмотреть раунды · ${Object.keys(byRound).length + (parent ? Object.keys(p1ByRound).length : 0)}`}<span class="chev">›</span></button>` : ""}
+      ${!finished || state.view.roundsOpen === tid ? roundsHtml : ""}
 
       ${financeCardHtml(t)}
 
@@ -2353,6 +2357,7 @@ const DATA = BOOT.data;
       else if (act==="add-booking") el.onclick = addBooking;
       else if (act==="new-tournament") el.onclick = () => { state.view.create=true; state._createDraft=null; render(); };
       else if (act==="cancel-create") el.onclick = () => { state.view.create=false; render(); };
+      else if (act==="toggle-rounds") el.onclick = () => { state.view.roundsOpen = state.view.roundsOpen === el.dataset.id ? null : el.dataset.id; render(); };
       else if (act==="open-tournament") el.onclick = () => { state.view.tournament = el.dataset.id; render(); };
       else if (act==="close-tournament") el.onclick = () => { state.view.tournament = null; render(); };
       else if (act==="delete-ask") el.onclick = () => { state.view.confirmDelete = el.dataset.id; render(); };

@@ -108,7 +108,7 @@ nav.tabs button:active { transform: scale(.94); }
 /* ---------- формы ---------- */
 label.field { display: block; margin-bottom: 12px; }
 label.field .lbl { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
-input[type=text], input[type=number], input[type=date], input[type=time], input[type=email], select, textarea {
+input[type=text], input[type=number], input[type=date], input[type=time], input[type=email], input[type=url], input[type=search], input[type=tel], select, textarea {
   width: 100%; font-family: inherit; font-size: 15.5px; color: var(--ink);
   background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius-sm);
   padding: 10px 12px; appearance: none; transition: border-color .15s, box-shadow .15s; box-shadow: inset 0 2px 6px rgba(0,0,0,.35);
@@ -175,7 +175,8 @@ table.tbl th.sortable.on .arr { opacity: 1; }
 .match .pair { font-weight: 600; font-size: 14px; line-height: 1.25; }
 .match .pair.right { text-align: right; }
 .match .pair small { display: block; font-weight: 400; color: var(--ink-2); font-size: 13px; }
-.match .pair.winner { color: var(--court); }
+.match .pair.winner, .match .pair.winner small { color: var(--court); }
+.match .pair.winner small { font-weight: 600; }
 .match .score { display: flex; align-items: center; gap: 5px; }
 .match .score input { width: 56px; height: 50px; text-align: center; font-weight: 700; font-size: 19px; padding: 0; font-family: "Unbounded", "Manrope", sans-serif; background: rgba(0,0,0,.45); border-color: rgba(255,255,255,.12); border-radius: 12px; box-shadow: inset 0 2px 6px rgba(0,0,0,.5); }
 .match .score .colon { font-weight: 700; color: var(--ink-3); }
@@ -320,3 +321,12 @@ table.tbl td.lb-hl.pts { font-size: 14px; }
 .nav-avatar.ph { display: flex; align-items: center; justify-content: center; }
 nav.tabs button .ic .nav-avatar.ph svg { width: 70%; height: 70%; fill: currentColor; stroke: none; margin-top: 10%; opacity: .85; }
 nav.tabs button.active .nav-avatar { border-color: var(--court); box-shadow: 0 0 10px rgba(255,122,26,.5); }
+/* кнопка «Посмотреть раунды» у прошедших турниров */
+.rounds-toggle { width: 100%; margin: 4px 0 6px; padding: 14px 16px; border-radius: 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; font: 700 15px "Unbounded", sans-serif; color: var(--ink);
+  background: linear-gradient(135deg, rgba(255,122,26,.2), rgba(255,122,26,.05)); border: 1px solid rgba(255,122,26,.4); box-shadow: 0 8px 20px -12px rgba(255,122,26,.5); }
+.rounds-toggle .chev { font-size: 22px; color: var(--court); transition: transform .15s; }
+.rounds-toggle.open .chev { transform: rotate(90deg); }
+.rounds-toggle:active { transform: scale(.98); }
+/* прокрутка: не «протягиваем» жест наружу (в Telegram это сворачивало приложение) */
+html, body { overscroll-behavior-y: none; }
+.card:has(table.tbl), .chips-scroll { overscroll-behavior: contain; touch-action: pan-x pan-y; }
