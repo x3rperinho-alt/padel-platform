@@ -137,3 +137,25 @@ nav.tabs button[hidden] { display: none !important; }
 .rv-card.wait { opacity: .6; }
 .ct-nofit { font-size: 12px; font-weight: 600; color: var(--ink-3); padding: 5px 10px; border-radius: 999px; border: 1px dashed rgba(255,255,255,.18); white-space: nowrap; }
 .nofit-note { padding: 10px 12px; border-radius: 12px; font-size: 13px; color: var(--ink-2); background: rgba(255,255,255,.04); border: 1px dashed rgba(255,255,255,.18); }
+
+/* ---------- запись парами и подтверждение заявок ---------- */
+.ct-mine.pending { color: #FFB27A; border-color: rgba(255,122,26,.45); background: rgba(255,122,26,.1); }
+.ct-pend { margin-top: 8px; font-size: 12px; font-weight: 700; color: #FF9A4A; }
+.pend-tag { color: #FF9A4A; font-weight: 700; }
+.p-row.is-pending { background: rgba(255,122,26,.05); border-radius: 12px; }
+.btn.ok { color: #4ADE80; border-color: rgba(74,222,128,.45); }
+.pair-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 10px; }
+.pair-slot { border: 1px solid rgba(255,255,255,.08); border-radius: 16px; padding: 8px 12px 4px; background: rgba(255,255,255,.02); }
+.pair-slot.full { border-color: rgba(255,122,26,.28); }
+.pair-slot.mine { border-color: #FF7A1A; box-shadow: 0 0 18px rgba(255,122,26,.18); }
+.pair-slot-h { display: flex; justify-content: space-between; align-items: center; padding: 2px 0 4px; }
+.pair-slot-h b { font-family: "Unbounded", "Manrope", sans-serif; font-size: 13px; }
+.pair-slot .p-row { border-top: 1px solid rgba(255,255,255,.05); }
+.pair-free { display: flex; align-items: center; min-height: 48px; border-top: 1px dashed rgba(255,255,255,.1); }
+.pair-free .tiny { color: var(--ink-3); }
+.partner-pick select { width: 100%; }
+.rej-note { margin-bottom: 10px; padding: 10px 12px; border-radius: 12px; font-size: 13px; color: #FFB4A8; background: rgba(255,90,70,.08); border: 1px solid rgba(255,90,70,.3); }
+.tf-toggle { cursor: pointer; gap: 12px; margin: 4px 0 12px; }
+.tf-toggle input { width: 22px; height: 22px; flex: none; }
+.pair-slot.empty { padding: 6px 12px; }
+.pair-slot.empty .pair-slot-h { padding: 0; min-height: 36px; }

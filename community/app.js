@@ -80,12 +80,23 @@ setLang(detectLang(BOOT.tgLang));
   async function reload() { try { Object.assign(state, await db.loadAll()); render(); } catch (e) { console.error(e); } }
   let reloadTimer; db.subscribe(() => { clearTimeout(reloadTimer); reloadTimer = setTimeout(reload, 600); });
   const timeRange = s => s.time ? esc(s.time) + (s.time_end ? "–" + esc(s.time_end) : "") : "";
-  const regsOf = tid => state.registrations.filter(r => r.tournamentId === tid && r.status !== "cancelled").sort((a, b) => a.at.localeCompare(b.at));
+  const regsOf = tid => state.registrations.filter(r => r.tournamentId === tid && r.status !== "cancelled").sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
   const myReg = tid => { const me = myPlayer(); return me ? regsOf(tid).find(r => r.playerId === me.id) : null; };
   // подходит ли турнир по уровню текущему игроку (null — уровень ещё не подтверждён)
   const fitsLevel = tt => { const me = myPlayer(); if (!me || me.level == null || me.levelStatus !== "ok") return null;
     const a = tt.s.level_min, b = tt.s.level_max; return (a == null || me.level >= +a) && (b == null || me.level <= +b); };
   const isUpcoming = tt => tt.status !== "played" && (!tt.date || tt.date >= today());
+  // ---------- запись парами и подтверждение заявок ----------
+  const isPairs = tt => !!(tt && tt.s.pairs);
+  const teamMembers = (tid, n) => regsOf(tid).filter(r => r.status === "main" && r.team === n);
+  const teamNos = tt => { const n = +tt.s.slots || 0; if (n > 0) return Array.from({ length: n }, (_, i) => i + 1);
+    const used = [...new Set(regsOf(tt.id).filter(r => r.status === "main" && r.team != null).map(r => r.team))].sort((a, b) => a - b); return used.concat([(used[used.length - 1] || 0) + 1]); };
+  const firstFreeTeam = (tid, need) => { const tt = byId(state.tournaments, tid); return teamNos(tt).find(n => teamMembers(tid, n).length + (need || 1) <= 2) ?? null; };
+  const pendingOf = tid => regsOf(tid).filter(r => r.approval === "pending");
+  const myRejected = tid => { const me = myPlayer(); return me ? state.registrations.find(r => r.tournamentId === tid && r.playerId === me.id && r.approval === "rejected") : null; };
+  const regBadge = r => r.approval === "pending" ? `<span class="ct-mine pending">${t("pending_approval")}</span>` : `<span class="ct-mine ${r.status}">${r.status === "main" ? t("registered_main") : t("registered_reserve")}</span>`;
+  const regErrMsg = m => /team full/.test(m) ? t("team_full") : /partner already/.test(m) ? t("partner_taken") : /partner level/.test(m) ? t("partner_level_bad") : /too low/.test(m) ? t("level_too_low") : /too high/.test(m) ? t("level_too_high") : /closed/.test(m) ? t("registration_closed") : /level pending/.test(m) ? t("reg_need_level") : /no player/.test(m) ? t("need_card") : t("error", { msg: m });
+  const regToast = r => /pending/.test(r || "") ? t("request_sent") : /reserve/.test(r || "") ? t("registered_reserve") : t("registered_main");
 
   // ---------- анкета ----------
   function viewOnboarding() {
@@ -157,16 +168,17 @@ setLang(detectLang(BOOT.tgLang));
   // ---------- турниры ----------
   function tTile(tt) {
     const regs = regsOf(tt.id), main = regs.filter(r => r.status === "main").length, res = regs.filter(r => r.status === "reserve").length;
-    const slots = +tt.s.slots || 0, mine = myReg(tt.id);
-    const full = slots > 0 && main >= slots;
+    const slots = +tt.s.slots || 0, mine = myReg(tt.id), pairs = isPairs(tt), cap = pairs ? slots * 2 : slots;
+    const full = cap > 0 && main >= cap, pend = isAdmin() && isUpcoming(tt) ? pendingOf(tt.id).length : 0;
     const st = tt.status === "played" ? ["done", t("played")] : !tt.s.reg_open ? ["planned", t("reg_closed")] : full ? ["res", t("reg_reserve")] : ["live", t("reg_open")];
     return `<div class="tile t-tile ct" data-act="open-t" data-id="${tt.id}">
       <div class="ct-top"><span class="lvb ${letterClass(rangeLabel(tt.s)[0]==="≤"?rangeLabel(tt.s).slice(2):rangeLabel(tt.s))}">${esc(rangeLabel(tt.s))}</span><span class="t-status ${st[0]}"><i></i>${st[1]}</span></div>
       <div class="t-tile-name">${esc(tt.name)}</div>
-      <div class="tiny">${dateFmt(tt.date, true)}${tt.s.time ? " · " + timeRange(tt.s) : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""}</div>
+      <div class="tiny">${dateFmt(tt.date, true)}${tt.s.time ? " · " + timeRange(tt.s) : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""}${pairs ? " · " + t(tt.format) : ""}</div>
+      ${pend ? `<div class="ct-pend">⏳ ${t("pending_n", { n: pend })}</div>` : ""}
       <div class="ct-bottom">
-        <span class="ct-slots">${tt.status === "played" ? `<b>${new Set(state.games.filter(g => g.tournamentId === tt.id).flatMap(g => g.teamA.concat(g.teamB))).size}</b> ${t("players").toLowerCase()}` : slots ? `<b>${main}</b>/${slots} ${t("slots")}${res ? ` · ${t("reserve")} ${res}` : ""}` : `${main} ${t("players").toLowerCase()}`}</span>
-        ${!mine && isUpcoming(tt) && fitsLevel(tt) === false ? `<span class="ct-nofit">${t("not_your_level")}</span>` : mine ? `<span class="ct-mine ${mine.status}">${mine.status === "main" ? t("registered_main") : t("registered_reserve")}</span>` : tt.s.price ? `<span class="tiny">${esc(tt.s.price)} ₴</span>` : ""}
+        <span class="ct-slots">${tt.status === "played" ? `<b>${new Set(state.games.filter(g => g.tournamentId === tt.id).flatMap(g => g.teamA.concat(g.teamB))).size}</b> ${t("players").toLowerCase()}` : pairs ? `<b>${main}</b>/${cap || "∞"} ${t("slots")} · ${slots || "∞"} ${t("pairs_n")}${res ? ` · ${t("reserve")} ${res}` : ""}` : slots ? `<b>${main}</b>/${slots} ${t("slots")}${res ? ` · ${t("reserve")} ${res}` : ""}` : `${main} ${t("players").toLowerCase()}`}</span>
+        ${!mine && isUpcoming(tt) && fitsLevel(tt) === false ? `<span class="ct-nofit">${t("not_your_level")}</span>` : mine ? regBadge(mine) : tt.s.price ? `<span class="tiny">${esc(tt.s.price)} ₴</span>` : ""}
       </div>
     </div>`;
   }
@@ -184,14 +196,45 @@ setLang(detectLang(BOOT.tgLang));
     const tGames = state.games.filter(g => g.tournamentId === tid && g.scoreA != null && g.scoreB != null);
     if (tGames.length) return tournamentResultsHtml(tt, tGames);
     const regs = regsOf(tid), main = regs.filter(r => r.status === "main"), res = regs.filter(r => r.status === "reserve");
-    const slots = +tt.s.slots || 0, mine = myReg(tid), me = myPlayer();
-    const free = slots ? Math.max(0, slots - main.length) : null;
-    const row = (r, i) => `<div class="link-row p-row"><span class="p-row-main" data-act="open-profile" data-id="${r.playerId}">${avatarHtml(r.playerId, 34)}<span><span class="p-row-name">${esc(pname(r.playerId))}</span><br><span class="tiny">${letter((byId(state.players, r.playerId)||{}).level)}${isAdmin() ? " · " + (r.paid ? "✓ " + t("paid") : t("not_paid")) : ""}</span></span></span>
-      <span class="p-row-side">${isAdmin() ? `<button class="btn sm ${r.paid?'primary':''}" data-act="reg-paid" data-tid="${tid}" data-pid="${r.playerId}">₴</button><button class="btn sm ghost" data-act="reg-move" data-tid="${tid}" data-pid="${r.playerId}" data-to="${r.status==='main'?'reserve':'main'}" title="${r.status==='main'?t('move_reserve'):t('move_main')}">${r.status==='main'?'↓':'↑'}</button><button class="btn sm ghost danger" data-act="reg-remove" data-tid="${tid}" data-pid="${r.playerId}">✕</button>` : `<span class="tiny">${i+1}</span>`}</span></div>`;
+    const pairs = isPairs(tt), slots = +tt.s.slots || 0, cap = pairs ? slots * 2 : slots, mine = myReg(tid), me = myPlayer(), rej = !mine && myRejected(tid);
+    const free = cap ? Math.max(0, cap - main.length) : null;
     const canReg = tt.s.reg_open && tt.status !== "played";
-    const regBtn = !me ? `<p class="tiny">${t("need_card")}</p>` : me.levelStatus !== "ok" ? `<p class="tiny">${t("reg_need_level")}</p>` : !mine && fitsLevel(tt) === false ? `<div class="nofit-note">${t(me.level < +(tt.s.level_min ?? -1) ? "level_too_low" : "level_too_high")} · ${letter(me.level)} ${fmtLv(me.level)}</div>` : mine
-      ? `<div class="row"><span class="ct-mine ${mine.status}">${mine.status === "main" ? t("registered_main") : t("you_in_reserve_pos", { n: res.findIndex(r => r.playerId === me.id) + 1 })}</span>${canReg ? `<button class="btn sm" data-act="unreg" data-id="${tid}">${t("unregister")}</button>` : ""}</div>`
-      : canReg ? `<button class="btn primary block" data-act="reg" data-id="${tid}">${t("register")}${free != null ? ` · ${free ? t("free_slots", { n: free }) : t("reserve")}` : ""}</button>` : `<p class="tiny">${t("registration_closed")}</p>`;
+    const canJoin = !!me && me.levelStatus === "ok" && !mine && canReg && fitsLevel(tt) !== false;
+    const adminBtns = r => r.approval === "pending"
+      ? `<button class="btn sm ok" data-act="reg-approve" data-tid="${tid}" data-pid="${r.playerId}" title="${t("approve")}" aria-label="${t("approve")}">✓</button><button class="btn sm ghost danger" data-act="reg-reject" data-tid="${tid}" data-pid="${r.playerId}" title="${t("reject")}" aria-label="${t("reject")}">✕</button>`
+      : `<button class="btn sm ${r.paid?'primary':''}" data-act="reg-paid" data-tid="${tid}" data-pid="${r.playerId}">₴</button><button class="btn sm ghost" data-act="reg-move" data-tid="${tid}" data-pid="${r.playerId}" data-to="${r.status==='main'?'reserve':'main'}" title="${r.status==='main'?t('move_reserve'):t('move_main')}">${r.status==='main'?'↓':'↑'}</button><button class="btn sm ghost danger" data-act="reg-remove" data-tid="${tid}" data-pid="${r.playerId}">✕</button>`;
+    const sub = r => `${letter((byId(state.players, r.playerId)||{}).level)}${r.approval === "pending" ? ` · <span class="pend-tag">${t("pending_approval")}</span>` : ""}${isAdmin() && r.approval !== "pending" ? " · " + (r.paid ? "✓ " + t("paid") : t("not_paid")) : ""}`;
+    const row = (r, i) => `<div class="link-row p-row ${r.approval === "pending" ? "is-pending" : ""}"><span class="p-row-main" data-act="open-profile" data-id="${r.playerId}">${avatarHtml(r.playerId, 34)}<span><span class="p-row-name">${esc(pname(r.playerId))}</span><br><span class="tiny">${sub(r)}</span></span></span>
+      <span class="p-row-side">${isAdmin() ? adminBtns(r) : i != null ? `<span class="tiny">${i+1}</span>` : ""}</span></div>`;
+    const approvalNote = tt.s.approval && canReg ? `<p class="tiny" style="margin:8px 0 0;">${t("approval_note")}</p>` : "";
+    const rejNote = rej ? `<div class="rej-note">${t("rejected_note")}</div>` : "";
+    let regBtn;
+    if (!me) regBtn = `<p class="tiny">${t("need_card")}</p>`;
+    else if (me.levelStatus !== "ok") regBtn = `<p class="tiny">${t("reg_need_level")}</p>`;
+    else if (mine) regBtn = `<div class="row">${regBadge(mine)}${!pairs && mine.status === "reserve" && mine.approval !== "pending" ? `<span class="tiny">${t("you_in_reserve_pos", { n: res.findIndex(r => r.playerId === me.id) + 1 })}</span>` : ""}${canReg ? `<button class="btn sm" data-act="unreg" data-id="${tid}">${mine.approval === "pending" ? t("withdraw_request") : t("unregister")}</button>` : ""}</div>`
+      + (mine.approval === "pending" ? `<p class="tiny" style="margin:8px 0 0;">${t("pending_hint")}</p>` : "")
+      + (pairs && mine.addedBy && mine.addedBy !== me.id ? `<p class="tiny" style="margin:8px 0 0;">${t("added_by_partner", { name: esc(pname(mine.addedBy)) })}</p>` : "");
+    else if (fitsLevel(tt) === false) regBtn = `<div class="nofit-note">${t(me.level < +(tt.s.level_min ?? -1) ? "level_too_low" : "level_too_high")} · ${letter(me.level)} ${fmtLv(me.level)}</div>`;
+    else if (!canReg) regBtn = `<p class="tiny">${t("registration_closed")}</p>`;
+    else if (pairs) {
+      const inRange = p => (tt.s.level_min == null || (p.level != null && p.level >= +tt.s.level_min)) && (tt.s.level_max == null || (p.level != null && p.level <= +tt.s.level_max));
+      const cands = state.players.filter(p => p.active && p.id !== me.id && p.levelStatus === "ok" && !regs.some(r => r.playerId === p.id) && inRange(p)).sort((a, b) => a.name.localeCompare(b.name));
+      const emptyPair = firstFreeTeam(tid, 2) != null, anyPlace = firstFreeTeam(tid, 1) != null;
+      regBtn = rejNote + (state.view.partnerFor === tid
+        ? `<div class="partner-pick"><label class="field"><span class="lbl">${t("choose_partner")}</span><select id="partnerSel">${cands.map(p => `<option value="${p.id}">${esc(p.name)} · ${letter(p.level)}</option>`).join("")}</select></label>
+            ${cands.length ? "" : `<p class="tiny" style="margin:-4px 0 10px;">${t("no_partners")}</p>`}
+            <div class="row" style="gap:8px;justify-content:flex-end;"><button class="btn sm" data-act="partner-cancel">${t("cancel")}</button><button class="btn sm primary" data-act="reg-pair" data-id="${tid}" ${cands.length ? "" : "disabled"}>${emptyPair ? t("reg_as_pair") : t("reg_pair_reserve")}</button></div></div>`
+        : `<button class="btn primary block" data-act="partner-open" data-id="${tid}">${t("reg_with_partner")}</button>
+           ${anyPlace ? `<p class="tiny" style="margin:8px 0 0;text-align:center;">${t("or_take_place")}</p>` : `<button class="btn block" style="margin-top:8px;" data-act="reg" data-id="${tid}">${t("reg_reserve_solo")}</button>`}`) + approvalNote;
+    }
+    else regBtn = rejNote + `<button class="btn primary block" data-act="reg" data-id="${tid}">${t("register")}${free != null ? ` · ${free ? t("free_slots", { n: free }) : t("reserve")}` : ""}</button>` + approvalNote;
+    // карточка пары: 2 места; на первом свободном месте — кнопка «Зайняти»
+    const pairCard = n => { const m = teamMembers(tid, n), my = me && m.some(r => r.playerId === me.id);
+      const place = k => m[k] ? row(m[k], null) : `<div class="pair-free">${canJoin && k === m.length ? `<button class="btn sm" data-act="reg-team" data-id="${tid}" data-team="${n}">+ ${t("take_place")}</button>` : `<span class="tiny">${t("free_place")}</span>`}</div>`;
+      if (!m.length) return `<div class="pair-slot empty"><div class="pair-slot-h"><b>${t("pair")} ${n}</b>${canJoin ? `<button class="btn sm" data-act="reg-team" data-id="${tid}" data-team="${n}">+ ${t("take_place")}</button>` : `<span class="tiny">0/2 · ${t("free_place")}</span>`}</div></div>`;
+      return `<div class="pair-slot ${m.length === 2 ? "full" : ""} ${my ? "mine" : ""}"><div class="pair-slot-h"><b>${t("pair")} ${n}</b><span class="tiny">${m.length}/2</span></div>${place(0)}${place(1)}</div>`; };
+    const fullPairs = teamNos(tt).filter(n => teamMembers(tid, n).length === 2).length;
+    const addTeamSel = pairs ? `<select id="addRegTeam" style="flex:0 0 auto;max-width:42%;">${teamNos(tt).filter(n => teamMembers(tid, n).length < 2).map(n => `<option value="${n}">${t("pair")} ${n}</option>`).join("")}<option value="">${t("reserve")}</option></select>` : "";
     return `
       <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${t("tournaments")}</button>${canEdit() ? `<button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button>` : ""}</div>
       <h2 class="t-title">${esc(tt.name)}</h2>
@@ -208,9 +251,11 @@ setLang(detectLang(BOOT.tgLang));
         <div style="margin-top:14px;">${regBtn}</div>
         ${tt.s.contact ? `<button class="btn block" style="margin-top:8px;" data-act="open-link" data-url="${esc(tt.s.contact)}">${t("write_organizer")} ↗</button>` : ""}
       </div>
-      <div class="card"><h3>${t("main_list")} <span class="tiny">· ${main.length}${slots ? "/" + slots : ""}</span></h3><div style="margin-top:6px;">${main.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>
+      ${pairs
+        ? `<div class="card"><h3>${t("pairs_title")} <span class="tiny">· ${fullPairs}/${slots || teamNos(tt).length - 1}</span></h3><div class="pair-grid">${teamNos(tt).map(pairCard).join("")}</div></div>`
+        : `<div class="card"><h3>${t("main_list")} <span class="tiny">· ${main.length}${slots ? "/" + slots : ""}</span></h3><div style="margin-top:6px;">${main.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>`}
       ${res.length || isAdmin() ? `<div class="card"><h3>${t("reserve_list")} <span class="tiny">· ${res.length}</span></h3><div style="margin-top:6px;">${res.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>` : ""}
-      ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;">${state.players.filter(p => p.active && !regs.some(r => r.playerId === p.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(p => `<option value="${p.id}">${esc(p.name)} · ${letter(p.level)}</option>`).join("")}</select><button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
+      ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${state.players.filter(p => p.active && !regs.some(r => r.playerId === p.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(p => `<option value="${p.id}">${esc(p.name)} · ${letter(p.level)}</option>`).join("")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
         <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`;
   }
   // ---------- итоги турнира: таблица, статистика, раунды по кнопке ----------
@@ -274,12 +319,14 @@ setLang(detectLang(BOOT.tgLang));
         <div class="grid2">${inp("tfTime", t("t_time"), s.time, "time")}${inp("tfTimeEnd", t("t_time_end"), s.time_end, "time")}</div>
         ${inp("tfPlace", t("t_place"), s.place)}
         <div class="field"><span class="lbl">${t("t_format")}</span><div class="wrap-tags">${fmts.map(x => `<span class="chip ${f.format===x?'active':''}" data-act="tf-format" data-val="${x}">${t(x)}</span>`).join("")}</div></div>
-        <div class="grid3">${inp("tfCourts", t("t_courts"), f.courts, "number", 'min="1" max="12"')}${inp("tfSlots", t("t_slots"), s.slots, "number", 'min="0" max="64"')}${inp("tfPrice", t("t_price"), s.price, "number", 'min="0"')}</div>
+        <label class="row tf-toggle"><span>${t("t_pairs_mode")}<br><span class="tiny">${t("t_pairs_hint")}</span></span><input type="checkbox" id="tfPairs" data-act="tf-pairs" ${s.pairs ? "checked" : ""}></label>
+        <div class="grid3">${inp("tfCourts", t("t_courts"), f.courts, "number", 'min="1" max="12"')}${inp("tfSlots", s.pairs ? t("t_pairs") : t("t_slots"), s.slots, "number", 'min="0" max="64"')}${inp("tfPrice", t("t_price"), s.price, "number", 'min="0"')}</div>
         <div class="grid2">${inp("tfMin", t("t_level_min"), s.level_min, "number", 'min="0" max="7" step="0.001" inputmode="decimal"')}${inp("tfMax", t("t_level_max"), s.level_max, "number", 'min="0" max="7" step="0.001" inputmode="decimal"')}</div>
         <p class="tiny" style="margin:-6px 0 12px;">${t("level_range")}: <b>${esc(rangeLabel(s))}</b></p>
         ${inp("tfContact", t("t_contact"), s.contact, "url", 'placeholder="https://t.me/…"')}
         <label class="field"><span class="lbl">${t("t_note")}</span><textarea id="tfNote" rows="3">${esc(s.note || "")}</textarea></label>
         <label class="row" style="cursor:pointer;"><span>${t("t_reg_open")}</span><input type="checkbox" id="tfOpen" ${s.reg_open ? "checked" : ""} style="width:22px;height:22px;"></label>
+        <label class="row tf-toggle"><span>${t("t_approval")}<br><span class="tiny">${t("t_approval_hint")}</span></span><input type="checkbox" id="tfApproval" ${s.approval ? "checked" : ""}></label>
         <div class="pf-actions" style="margin-top:14px;justify-content:space-between;">
           ${f.isNew ? "<span></span>" : `<button class="btn sm ghost danger" data-act="tf-delete">${t("delete")}</button>`}
           <span style="display:flex;gap:6px;"><button class="btn sm" data-act="tf-cancel">${t("cancel")}</button><button class="btn sm primary" data-act="tf-save">${t("save")}</button></span>
@@ -290,7 +337,7 @@ setLang(detectLang(BOOT.tgLang));
     const f = state._tf; const g = id => document.getElementById(id); if (!f || !g("tfName")) return f;
     f.name = g("tfName").value.trim(); f.date = g("tfDate").value; f.courts = +g("tfCourts").value || 1;
     const num = v => v === "" ? null : +v;
-    Object.assign(f.s, { time: g("tfTime").value, time_end: g("tfTimeEnd").value, place: g("tfPlace").value.trim(), slots: num(g("tfSlots").value), price: num(g("tfPrice").value), level_min: num(g("tfMin").value), level_max: num(g("tfMax").value), contact: g("tfContact").value.trim(), note: g("tfNote").value.trim(), reg_open: g("tfOpen").checked });
+    Object.assign(f.s, { time: g("tfTime").value, time_end: g("tfTimeEnd").value, place: g("tfPlace").value.trim(), slots: num(g("tfSlots").value), price: num(g("tfPrice").value), level_min: num(g("tfMin").value), level_max: num(g("tfMax").value), contact: g("tfContact").value.trim(), note: g("tfNote").value.trim(), reg_open: g("tfOpen").checked, pairs: g("tfPairs").checked, approval: g("tfApproval").checked });
     return f;
   }
   async function saveTf() {
@@ -436,7 +483,7 @@ setLang(detectLang(BOOT.tgLang));
     if (!pid || !byId(state.players, pid)) return viewOnboarding();
     const p = byId(state.players, pid), { E, list } = board(); const s = E.stats[pid]; const rank = list.findIndex(x => x.id === pid);
     const mine = my && my.id === pid, nav = !!state.view.pid;
-    const upcoming = state.registrations.filter(r => r.playerId === pid).map(r => ({ r, tt: byId(state.tournaments, r.tournamentId) })).filter(x => x.tt && isUpcoming(x.tt));
+    const upcoming = state.registrations.filter(r => r.playerId === pid && r.status !== "cancelled").map(r => ({ r, tt: byId(state.tournaments, r.tournamentId) })).filter(x => x.tt && isUpcoming(x.tt));
     const head = nav ? `<div class="section-head"><button class="btn ghost sm back" data-act="p-back">‹ ${t("back")}</button><h2 style="flex:1;text-align:right;">${t("profile")}</h2></div>` : `<div class="section-head"><h2>${t("profile")}</h2></div>`;
     if (state.view.editP === pid && (mine || isAdmin())) return head + profileEditHtml(p);
     return `${head}${mine ? levelBannerHtml() : ""}
@@ -455,7 +502,7 @@ setLang(detectLang(BOOT.tgLang));
       </div>
       ${contactsHtml(p, mine)}
       ${achievementsHtml(pid, E)}
-      ${upcoming.length ? `<div class="card"><h3>${t("my_tournaments")}</h3><div class="stack" style="margin-top:8px;">${upcoming.map(({ r, tt }) => `<div class="row" style="cursor:pointer;" data-act="open-t-tab" data-id="${tt.id}"><span>${esc(tt.name)}<br><span class="tiny">${dateFmt(tt.date)} · ${esc(rangeLabel(tt.s))}</span></span><span class="ct-mine ${r.status}">${r.status === "main" ? t("main_list") : t("reserve_list")}</span></div>`).join("")}</div></div>` : ""}
+      ${upcoming.length ? `<div class="card"><h3>${t("my_tournaments")}</h3><div class="stack" style="margin-top:8px;">${upcoming.map(({ r, tt }) => `<div class="row" style="cursor:pointer;" data-act="open-t-tab" data-id="${tt.id}"><span>${esc(tt.name)}<br><span class="tiny">${dateFmt(tt.date)} · ${esc(rangeLabel(tt.s))}</span></span>${r.approval === "pending" ? `<span class="ct-mine pending">${t("pending_approval")}</span>` : `<span class="ct-mine ${r.status}">${r.status === "main" ? t("main_list") : t("reserve_list")}</span>`}</div>`).join("")}</div></div>` : ""}
       ${tournamentsHistoryHtml(pid, E)}
       ${matchHistoryHtml(pid, E)}
       ${mine ? accountCardHtml() : ""}`;
@@ -596,18 +643,27 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "open-t") on(() => { state.view.t = id; window.scrollTo(0, 0); render(); });
       else if (a === "open-t-tab") on(() => { state.tab = "tournaments"; state.view.t = id; state.view.pid = null; window.scrollTo(0, 0); render(); });
       else if (a === "t-back") on(() => { state.view.t = null; render(); });
-      else if (a === "new-t") on(() => { const nid = uid(); state._tf = { id: nid, isNew: true, name: "", date: today(), format: "americano", courts: 2, status: "scheduled", s: { reg_open: true, slots: 8 } }; state.view.t = nid; state.view.editT = nid; render(); });
+      else if (a === "new-t") on(() => { const nid = uid(); state._tf = { id: nid, isNew: true, name: "", date: today(), format: "americano", courts: 2, status: "scheduled", s: { reg_open: true, slots: 8, approval: true } }; state.view.t = nid; state.view.editT = nid; render(); });
       else if (a === "edit-t") on(() => { state._tf = null; state.view.editT = id; render(); });
-      else if (a === "tf-format") on(() => { readTf().format = el.dataset.val; render(); });
+      else if (a === "tf-format") on(() => { const f = readTf(), was = f.format; f.format = el.dataset.val; if (f.format === "team_americano") f.s.pairs = true; else if (was === "team_americano") f.s.pairs = false; render(); });
+      else if (a === "tf-pairs") { el.onchange = () => { readTf(); render(); }; }
       else if (a === "tf-cancel") on(() => { const f = state._tf; state._tf = null; state.view.editT = null; if (f && f.isNew) state.view.t = null; render(); });
       else if (a === "tf-save") on(saveTf);
       else if (a === "tf-delete") on(async () => { const f = state._tf; if (!confirm(t("delete_confirm", { name: f.name }))) return; try { await db.deleteTournament(f.id); state._tf = null; state.view.editT = null; state.view.t = null; await reload(); } catch (e) { err(e); } });
-      else if (a === "reg") on(async () => { try { const r = await db.register(id); await reload(); toast(r === "reserve" ? t("registered_reserve") : t("registered_main")); } catch (e) { const m = String(e.message||""); toast(/too low/.test(m) ? t("level_too_low") : /too high/.test(m) ? t("level_too_high") : /closed/.test(m) ? t("registration_closed") : /no player/.test(m) ? t("need_card") : t("error", { msg: m })); } });
+      else if (a === "reg") on(async () => { try { const r = await db.register(id); await reload(); toast(regToast(r)); } catch (e) { toast(regErrMsg(String(e.message || ""))); } });
+      else if (a === "reg-team") on(async () => { try { const r = await db.register(id, +el.dataset.team); await reload(); toast(regToast(r)); } catch (e) { toast(regErrMsg(String(e.message || ""))); } });
+      else if (a === "partner-open") on(() => { state.view.partnerFor = id; render(); });
+      else if (a === "partner-cancel") on(() => { state.view.partnerFor = null; render(); });
+      else if (a === "reg-pair") on(async () => { const sel = document.getElementById("partnerSel"); if (!sel || !sel.value) return; try { const r = await db.register(id, null, sel.value); state.view.partnerFor = null; await reload(); toast(regToast(r)); } catch (e) { toast(regErrMsg(String(e.message || ""))); } });
+      else if (a === "reg-approve" || a === "reg-reject") on(async () => { try { await db.reviewRegistration(el.dataset.tid, el.dataset.pid, a === "reg-approve" ? "approve" : "reject"); await reload(); toast(a === "reg-approve" ? t("approved_toast") : t("rejected_toast")); } catch (e) { err(e); } });
       else if (a === "unreg") on(async () => { try { await db.unregister(id); await reload(); } catch (e) { err(e); } });
       else if (a === "reg-paid") on(async () => { const r = regsOf(el.dataset.tid).find(x => x.playerId === el.dataset.pid); try { await db.setRegistration(el.dataset.tid, el.dataset.pid, { paid: !r.paid }); await reload(); } catch (e) { err(e); } });
-      else if (a === "reg-move") on(async () => { try { await db.setRegistration(el.dataset.tid, el.dataset.pid, { status: el.dataset.to }); await reload(); } catch (e) { err(e); } });
-      else if (a === "reg-remove") on(async () => { try { await db.removeRegistration(el.dataset.tid, el.dataset.pid); await reload(); } catch (e) { err(e); } });
-      else if (a === "reg-add") on(async () => { const sel = document.getElementById("addRegSel"); if (!sel || !sel.value) return; try { await db.addRegistration(id, sel.value, "main"); await reload(); } catch (e) { err(e); } });
+      else if (a === "reg-move") on(async () => { const tid = el.dataset.tid, tt = byId(state.tournaments, tid), to = el.dataset.to; let patch = { status: to };
+        if (isPairs(tt)) { if (to === "main") { const n = firstFreeTeam(tid, 1); if (n == null) { toast(t("no_free_place")); return; } patch.team_no = n; } else patch.team_no = null; }
+        try { await db.setRegistration(tid, el.dataset.pid, patch); await reload(); } catch (e) { err(e); } });
+      else if (a === "reg-remove") on(async () => { try { await db.removeRegistration(el.dataset.tid, el.dataset.pid); await db.promoteReserve(el.dataset.tid).catch(() => {}); await reload(); } catch (e) { err(e); } });
+      else if (a === "reg-add") on(async () => { const sel = document.getElementById("addRegSel"); if (!sel || !sel.value) return; const ts = document.getElementById("addRegTeam");
+        const team = ts ? (ts.value ? +ts.value : null) : null; try { await db.addRegistration(id, sel.value, ts && !ts.value ? "reserve" : "main", team); await reload(); } catch (e) { err(e); } });
       else if (a === "p-edit-contacts") on(() => { state._pf = null; state.view.editP = id; render(); const f = document.getElementById("pfContacts"); if (f) f.scrollIntoView({ block: "start", behavior: "smooth" }); const i = document.getElementById("pfc_phone"); if (i) i.focus({ preventScroll: true }); });
       else if (a === "lv-step") on(() => { keepPf(); const pf = state._pf; pf.level = Math.round((pf.level + +el.dataset.val) * 10) / 10; render(); });
       else if (a === "toggle-rounds") on(() => { state.view.roundsOpen = state.view.roundsOpen === id ? null : id; render(); });

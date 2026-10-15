@@ -1,10 +1,4 @@
-# Два сайта из одного репозитория: friends и community. В Netlify у каждого сайта свой "Base directory".
+# Каждый сайт пересобирается только когда меняется ЕГО папка — экономит кредиты Netlify.
+# padelfreakclub — приложение друзей (папка friends/), остальное (048padel) — коммьюнити (папка community/).
 [build]
-  publish = "."
-  command = ""
-
-[[headers]]
-  for = "/*"
-  [headers.values]
-    X-Frame-Options = "ALLOWALL"
-    Content-Security-Policy = "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org"
+  ignore = "if [ \"$SITE_NAME\" = \"padelfreakclub\" ]; then D=friends; else D=community; fi; git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- $D/"

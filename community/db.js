@@ -35,7 +35,7 @@ export function createDb(cfg) {
   const toTournament = t => ({ id: t.id, seq: t.seq || 0, name: t.name, date: t.date, status: t.status, format: t.format, courts: t.courts, participantIds: t.participant_ids || [], teams: t.teams || [],
     scoring: t.scoring || {}, rounds: t.rounds || null, money: t.money || {}, s: t.settings || {} });
   const toGame = g => ({ id: g.id, tournamentId: g.tournament_id, round: g.round, court: g.court, teamA: g.team_a, teamB: g.team_b, scoreA: g.score_a, scoreB: g.score_b, label: g.label || null });
-  const toReg = r => ({ tournamentId: r.tournament_id, playerId: r.player_id, status: r.status, paid: !!r.paid, at: r.created_at });
+  const toReg = r => ({ tournamentId: r.tournament_id, playerId: r.player_id, status: r.status, paid: !!r.paid, at: r.created_at, team: r.team_no ?? null, approval: r.approval || "ok", addedBy: r.added_by || null });
   async function loadAll() {
     const q = t => sb.from(t).select("*").eq("league_id", L);
     const [players, tournaments, games, regs] = await Promise.all([q("players"), q("tournaments_public"), q("games"), q("registrations")]);
@@ -54,7 +54,9 @@ export function createDb(cfg) {
   async function reviewLevel(pid, action, level) { return rpc("review_level", { p_player: pid, p_action: action, p_level: level ?? null }); }
   async function submitQuiz(answers, score) { return rpc("submit_quiz", { p_answers: answers, p_score: score }); }
   async function adjustMyLevel(level) { return rpc("adjust_my_level", { p_level: level }); }
-  async function register(tid) { return rpc("register_tournament", { p_tournament: tid }); }
+  async function register(tid, team, partner) { return rpc("register_tournament", { p_tournament: tid, p_team: team ?? null, p_partner: partner || null }); }
+  async function reviewRegistration(tid, pid, action) { return rpc("review_registration", { p_tournament: tid, p_player: pid, p_action: action }); }
+  async function promoteReserve(tid) { return rpc("promote_reserve", { p_tournament: tid }); }
   async function unregister(tid) { return rpc("unregister_tournament", { p_tournament: tid }); }
   async function setDisplayName(name) { const s = await session(); if (!s) return; const { error } = await sb.from("profiles").update({ display_name: name }).eq("user_id", s.user.id); if (error) throw error; }
 
@@ -68,7 +70,7 @@ export function createDb(cfg) {
   async function deleteTournament(tid) { const { error } = await sb.from("tournaments").delete().eq("league_id", L).eq("id", tid); if (error) throw error; }
   async function setRegistration(tid, pid, patch) { const { error } = await sb.from("registrations").update(patch).eq("league_id", L).eq("tournament_id", tid).eq("player_id", pid); if (error) throw error; }
   async function removeRegistration(tid, pid) { const { error } = await sb.from("registrations").delete().eq("league_id", L).eq("tournament_id", tid).eq("player_id", pid); if (error) throw error; }
-  async function addRegistration(tid, pid, status) { const { error } = await sb.from("registrations").upsert({ league_id: L, tournament_id: tid, player_id: pid, status: status || "main", paid: false }, { onConflict: "league_id,tournament_id,player_id" }); if (error) throw error; }
+  async function addRegistration(tid, pid, status, team) { const { error } = await sb.from("registrations").upsert({ league_id: L, tournament_id: tid, player_id: pid, status: status || "main", paid: false, team_no: team ?? null, approval: "ok", created_at: new Date().toISOString() }, { onConflict: "league_id,tournament_id,player_id" }); if (error) throw error; }
   async function updatePlayer(pid, patch) {
     const row = {}; if ("level" in patch) row.level = patch.level; if ("eloStart" in patch) row.elo_start = patch.eloStart; if ("confirmed" in patch) row.elo_confirmed = patch.confirmed; if ("active" in patch) row.active = patch.active; if ("name" in patch) row.name = patch.name; if ("levelStatus" in patch) row.level_status = patch.levelStatus;
     const { error } = await sb.from("players").update(row).eq("league_id", L).eq("id", pid); if (error) throw error;
@@ -94,6 +96,6 @@ export function createDb(cfg) {
   }
 
   return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinOpen, loadAll,
-    createMyPlayer, updateMyCard, adjustMyLevel, reviewLevel, submitQuiz, register, unregister, setDisplayName,
+    createMyPlayer, updateMyCard, adjustMyLevel, reviewLevel, submitQuiz, register, unregister, reviewRegistration, promoteReserve, setDisplayName,
     saveTournament, deleteTournament, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, listMembers, setMemberRole, profileNames, subscribe };
 }
