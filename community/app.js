@@ -142,7 +142,7 @@ setLang(detectLang(BOOT.tgLang));
         ${isQuiz ? `
         <div class="quiz-intro"><div class="quiz-intro-ic">?</div><p>${t("quiz_intro")}</p></div>
         <button class="btn primary block" data-act="quiz-start">${t("quiz_start")} →</button>` : `
-        <label class="field"><span class="lbl">${t("app_nick", { app: t("src_" + d.source) })}</span>${okWrap(`<input type="text" id="obNick" value="${esc(d.nick || "")}" placeholder="nick / ID" maxlength="40" enterkeyhint="done">`, "ob")}</label>
+        <label class="field"><span class="lbl">${t("app_nick", { app: t("src_" + d.source) })}</span>${okWrap(`<input type="text" id="obNick" value="${esc(d.nick || "")}" placeholder="${t("nick_or_link")}" maxlength="200" enterkeyhint="done">`, "ob")}<span class="tiny field-hint">${t("link_hint_" + d.source) || ""}</span></label>
         <label class="field"><span class="lbl">${t("lv_in_" + d.source)}</span>${okWrap(`<input type="number" id="obLevel" enterkeyhint="done" inputmode="decimal" min="0" max="${d.source === "pado" ? 4000 : 7}" step="${d.source === "pado" ? "any" : "0.001"}" value="${esc(d.level)}" placeholder="${{ raketo: "2.434", pado: "1450", playtomic: "3.25" }[d.source]}">`, "ob")}</label>
         <div class="ob-preview ${lv==null?'dim':''}">${levelBadge(lv, "big")}<div><div class="tiny">${d.source === "raketo" ? "" : t("as_raketo") + " · "}${t("letter")} · ${t("start_elo")}</div><div class="ob-elo">${lv==null?"—":(d.source === "raketo" ? "" : fmtLv(lv) + " · ") + letter(lv)+" · "+levelElo(lv)}</div></div></div>
         <div class="review-note">${t("review_note", { app: t("src_" + d.source) })}</div>
@@ -175,7 +175,7 @@ setLang(detectLang(BOOT.tgLang));
     const d = state._onb; const ig = d.ig.trim().replace(/^@/, "");
     const isQuiz = d.source === "quiz"; const score = d.answers.reduce((a, x) => a + x, 0);
     const lv = isQuiz ? quizLevel(d.answers) : toRaketo(d.source, d.level);
-    const extra = { ...(ig ? { instagram: ig } : {}), ...(isQuiz ? { quiz: d.answers.slice() } : { [d.source]: (d.nick || "").trim().replace(/^@/, ""), level_raw: String(d.level).trim() }) };
+    const extra = { ...(ig ? { instagram: ig } : {}), ...(isQuiz ? { quiz: d.answers.slice() } : { [d.source]: appLink(d.nick) || (d.nick || "").trim().replace(/^@/, ""), level_raw: String(d.level).trim() }) };
     try {
       if (d.retest) await db.submitQuiz(d.answers.slice(), score);
       else await db.createMyPlayer(d.name.trim(), lv, d.source, extra);
@@ -402,15 +402,20 @@ setLang(detectLang(BOOT.tgLang));
     ["instagram", CI('<rect x="3" y="6" width="18" height="14" rx="3"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2.5h5L16 6"/>'), v => "https://instagram.com/" + v],
     ["playtomic", "P", null], ["pado", "P", null], ["raketo", "R", null],
   ];
+  // ссылка на профиль в приложении (Raketo, Playtomic, Pado): только https, без пробелов и кавычек
+  const appLink = v => { v = String(v || "").trim(); if (/^[a-z0-9-]+(\.[a-z0-9-]+)+\/\S+$/i.test(v) && !/^https?:/i.test(v)) v = "https://" + v; return /^https:\/\/[^\s"'<>]+$/i.test(v) ? v : null; };
   const cleanContact = (k, v) => { v = String(v || "").trim(); if (!v) return ""; if (k === "phone") return v.replace(/[^\d+()\s-]/g, "").slice(0, 20);
+    if (["playtomic", "pado", "raketo"].includes(k) && appLink(v)) return appLink(v).slice(0, 200);
     return v.replace(/^https?:\/\/(www\.)?(t\.me|instagram\.com)\/@?/i, "").replace(/^@/, "").replace(/[/?#].*$/, "").slice(0, 40); };
   function contactsHtml(p, mine) {
     const c = p.contacts || {}; const filled = CONTACTS.filter(([k]) => c[k]);
     const pen = mine ? `<button class="icon-btn" data-act="p-edit-contacts" data-id="${p.id}" title="${t("edit")}">✎</button>` : "";
     if (!filled.length) return mine ? `<div class="card"><div class="row"><span class="muted">${t("contacts_empty")}</span><button class="btn sm" data-act="p-edit-contacts" data-id="${p.id}">+ ${t("contacts")}</button></div></div>` : "";
     return `<div class="card"><div class="row"><h3>${t("contacts")}</h3>${pen}</div><div class="ct-list">${filled.map(([k, ic, href]) => {
-      const v = c[k], label = k === "phone" ? v : (["playtomic","pado","raketo"].includes(k) ? v : "@" + v);
+      const v = c[k], isApp = ["playtomic","pado","raketo"].includes(k), link = isApp ? appLink(v) : null;
+      const label = k === "phone" ? v : isApp ? (link ? t("open_profile") + " ↗" : v) : "@" + v;
       const inner = `<span class="ct-ic ct-${k}">${ic}</span><span><span class="tiny">${t("c_" + k)}</span><b>${esc(label)}</b></span>`;
+      if (isApp) return link ? `<button class="ct-item" data-act="open-link" data-url="${esc(link)}">${inner}</button>` : `<button class="ct-item" data-act="copy-nick" data-val="${esc(v)}" data-app="${k}">${inner}</button>`;
       return href ? (k === "phone" ? `<a class="ct-item wide" href="${esc(href(v))}">${inner}</a>` : `<button class="ct-item" data-act="open-link" data-url="${esc(href(v))}">${inner}</button>`) : `<div class="ct-item">${inner}</div>`;
     }).join("")}</div></div>`;
   }
@@ -560,7 +565,7 @@ setLang(detectLang(BOOT.tgLang));
       ${adjBlock}
       <label class="field" style="margin-top:12px;"><span class="lbl">${t("bio")}</span>${okWrap(`<textarea id="pfBio" rows="2" maxlength="200">${esc(pf.bio)}</textarea>`, "pf:" + p.id)}</label>
       ${mine ? `<h3 id="pfContacts" style="margin:6px 0 4px;scroll-margin-top:40px;">${t("contacts")}</h3><p class="tiny" style="margin:0 0 10px;">${t("contacts_hint")}</p>
-      <div class="ct-form">${CONTACTS.map(([k, ic]) => `<label class="ct-field"><span class="ct-ic ct-${k}">${ic}</span>${okWrap(`<input type="${k === "phone" ? "tel" : "text"}" id="pfc_${k}" value="${esc(pf.c[k])}" placeholder="${t("c_" + k)}${k === "phone" ? " +380…" : ["playtomic","pado","raketo"].includes(k) ? " — nick / ID" : " @nick"}" maxlength="60" enterkeyhint="done">`, "pf:" + p.id)}</label>`).join("")}</div>` : ""}
+      <div class="ct-form">${CONTACTS.map(([k, ic]) => `<label class="ct-field"><span class="ct-ic ct-${k}">${ic}</span>${okWrap(`<input type="${k === "phone" ? "tel" : "text"}" id="pfc_${k}" value="${esc(pf.c[k])}" placeholder="${t("c_" + k)}${k === "phone" ? " +380…" : ["playtomic","pado","raketo"].includes(k) ? " — " + t("nick_or_link") : " @nick"}" maxlength="${["playtomic","pado","raketo"].includes(k) ? 200 : 60}" enterkeyhint="done">`, "pf:" + p.id)}</label>`).join("")}</div>` : ""}
       <div class="pf-actions" style="justify-content:flex-end;"><button class="btn sm" data-act="pf-cancel">${t("cancel")}</button><button class="btn sm primary" data-act="pf-save" data-id="${p.id}">${t("save")}</button></div>
     </div>`;
   }
@@ -619,7 +624,7 @@ setLang(detectLang(BOOT.tgLang));
         const c = p.contacts || {}, src = c.level_source || "", nick = c[src];
         if (p.levelStatus === "quiz_required") return `<div class="card rv-card wait"><div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 40)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("rv_waiting_quiz")} · ${t("src_" + src)} ${p.levelClaim ?? ""}</span></span></div>${isAdmin() ? `<div class="rv-actions" style="margin-top:10px;"><button class="btn sm ghost danger" data-act="adm-reset" data-id="${p.id}">↺ ${t("reset_short")}</button></div>` : ""}</div>`;
         return `<div class="card rv-card">
-          <div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 40)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("src_" + src)} · ${nick ? `<b class="rv-nick">${esc(nick)}</b>` : "—"}${c.level_raw ? ` · ${t("rv_raw")}: <b>${esc(c.level_raw)}</b>` : ""}</span></span></div>
+          <div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 40)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("src_" + src)} · ${nick ? (appLink(nick) ? `<button class="rv-link" data-act="open-link" data-url="${esc(appLink(nick))}">${t("open_profile")} ↗</button>` : `<b class="rv-nick">${esc(nick)}</b>`) : "—"}${c.level_raw ? ` · ${t("rv_raw")}: <b>${esc(c.level_raw)}</b>` : ""}</span></span></div>
           <div class="rv-claim">${levelBadge(p.levelClaim, "big")}<div><div class="tiny">${t("rv_claimed")}</div><div class="ob-elo">${fmtLv(p.levelClaim)} · ${letter(p.levelClaim)} · ${levelElo(p.levelClaim)}</div></div></div>
           <div class="rv-actions">
             <label>${t("level_value")}<input type="number" step="0.001" min="0" max="7" inputmode="decimal" id="rv_${p.id}" value="${p.levelClaim ?? ""}"></label>
@@ -743,7 +748,9 @@ setLang(detectLang(BOOT.tgLang));
         try { await db.resetPlayer(id); await reload(); toast(t("reset_done", { name: p.name })); } catch (e) { err(e); } });
       else if (a === "pf-photo") on(() => { const f = document.getElementById("pfPhoto"); if (f) f.click(); });
       else if (a === "pf-photo-clear") on(() => { keepPf(); state._pf.avatar = null; render(); });
-      else if (a === "open-link") on(() => { const u = el.dataset.url; const tg = window.Telegram && window.Telegram.WebApp; if (tg && /t\.me/.test(u) && tg.openTelegramLink) tg.openTelegramLink(u); else window.open(u, "_blank", "noopener"); });
+      else if (a === "open-link") on(() => { const u = el.dataset.url; const tg = window.Telegram && window.Telegram.WebApp;
+        if (tg && tg.initData && /^https:\/\/t\.me\//.test(u) && tg.openTelegramLink) tg.openTelegramLink(u); else if (tg && tg.initData && tg.openLink) tg.openLink(u); else window.open(u, "_blank", "noopener"); });
+      else if (a === "copy-nick") on(async () => { const v = el.dataset.val; try { await navigator.clipboard.writeText(v); toast(t("nick_copied", { app: t("src_" + el.dataset.app) })); } catch (e) { toast(v); } });
       else if (a === "logout") on(async () => { await db.signOut(); location.reload(); });
       else if (a === "rv-approve") on(async () => { const inp = document.getElementById("rv_" + id); const lv = inp && inp.value !== "" ? +inp.value : null; try { await db.reviewLevel(id, "approve", lv); await reload(); toast(t("saved")); } catch (e) { err(e); } });
       else if (a === "rv-quiz") on(async () => { try { await db.reviewLevel(id, "quiz"); await reload(); toast(t("saved")); } catch (e) { err(e); } });
