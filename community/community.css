@@ -199,3 +199,10 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
 /* ---------- ссылки на профили в приложениях ---------- */
 .field-hint { display: block; margin-top: 6px; color: var(--ink-3); }
 .rv-link { background: none; border: none; padding: 0; font: inherit; font-weight: 800; color: #FF9A4A; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---------- счётчики ожидающих (кружки) ---------- */
+.chip.has-badge { position: relative; overflow: visible; }
+.cnt-badge { position: absolute; top: -7px; right: -6px; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+  font: 800 11px/1 "Manrope", sans-serif; color: #fff; background: #FF3B30; border: 2px solid #0A0A0B; box-shadow: 0 2px 8px rgba(255,59,48,.45); }
+.nav-badge { position: absolute; top: 0; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+  font: 800 10.5px/1 "Manrope", sans-serif; color: #fff; background: #FF3B30; border: 2px solid #0C0C0E; pointer-events: none; }

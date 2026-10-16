@@ -602,7 +602,7 @@ setLang(detectLang(BOOT.tgLang));
     const queue = state.players.filter(p => p.levelStatus !== "ok");
     const pendingN = queue.filter(p => p.levelStatus === "pending").length;
     const sub = state.view.adm || (pendingN ? "review" : "ratings");
-    const tabs = [["review", t("review_tab") + (pendingN ? ` · ${pendingN}` : "")], ["ratings", t("ratings_admin")], ...(isAdmin() ? [["visits", t("visits_tab")]] : []), ["roles", t("roles")]];
+    const tabs = [["review", t("review_tab"), pendingN], ["ratings", t("ratings_admin")], ...(isAdmin() ? [["visits", t("visits_tab")]] : []), ["roles", t("roles")]];
     let body = "";
     if (sub === "ratings") {
       const q = (state.view.q || "").toLowerCase(); const E = computeElo();
@@ -634,7 +634,7 @@ setLang(detectLang(BOOT.tgLang));
           </div></div>`;
       }).join("");
     return `<div class="section-head"><h2>${t("admin")}</h2></div>
-      <div class="chips-wrap" style="margin-bottom:12px;">${tabs.map(([k, l]) => `<span class="chip sm ${sub===k?'active':''}" data-act="adm-tab" data-val="${k}">${l}</span>`).join("")}</div>${body}`;
+      <div class="chips-wrap" style="margin-bottom:12px;">${tabs.map(([k, l, n]) => `<span class="chip sm has-badge ${sub===k?'active':''}" data-act="adm-tab" data-val="${k}">${l}${n ? `<span class="cnt-badge">${n}</span>` : ""}</span>`).join("")}</div>${body}`;
   }
   const ROLE_LABEL = { owner: "owner", admin: "admin", editor: "editor", player: "player", viewer: "viewer" };
   // ---------- кто заходил (только админ): ник Telegram, вход, есть ли анкета ----------
@@ -683,7 +683,14 @@ setLang(detectLang(BOOT.tgLang));
     document.querySelectorAll("nav.tabs button").forEach(b => { b.classList.toggle("active", b.dataset.tab === state.tab); if (b.dataset.tab === "admin") b.hidden = !canEdit(); });
     const labels = { tournaments: t("tournaments"), rating: t("rating"), admin: t("admin"), profile: t("profile") };
     document.querySelectorAll("nav.tabs button .lbl").forEach(l => l.textContent = labels[l.parentElement.dataset.tab]);
-    updateNavAvatar(); bind(v);
+    updateNavAvatar(); updateNavBadges(); bind(v);
+  }
+  function updateNavBadges() {
+    const lv = canEdit() ? state.players.filter(p => p.levelStatus === "pending").length : 0;
+    const rg = isAdmin() ? state.registrations.filter(r => r.approval === "pending" && r.status !== "cancelled" && (tt => tt && isUpcoming(tt))(byId(state.tournaments, r.tournamentId))).length : 0;
+    [["admin", lv], ["tournaments", rg]].forEach(([tab, n]) => { const b = document.querySelector(`nav.tabs button[data-tab="${tab}"]`); if (!b) return;
+      let el = b.querySelector(".nav-badge"); if (!n) { if (el) el.remove(); return; }
+      if (!el) { el = document.createElement("span"); el.className = "nav-badge"; b.appendChild(el); } el.textContent = n > 99 ? "99+" : n; });
   }
   function updateNavAvatar() {
     const ic = document.querySelector('nav.tabs button[data-tab="profile"] .ic'); const p = myPlayer(); if (!ic) return;
