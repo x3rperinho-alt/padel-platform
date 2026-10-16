@@ -183,3 +183,15 @@ body.kb #view { padding-bottom: 45vh; }
   color: #FFD9BD; background: rgba(255,122,26,.14) !important; border: 1px solid rgba(255,122,26,.5) !important; box-shadow: 0 0 16px rgba(255,122,26,.18); }
 .home-pill svg, .home-ic { width: 17px; height: 17px; fill: none; stroke: #FF7A1A; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; vertical-align: -4px; }
 header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
+
+/* ---------- кто заходил ---------- */
+.vis-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.vis-main { flex: 1; min-width: 0; }
+.vis-name { font-weight: 700; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vis-main .tiny { margin-top: 2px; }
+.tg-link { color: #5FB3F0; font-weight: 700; cursor: pointer; }
+.vis-badge { flex: none; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.vis-badge.ok { color: #4ADE80; border-color: rgba(74,222,128,.35); background: rgba(74,222,128,.08); }
+.vis-badge.pending { color: #FFC94D; border-color: rgba(255,201,77,.35); background: rgba(255,201,77,.08); }
+.vis-badge.quiz { color: #FF9A4A; border-color: rgba(255,122,26,.4); background: rgba(255,122,26,.08); }
+.vis-badge.none { color: var(--ink-3); border-color: rgba(255,255,255,.15); background: rgba(255,255,255,.03); }

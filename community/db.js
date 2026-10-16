@@ -78,6 +78,7 @@ export function createDb(cfg) {
   async function submitQuiz(answers, score) { return rpc("submit_quiz", { p_answers: answers, p_score: score }); }
   async function adjustMyLevel(level) { return rpc("adjust_my_level", { p_level: level }); }
   async function register(tid, team, partner) { return rpc("register_tournament", { p_tournament: tid, p_team: team ?? null, p_partner: partner || null }); }
+  async function adminMembers() { const r = await rpc("admin_members", {}); return (r || []).map(m => ({ userId: m.user_id, role: m.role, playerId: m.player_id, name: m.display_name || "", username: m.tg_username || "", tgId: m.tg_id, joined: m.joined_at, seen: m.last_sign_in })); }
   async function resetPlayer(pid) { return rpc("reset_player", { p_player: pid }); }
   async function reviewRegistration(tid, pid, action) { return rpc("review_registration", { p_tournament: tid, p_player: pid, p_action: action }); }
   async function promoteReserve(tid) { return rpc("promote_reserve", { p_tournament: tid }); }
@@ -120,6 +121,6 @@ export function createDb(cfg) {
   }
 
   return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinOpen, loadAll,
-    createMyPlayer, updateMyCard, adjustMyLevel, reviewLevel, submitQuiz, register, unregister, reviewRegistration, resetPlayer, promoteReserve, setDisplayName,
+    createMyPlayer, updateMyCard, adjustMyLevel, reviewLevel, submitQuiz, register, unregister, reviewRegistration, resetPlayer, adminMembers, promoteReserve, setDisplayName,
     saveTournament, deleteTournament, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, listMembers, setMemberRole, profileNames, subscribe };
 }

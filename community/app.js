@@ -597,7 +597,7 @@ setLang(detectLang(BOOT.tgLang));
     const queue = state.players.filter(p => p.levelStatus !== "ok");
     const pendingN = queue.filter(p => p.levelStatus === "pending").length;
     const sub = state.view.adm || (pendingN ? "review" : "ratings");
-    const tabs = [["review", t("review_tab") + (pendingN ? ` · ${pendingN}` : "")], ["ratings", t("ratings_admin")], ["roles", t("roles")]];
+    const tabs = [["review", t("review_tab") + (pendingN ? ` · ${pendingN}` : "")], ["ratings", t("ratings_admin")], ...(isAdmin() ? [["visits", t("visits_tab")]] : []), ["roles", t("roles")]];
     let body = "";
     if (sub === "ratings") {
       const q = (state.view.q || "").toLowerCase(); const E = computeElo();
@@ -613,6 +613,7 @@ setLang(detectLang(BOOT.tgLang));
             ${isAdmin() && p.userId ? `<button class="btn sm ghost danger" data-act="adm-reset" data-id="${p.id}" title="${t("reset_player")}">↺ ${t("reset_short")}</button>` : ""}
           </div></div>`).join("")}</div></div>`;
     } else if (sub === "roles") body = membersCardHtml();
+    else if (sub === "visits") body = visitsHtml();
     else if (sub === "review") body = !queue.length ? `<div class="card"><div class="empty"><div class="ic">✓</div>${t("review_empty")}</div></div>`
       : `<p class="tiny" style="margin:0 0 10px;">${t("review_hint")}</p>` + queue.sort((a, b) => (a.levelStatus === "pending" ? 0 : 1) - (b.levelStatus === "pending" ? 0 : 1)).map(p => {
         const c = p.contacts || {}, src = c.level_source || "", nick = c[src];
@@ -631,6 +632,30 @@ setLang(detectLang(BOOT.tgLang));
       <div class="chips-wrap" style="margin-bottom:12px;">${tabs.map(([k, l]) => `<span class="chip sm ${sub===k?'active':''}" data-act="adm-tab" data-val="${k}">${l}</span>`).join("")}</div>${body}`;
   }
   const ROLE_LABEL = { owner: "owner", admin: "admin", editor: "editor", player: "player", viewer: "viewer" };
+  // ---------- кто заходил (только админ): ник Telegram, вход, есть ли анкета ----------
+  const seenFmt = ts => { if (!ts) return "—"; const d = new Date(ts), now = new Date(), hm = d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+    const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(), diff = Math.round((day(now) - day(d)) / 864e5);
+    return diff === 0 ? t("today") + " " + hm : diff === 1 ? t("yesterday") + " " + hm : String(d.getDate()).padStart(2, "0") + "." + String(d.getMonth() + 1).padStart(2, "0") + " " + hm; };
+  function visitsHtml() {
+    if (!state._visits) { if (!state._vl) { state._vl = true; db.adminMembers().then(r => { state._visits = r; state._vl = false; render(); }).catch(e => { state._vl = false; state._visits = []; err(e); }); } return `<div class="card"><p class="tiny">…</p></div>`; }
+    const st = m => { const p = m.playerId && byId(state.players, m.playerId); return !p ? "none" : p.levelStatus === "pending" ? "pending" : p.levelStatus === "quiz_required" ? "quiz" : "ok"; };
+    const all = state._visits, f = state.view.visF || "all";
+    const cnt = k => all.filter(m => st(m) === k).length;
+    const rows = all.filter(m => f === "all" || st(m) === f);
+    const badge = { ok: ["ok", t("vis_ok")], pending: ["pending", t("vis_pending")], quiz: ["quiz", t("vis_quiz")], none: ["none", t("vis_none")] };
+    const filters = [["all", t("vis_all"), all.length], ["none", t("vis_none"), cnt("none")], ["pending", t("vis_pending"), cnt("pending")], ["ok", t("vis_ok"), cnt("ok")]];
+    return `<div class="card">
+      <div class="row" style="margin-bottom:10px;"><span class="tiny">${t("vis_hint")}</span><button class="btn sm ghost" data-act="vis-refresh">↻</button></div>
+      <div class="chips-wrap" style="margin-bottom:10px;">${filters.map(([k, l, n]) => `<span class="chip sm ${f === k ? "active" : ""}" data-act="vis-f" data-val="${k}">${l} · ${n}</span>`).join("")}</div>
+      ${rows.map(m => { const p = m.playerId && byId(state.players, m.playerId), b = badge[st(m)];
+        return `<div class="vis-row">
+          ${p ? `<span data-act="open-profile" data-id="${p.id}" style="cursor:pointer;">${avatarHtml(p.id, 38)}</span>` : `<span class="avatar ph" style="width:38px;height:38px;">${SIL}</span>`}
+          <div class="vis-main"><div class="vis-name">${esc((p && p.name) || m.name || "—")}${m.role !== "player" ? ` <span class="role-tag ${m.role}">${m.role}</span>` : ""}</div>
+            <div class="tiny">${m.username ? `<span class="tg-link" data-act="open-tg" data-u="${esc(m.username)}">@${esc(m.username)}</span>` : `<span>ID ${esc(m.tgId ?? "—")}</span>`}${p && m.name && m.name !== p.name ? ` · ${esc(m.name)}` : ""}</div>
+            <div class="tiny">${t("vis_seen")}: <b>${seenFmt(m.seen)}</b> · ${t("vis_first")}: ${seenFmt(m.joined)}</div></div>
+          <span class="vis-badge ${b[0]}">${b[1]}</span></div>`; }).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}
+    </div>`;
+  }
   function membersCardHtml() {
     if (!state._members) { if (!state._ml) { state._ml = true; db.listMembers().then(m => { state._members = m; state._ml = false; render(); }).catch(() => { state._ml = false; state._members = []; }); } return `<div class="card"><p class="tiny">…</p></div>`; }
     const order = { owner: 0, admin: 1, editor: 2, player: 3, viewer: 4 };
@@ -708,6 +733,9 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "pf-cancel") on(() => { state._pf = null; state.view.editP = null; render(); });
       else if (a === "pf-save") on(() => savePf(id));
       else if (a === "add-home") on(addToHome);
+      else if (a === "vis-f") on(() => { state.view.visF = el.dataset.val; render(); });
+      else if (a === "vis-refresh") on(() => { state._visits = null; render(); });
+      else if (a === "open-tg") on(() => { const u = "https://t.me/" + el.dataset.u; try { if (tgApp && tgApp.openTelegramLink && tgApp.initData) { tgApp.openTelegramLink(u); return; } } catch (e) {} window.open(u, "_blank"); });
       else if (a === "field-ok") on(() => { const sc = el.dataset.scope || ""; const inp = el.parentElement && el.parentElement.querySelector("input,textarea"); if (inp) inp.blur();
         if (sc === "ob") { keepOnb(); el.classList.add("done"); setTimeout(() => el.classList.remove("done"), 900); }
         else if (sc.startsWith("pf:")) savePf(sc.slice(3), true); });
