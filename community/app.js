@@ -2,6 +2,7 @@
 import { CONFIG } from "./config.js";
 import { createDb } from "./db.js";
 import { bootstrap } from "./auth.js";
+import { americanoSchedule, defaultAmericanoRounds, mexicanoRound, swissRound, balanceTeams, roundRobinSchedule, playerTable, teamTable, playoffFirst, playoffNext, playoffPlaces, isBracket } from "./engine.js";
 import { t, setLang, getLang, detectLang, LANGS, dateFmt, quiz, quizLevel, quizElo } from "./i18n.js";
 
 setLang(detectLang(null));
@@ -100,6 +101,8 @@ setLang(detectLang(BOOT.tgLang));
   const err = e => toast(t("error", { msg: (e && e.message) || e }));
   // поле ввода с кнопкой ✓ справа: прячет клавиатуру и сохраняет (scope: ob — анкета, pf:<id> — профиль)
   const okWrap = (inner, scope) => `<span class="ok-wrap">${inner}<button type="button" class="ok-btn" data-act="field-ok" data-scope="${scope}" aria-label="${t("save")}">✓</button></span>`;
+  const decFix = inp => { const cur = inp.value; let x = cur.replace(/,/g, ".").replace(/[^0-9.]/g, ""); const i = x.indexOf("."); if (i >= 0) x = x.slice(0, i + 1) + x.slice(i + 1).replace(/\./g, "");
+    if (x !== cur) { const pos = inp.selectionStart; inp.value = x; try { inp.setSelectionRange(Math.min(pos, x.length), Math.min(pos, x.length)); } catch (e) {} } };
   const isField = el => !!el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !["checkbox", "radio", "file", "button", "submit"].includes(el.type)));
   // подтверждение: в Telegram — родное окно, в браузере — обычный confirm
   const ask = msg => new Promise(res => { const tg = window.Telegram && window.Telegram.WebApp; if (tg && tg.showConfirm && tg.initData) { try { tg.showConfirm(msg, ok => res(!!ok)); return; } catch (e) {} } res(confirm(msg)); });
@@ -143,7 +146,7 @@ setLang(detectLang(BOOT.tgLang));
         <div class="quiz-intro"><div class="quiz-intro-ic">?</div><p>${t("quiz_intro")}</p></div>
         <button class="btn primary block" data-act="quiz-start">${t("quiz_start")} →</button>` : `
         <label class="field"><span class="lbl">${t("app_nick", { app: t("src_" + d.source) })}</span>${okWrap(`<input type="text" id="obNick" value="${esc(d.nick || "")}" placeholder="${t("nick_or_link")}" maxlength="200" enterkeyhint="done">`, "ob")}<span class="tiny field-hint">${t("link_hint_" + d.source) || ""}</span></label>
-        <label class="field"><span class="lbl">${t("lv_in_" + d.source)}</span>${okWrap(`<input type="number" id="obLevel" enterkeyhint="done" inputmode="decimal" min="0" max="${d.source === "pado" ? 4000 : 7}" step="${d.source === "pado" ? "any" : "0.001"}" value="${esc(d.level)}" placeholder="${{ raketo: "2.434", pado: "1450", playtomic: "3.25" }[d.source]}">`, "ob")}</label>
+        <label class="field"><span class="lbl">${t("lv_in_" + d.source)}</span>${okWrap(`<input type="text" inputmode="decimal" autocomplete="off" class="dec-in" id="obLevel" enterkeyhint="done" value="${esc(d.level)}" placeholder="${{ raketo: "2.434", pado: "1450", playtomic: "3.25" }[d.source]}">`, "ob")}</label>
         <div class="ob-preview ${lv==null?'dim':''}">${levelBadge(lv, "big")}<div><div class="tiny">${d.source === "raketo" ? "" : t("as_raketo") + " · "}${t("letter")} · ${t("start_elo")}</div><div class="ob-elo">${lv==null?"—":(d.source === "raketo" ? "" : fmtLv(lv) + " · ") + letter(lv)+" · "+levelElo(lv)}</div></div></div>
         <div class="review-note">${t("review_note", { app: t("src_" + d.source) })}</div>
         <button class="btn primary block" style="margin-top:14px;" data-act="ob-save" ${d.name.trim().length<2||lv==null||lv<0||lv>7||!(d.nick||"").trim()?"disabled":""}>${t("send_review")}</button>`}
@@ -198,7 +201,7 @@ setLang(detectLang(BOOT.tgLang));
     const regs = regsOf(tt.id), main = regs.filter(r => r.status === "main").length, res = regs.filter(r => r.status === "reserve").length;
     const slots = +tt.s.slots || 0, mine = myReg(tt.id), pairs = isPairs(tt), cap = pairs ? slots * 2 : slots;
     const full = cap > 0 && main >= cap, pend = isAdmin() && isUpcoming(tt) ? pendingOf(tt.id).length : 0;
-    const st = tt.status === "played" ? ["done", t("played")] : !tt.s.reg_open ? ["planned", t("reg_closed")] : full ? ["res", t("reg_reserve")] : ["live", t("reg_open")];
+    const st = tt.status === "played" ? ["done", t("played")] : tt.status === "live" ? ["live", t("live")] : !tt.s.reg_open ? ["planned", t("reg_closed")] : full ? ["res", t("reg_reserve")] : ["live", t("reg_open")];
     return `<div class="tile t-tile ct" data-act="open-t" data-id="${tt.id}">
       <div class="ct-top"><span class="lvb ${letterClass(rangeLabel(tt.s)[0]==="≤"?rangeLabel(tt.s).slice(2):rangeLabel(tt.s))}">${esc(rangeLabel(tt.s))}</span><span class="t-status ${st[0]}"><i></i>${st[1]}</span></div>
       <div class="t-tile-name">${esc(tt.name)}</div>
@@ -221,6 +224,8 @@ setLang(detectLang(BOOT.tgLang));
     if (state.view.editT === tid && state._tf) return tournamentFormHtml(state._tf);
     const tt = byId(state.tournaments, tid); if (!tt) { state.view.t = null; return viewTournaments(); }
     if (state.view.editT === tid) return tournamentFormHtml(tt);
+    if (state.view.run === tid && state._run && canEdit()) return runSetupHtml(tt);
+    if (tt.status === "live" || (state.view.fix === tid && canEdit())) return liveHtml(tt, tt.status !== "live");
     const tGames = state.games.filter(g => g.tournamentId === tid && g.scoreA != null && g.scoreB != null);
     if (tGames.length) return tournamentResultsHtml(tt, tGames);
     const regs = regsOf(tid), main = regs.filter(r => r.status === "main"), res = regs.filter(r => r.status === "reserve");
@@ -283,6 +288,7 @@ setLang(detectLang(BOOT.tgLang));
         ? `<div class="card"><h3>${t("pairs_title")} <span class="tiny">· ${fullPairs}/${slots || teamNos(tt).length - 1}</span></h3><div class="pair-grid">${teamNos(tt).map(pairCard).join("")}</div></div>`
         : `<div class="card"><h3>${t("main_list")} <span class="tiny">· ${main.length}${slots ? "/" + slots : ""}</span></h3><div style="margin-top:6px;">${main.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>`}
       ${res.length || isAdmin() ? `<div class="card"><h3>${t("reserve_list")} <span class="tiny">· ${res.length}</span></h3><div style="margin-top:6px;">${res.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>` : ""}
+      ${canEdit() && tt.status !== "played" ? runCardHtml(tt) : ""}
       ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${state.players.filter(p => p.active && !regs.some(r => r.playerId === p.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(p => `<option value="${p.id}">${esc(p.name)} · ${letter(p.level)}</option>`).join("")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
         <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`;
   }
@@ -320,10 +326,11 @@ setLang(detectLang(BOOT.tgLang));
           <div class="pair right ${wb ? "winner" : ""}">${pl(g.teamB[0])}<small>${g.teamB[1] ? pl(g.teamB[1]) : ""}</small></div></div></div>`; };
     const medal = i => i === 0 ? "gold" : "";
     return `
-      <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${t("tournaments")}</button>${canEdit() ? `<button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button>` : ""}</div>
+      <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${t("tournaments")}</button>${canEdit() ? `<span style="display:flex;gap:6px;"><button class="btn sm" data-act="fix-open" data-id="${tid}">${t("fix_scores")}</button><button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button></span>` : ""}</div>
       <h2 class="t-title">${esc(tt.name)}</h2>
       <p class="tiny" style="margin:-4px 0 12px;">${dateFmt(tt.date, true)}${tt.s.time ? " · " + timeRange(tt.s) : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""} · ${t(tt.format)} · ${esc(rangeLabel(tt.s))}</p>
-      <div class="card"><h3>${t("standings")}</h3>
+      ${isTeamF(tt.format) && teamsOf(tt).length ? `<div class="card"><h3>${t("standings")}</h3>${standingsHtml(tt, tGames)}</div>` : ""}
+      <div class="card"><h3>${isTeamF(tt.format) && teamsOf(tt).length ? t("players") : t("standings")}</h3>
         <table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("players")}</th><th>${t("pts")}</th><th>W-L</th><th>${t("diff")}</th><th>Elo</th></tr>
         ${rows.map((r, i) => { const d = eloD(r.id); return `<tr><td><span class="pos-badge ${medal(i)}">${i + 1}</span></td>
           <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span></span></td>
@@ -333,6 +340,241 @@ setLang(detectLang(BOOT.tgLang));
       ${facts.length ? `<div class="card"><h3>${t("t_stats")}</h3><div class="facts">${facts.map(([k, who, sub]) => `<div class="fact"><div class="tiny">${k}</div><div class="fact-who">${who}</div><div class="fact-sub">${sub}</div></div>`).join("")}</div></div>` : ""}
       ${finished ? `<button class="rounds-toggle ${roundsOpen ? "open" : ""}" data-act="toggle-rounds" data-id="${tid}">${roundsOpen ? t("hide_rounds") : t("view_rounds", { n: rKeys.length })}<span class="chev">›</span></button>` : ""}
       ${roundsOpen ? rKeys.map(r => `<h3 style="margin:16px 0 8px;">${t("round").charAt(0).toUpperCase() + t("round").slice(1)} ${r}</h3>${byRound[r].sort((a, b) => (a.court || 0) - (b.court || 0)).map(match).join("")}`).join("") : ""}`;
+  }
+  // ---------- проведение турнира: старт, раунды, счёт, таблица наживо ----------
+  const TEAM_F = ["team_americano", "roundrobin", "playoff"], STEP_F = ["mexicano", "swiss"];
+  const isTeamF = f => TEAM_F.includes(f);
+  const scoredG = g => g.scoreA != null && g.scoreB != null;
+  const tGamesOf = tid => state.games.filter(g => g.tournamentId === tid);
+  const strengthFn = () => { const E = computeElo(); return id => ((E.ratings[id] ?? 2500) - 2500) / 50; };
+  const tRow = (tt, patch) => ({ id: tt.id, seq: tt.seq, name: tt.name, date: tt.date, status: tt.status, format: tt.format, courts: tt.courts, participantIds: tt.participantIds, teams: tt.teams, scoring: tt.scoring, rounds: tt.rounds, s: tt.s, ...patch });
+  const runPlayers = tid => regsOf(tid).filter(r => r.status === "main" && r.approval !== "pending").map(r => r.playerId);
+  const teamsOf = tt => (tt.teams || []).map(x => x.players || x).filter(x => Array.isArray(x) && x.length === 2);
+  const pairName = tm => `${pl(tm[0])} + ${pl(tm[1])}`;
+  const gameId = (tid, r, c) => `${tid}-r${r}-c${c}`;
+  // пары: как записались парами, остальных — «сильный + слабый»
+  function buildTeams(tt, ids, shuffle) {
+    const S = strengthFn(), used = new Set(), list = [];
+    if (isPairs(tt)) teamNos(tt).forEach(n => { const m = teamMembers(tt.id, n).filter(r => r.approval !== "pending" && ids.includes(r.playerId)); if (m.length === 2) { list.push(m.map(r => r.playerId)); m.forEach(r => used.add(r.playerId)); } });
+    const fromReg = list.length, rest = ids.filter(id => !used.has(id)), auto = balanceTeams(rest, S, shuffle);
+    const inT = new Set(auto.flat()); return { list: list.concat(auto), fromReg, left: rest.filter(id => !inT.has(id)) };
+  }
+  function runDefaultRounds(r, n) {
+    if (r.format === "americano") return defaultAmericanoRounds(n, r.courts);
+    if (r.format === "mexicano") return 6;
+    if (r.format === "swiss") return 5;
+    if (r.format === "playoff") return Math.round(Math.log2(Math.max(2, r.teams.list.length)));
+    return (roundRobinSchedule(r.teams.list, r.courts) || []).length;
+  }
+  function initRun(tt) {
+    const ids = runPlayers(tt.id), sc = tt.scoring || {};
+    const r = { tid: tt.id, format: tt.format || "americano", courts: tt.courts || 2, mode: sc.mode || "total", target: sc.target ?? 21, touched: false };
+    r.teams = buildTeams(tt, ids, false); r.rounds = runDefaultRounds(r, ids.length); return r;
+  }
+  function readRun() {
+    const r = state._run, g = id => document.getElementById(id); if (!r) return r;
+    if (g("runCourts")) r.courts = Math.max(1, Math.min(12, +g("runCourts").value || 1));
+    if (g("runRounds")) { const v = Math.max(1, Math.min(40, +g("runRounds").value || 1)); if (v !== r.rounds) r.touched = true; r.rounds = v; }
+    if (g("runTarget")) r.target = g("runTarget").value === "" ? null : Math.max(1, Math.min(99, +g("runTarget").value));
+    return r;
+  }
+  function runCheck(r, ids) {
+    if (isTeamF(r.format)) {
+      if (r.teams.list.length < 2) return t("run_need_pairs");
+      if (r.format === "playoff" && !isBracket(r.teams.list.length)) return t("run_need_bracket", { n: r.teams.list.length });
+    } else if (ids.length < 4) return t("run_need_n", { n: 4 });
+    return null;
+  }
+  function runSummary(r, ids) {
+    if (r.format === "playoff") { const n = r.teams.list.length; return isBracket(n) ? t("run_sum_playoff", { n, m: n }) : ""; }
+    if (isTeamF(r.format)) { const full = (roundRobinSchedule(r.teams.list, r.courts) || []).length; return t("run_sum_rr", { n: Math.min(r.rounds, full), full, m: r.teams.list.length * (r.teams.list.length - 1) / 2 }); }
+    const per = Math.min(Math.floor(ids.length / 4), r.courts), rest = ids.length - per * 4;
+    return t("run_sum_ind", { n: r.rounds, c: per }) + (rest > 0 ? " · " + t("run_sum_rest", { n: rest }) : "");
+  }
+  function runCardHtml(tt) {
+    const ids = runPlayers(tt.id), pend = pendingOf(tt.id).length;
+    return `<div class="card run-card"><h3>${t("run_title")}</h3><p class="tiny" style="margin:6px 0 10px;">${t("run_hint")}</p>
+      <div class="tiny" style="margin-bottom:10px;">${t("run_participants")}: <b>${ids.length}</b>${pend ? ` · <span class="pend-tag">${t("run_pending_excluded", { n: pend })}</span>` : ""}</div>
+      <button class="btn primary block" data-act="run-open" data-id="${tt.id}">${t("run_setup")} ▸</button></div>`;
+  }
+  function runSetupHtml(tt) {
+    const r = state._run, ids = runPlayers(tt.id), f = r.format, team = isTeamF(f), er = runCheck(r, ids), pend = pendingOf(tt.id).length;
+    const fmts = ["americano", "mexicano", "swiss", "team_americano", ...(f === "roundrobin" ? ["roundrobin"] : []), "playoff"];
+    const lv = id => letter((byId(state.players, id) || {}).level);
+    const fullRR = team && f !== "playoff" ? (roundRobinSchedule(r.teams.list, r.courts) || []).length : null;
+    const inp = (id, label, val, extra) => `<label class="field"><span class="lbl">${label}</span><input type="number" inputmode="numeric" id="${id}" value="${val ?? ""}" ${extra || ""}></label>`;
+    return `
+      <div class="section-head"><button class="btn ghost sm back" data-act="run-cancel">‹ ${t("cancel")}</button><h2 style="font-size:16px;">${t("run_title")}</h2></div>
+      <h2 class="t-title">${esc(tt.name)}</h2>
+      <div class="card">
+        <div class="field"><span class="lbl">${t("t_format")}</span><div class="wrap-tags">${fmts.map(x => `<span class="chip ${f === x ? "active" : ""}" data-act="run-format" data-val="${x}">${t(x)}</span>`).join("")}</div>
+          <p class="tiny" style="margin:8px 0 0;">${t("fmt_" + (f === "roundrobin" ? "team_americano" : f))}</p></div>
+      </div>
+      <div class="card"><h3>${t("run_participants")} <span class="tiny">· ${ids.length}</span></h3>
+        ${pend ? `<p class="tiny" style="margin:6px 0 0;"><span class="pend-tag">${t("run_pending_excluded", { n: pend })}</span></p>` : ""}
+        ${team ? `<div class="run-teams">${r.teams.list.map((tm, i) => `<div class="run-team"><span class="run-n">${i + 1}</span><span class="run-tn">${esc(pname(tm[0]))} <span class="tiny">${lv(tm[0])}</span> + ${esc(pname(tm[1]))} <span class="tiny">${lv(tm[1])}</span></span></div>`).join("")}</div>
+            ${r.teams.left.length ? `<p class="tiny warn-t">${t("run_left_out", { names: r.teams.left.map(pname).map(esc).join(", ") })}</p>` : ""}
+            <p class="tiny" style="margin:8px 0;">${r.teams.fromReg === r.teams.list.length ? t("run_teams_all_reg") : r.teams.fromReg ? t("run_teams_from_reg", { n: r.teams.fromReg }) : t("run_teams_auto")}</p>
+            ${r.teams.list.length - r.teams.fromReg > 1 ? `<button class="btn sm" data-act="run-shuffle">↻ ${t("run_shuffle")}</button>` : ""}`
+          : `<div class="chips-wrap" style="margin-top:8px;">${ids.map(id => `<span class="chip sm run-p">${esc(pname(id))} <b>${lv(id)}</b></span>`).join("")}</div>`}
+      </div>
+      <div class="card">
+        <div class="grid2">${inp("runCourts", t("t_courts"), r.courts, 'min="1" max="12"')}${f === "playoff" ? `<div></div>` : inp("runRounds", t("run_rounds"), r.rounds, `min="1" max="${fullRR || 40}"`)}</div>
+        <div class="field"><span class="lbl">${t("run_scoring")}</span><div class="wrap-tags">
+          <span class="chip ${r.mode === "total" ? "active" : ""}" data-act="run-mode" data-val="total">${t("run_total")}</span>
+          <span class="chip ${r.mode === "race" ? "active" : ""}" data-act="run-mode" data-val="race">${t("run_race")}</span></div></div>
+        ${inp("runTarget", t("run_target"), r.target, 'min="1" max="99"')}
+        <p class="tiny" style="margin:-6px 0 12px;">${r.mode === "total" ? t("run_total_hint", { n: r.target || 21, a: Math.ceil((r.target || 21) * 0.6), b: (r.target || 21) - Math.ceil((r.target || 21) * 0.6) }) : t("run_race_hint", { n: r.target || 6 })}</p>
+        <p class="run-sum">${er ? `<span class="warn-t">${er}</span>` : runSummary(r, ids)}</p>
+        <button class="btn primary block" data-act="run-start" ${er ? "disabled" : ""}>${t("run_start")}</button>
+        ${STEP_F.includes(f) ? `<p class="tiny" style="margin:8px 0 0;text-align:center;">${t("run_step_note")}</p>` : ""}
+      </div>`;
+  }
+  async function startRun() {
+    const r = readRun(), tt = byId(state.tournaments, r.tid), ids = runPlayers(tt.id), e0 = runCheck(r, ids); if (e0) { toast(e0); return; }
+    const S = strengthFn(), M = ([a, b]) => ({ teamA: a, teamB: b, label: null });
+    let rounds;
+    if (r.format === "americano") rounds = (americanoSchedule(ids, r.rounds, r.courts) || []).map(rd => rd.map(M));
+    else if (r.format === "mexicano") rounds = [mexicanoRound(ids, [], r.courts, S).map(M)];
+    else if (r.format === "swiss") rounds = [swissRound(ids, [], r.courts, S, 2).map(M)];
+    else if (r.format === "playoff") rounds = [playoffFirst(r.teams.list.slice().sort((a, b) => S(b[0]) + S(b[1]) - S(a[0]) - S(a[1])))];
+    else rounds = (roundRobinSchedule(r.teams.list, r.courts) || []).slice(0, r.rounds).map(rd => rd.map(M));
+    if (!rounds.length || !rounds[0] || !rounds[0].length) { toast(t("run_need_n", { n: 4 })); return; }
+    const games = []; rounds.forEach((rd, i) => rd.forEach((m, c) => games.push({ id: gameId(tt.id, i + 1, c + 1), tournamentId: tt.id, round: i + 1, court: c + 1, teamA: m.teamA, teamB: m.teamB, scoreA: null, scoreB: null, label: m.label })));
+    const team = isTeamF(r.format);
+    try {
+      await db.deleteGames(tGamesOf(tt.id).map(g => g.id));
+      await db.saveTournament(tRow(tt, { format: r.format, courts: r.courts, status: "live", participantIds: team ? r.teams.list.flat() : ids, teams: team ? r.teams.list.map((p, i) => ({ id: "tm" + (i + 1), players: p })) : [],
+        scoring: { mode: r.mode, target: r.target }, rounds: r.format === "playoff" ? null : (STEP_F.includes(r.format) ? r.rounds : rounds.length), s: { ...tt.s, reg_open: false, reg_was: !!tt.s.reg_open } }));
+      await db.saveGames(games); await db.addLog("Старт турніру: " + tt.name).catch(() => {});
+      state._run = null; state.view.run = null; state.view.liveTab = "m"; state.view.liveRound = null; window.scrollTo(0, 0); await reload(); toast(t("run_started"));
+    } catch (e) { err(e); }
+  }
+  // таблица: личная / по парам / места плей-офф
+  function standingsHtml(tt, games) {
+    const sg = games.filter(scoredG), E = computeElo(), tid = tt.id;
+    const teams = teamsOf(tt), diff = r => `${r.pts - r.pa >= 0 ? "+" : ""}${r.pts - r.pa}`;
+    if (isTeamF(tt.format) && teams.length) {
+      const rows = tt.format === "playoff" ? playoffPlaces(teams, sg) : teamTable(teams, sg);
+      return `<table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("team_col")}</th>${tt.format === "playoff" ? "" : `<th>${t("pts")}</th>`}<th>W-L</th><th>${t("diff")}</th></tr>
+        ${rows.map((r, i) => `<tr><td><span class="pos-badge ${i === 0 && (tt.format !== "playoff" || r.place === 1) ? "gold" : ""}">${tt.format === "playoff" ? (r.place || "–") : i + 1}</span></td><td class="lb-name team-cell">${pairName(r.players)}</td>${tt.format === "playoff" ? "" : `<td class="lb-elo">${r.pts}</td>`}<td>${r.w}-${r.l}${r.d ? "-" + r.d : ""}</td><td>${diff(r)}</td></tr>`).join("")}</table>`;
+    }
+    const ids = tt.participantIds && tt.participantIds.length ? tt.participantIds : [...new Set(games.flatMap(g => g.teamA.concat(g.teamB)))];
+    const eloD = id => (E.seq[id] || []).filter(x => x.g.tournamentId === tid).reduce((a, x) => a + x.d, 0);
+    return `<table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("players")}</th><th>${t("pts")}</th><th>W-L</th><th>${t("diff")}</th><th>Elo</th></tr>
+      ${playerTable(ids, sg).map((r, i) => { const d = eloD(r.id); return `<tr><td><span class="pos-badge ${i === 0 && r.pts ? "gold" : ""}">${i + 1}</span></td>
+        <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span></span></td>
+        <td class="lb-elo">${r.pts}</td><td>${r.w}-${r.l}${r.d ? "-" + r.d : ""}</td><td>${diff(r)}</td>
+        <td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${r.g ? (d >= 0 ? "+" : "") + Math.round(d) : "—"}</td></tr>`; }).join("")}</table>`;
+  }
+  function liveHtml(tt, fix) {
+    const tid = tt.id, games = tGamesOf(tid), edit = canEdit(), me = myPlayer(), sc = tt.scoring || {};
+    const maxR = games.length ? Math.max(...games.map(g => g.round)) : 0;
+    const byR = r => games.filter(g => g.round === r).sort((a, b) => (a.court || 0) - (b.court || 0));
+    const done = r => byR(r).length > 0 && byR(r).every(scoredG);
+    let firstOpen = maxR; for (let r = 1; r <= maxR; r++) if (!done(r)) { firstOpen = r; break; }
+    const cur = state.view.liveRound && state.view.liveRound <= maxR ? state.view.liveRound : firstOpen;
+    const tab = state.view.liveTab || "m";
+    const planned = STEP_F.includes(tt.format) ? Math.max(tt.rounds || 0, maxR) : tt.format === "playoff" ? Math.max(maxR, Math.round(Math.log2(Math.max(2, teamsOf(tt).length)))) : maxR;
+    const nScored = games.filter(scoredG).length;
+    const scLbl = sc.target ? t(sc.mode === "race" ? "sc_race" : "sc_total", { n: sc.target }) : "";
+    const lbl = g => g.label ? `<b class="po-lbl">${t("po_" + g.label)}</b> · ` : "";
+    const match = g => { const wa = scoredG(g) && g.scoreA > g.scoreB, wb = scoredG(g) && g.scoreB > g.scoreA, mine = me && g.teamA.concat(g.teamB).includes(me.id);
+      const inp = s => `<input class="sc-in" type="number" inputmode="numeric" pattern="[0-9]*" min="0" max="99" data-gid="${g.id}" data-side="${s}" value="${(s === "A" ? g.scoreA : g.scoreB) ?? ""}" aria-label="${t("score")}">`;
+      const box = v => `<span class="sbox">${v ?? "–"}</span>`;
+      return `<div class="match live-m ${mine ? "mine" : ""} ${scoredG(g) ? "is-done" : ""}" data-gid="${g.id}">
+        <div class="court-lbl">${lbl(g)}${t("court")} ${g.court || "—"}${mine ? ` · <b class="your-m">${t("your_match")}</b>` : ""}</div>
+        <div class="mrow"><div class="pair ${wa ? "winner" : ""}">${pl(g.teamA[0])}<small>${pl(g.teamA[1])}</small></div>
+          <div class="score">${edit ? inp("A") : box(g.scoreA)}<span class="colon">:</span>${edit ? inp("B") : box(g.scoreB)}</div>
+          <div class="pair right ${wb ? "winner" : ""}">${pl(g.teamB[0])}<small>${pl(g.teamB[1])}</small></div></div></div>`; };
+    const inRound = new Set(byR(cur).flatMap(g => g.teamA.concat(g.teamB)));
+    const resting = (isTeamF(tt.format) ? teamsOf(tt).filter(tm => !inRound.has(tm[0])).map(tm => esc(pname(tm[0])) + " + " + esc(pname(tm[1]))) : (tt.participantIds || []).filter(id => !inRound.has(id)).map(id => esc(pname(id))));
+    const chips = Array.from({ length: Math.max(planned, maxR) }, (_, i) => i + 1).map(r => r <= maxR
+      ? `<span class="chip sm rnd-chip ${r === cur ? "active" : ""} ${done(r) ? "done" : ""}" data-act="live-round" data-val="${r}">${r}${done(r) ? " ✓" : ""}</span>`
+      : `<span class="chip sm rnd-chip future">${r}</span>`).join("");
+    let controls = "";
+    if (edit && !fix) {
+      if (STEP_F.includes(tt.format)) {
+        const lastEmpty = maxR > 1 && byR(maxR).every(g => !scoredG(g));
+        controls = done(maxR)
+          ? `<button class="btn primary block" data-act="live-next" data-id="${tid}">${maxR < planned ? t("next_round", { n: maxR + 1 }) : t("extra_round")}</button>`
+          : `<p class="tiny" style="text-align:center;margin:4px 0;">${t("fill_round_first", { n: maxR })}${maxR < planned ? " · " + t("then_next", { n: maxR + 1 }) : ""}</p>`;
+        if (lastEmpty) controls += `<button class="btn ghost sm danger block" style="margin-top:8px;" data-act="live-remove" data-id="${tid}">${t("remove_round", { n: maxR })}</button>`;
+      } else if (tt.format === "playoff" && !done(maxR)) controls = `<p class="tiny" style="text-align:center;margin:4px 0;">${t("po_auto")}</p>`;
+    }
+    const allDone = games.length && games.every(scoredG);
+    const finishCard = edit ? (fix
+      ? `<div class="card"><button class="btn primary block" data-act="fix-done">${t("fix_done")}</button></div>`
+      : `<div class="card live-end"><div class="row"><span class="tiny">${t("scored_n", { a: nScored, b: games.length })}</span>${nScored ? "" : `<button class="btn ghost sm danger" data-act="live-cancel" data-id="${tid}">${t("cancel_start")}</button>`}</div>
+          <button class="btn ${allDone && (!STEP_F.includes(tt.format) || maxR >= planned) ? "primary" : ""} block" style="margin-top:10px;" data-act="live-finish" data-id="${tid}">🏁 ${t("finish_t")}</button></div>`) : "";
+    return `
+      <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${t("tournaments")}</button>${edit && !fix ? `<button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button>` : ""}</div>
+      <div class="live-head"><h2 class="t-title">${esc(tt.name)}</h2>${fix ? `<span class="t-status planned">✎ ${t("fix_scores_short")}</span>` : `<span class="t-status live"><i></i>${t("live")}</span>`}</div>
+      <p class="tiny" style="margin:-4px 0 12px;">${t(tt.format)}${scLbl ? " · " + scLbl : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""}${tt.s.time ? " · " + timeRange(tt.s) : ""}</p>
+      <div class="seg live-tabs"><button class="${tab === "m" ? "active" : ""}" data-act="live-tab" data-val="m">${t("live_matches")}</button><button class="${tab === "t" ? "active" : ""}" data-act="live-tab" data-val="t">${t("live_table")}</button></div>
+      ${tab === "t" ? `<div class="card"><h3>${t("standings")}</h3>${nScored ? "" : `<p class="tiny">${t("no_scores_yet")}</p>`}${standingsHtml(tt, games)}</div>` : `
+        <div class="chips-scroll rnd-chips">${chips}</div>
+        <h3 class="sub-h" style="margin-top:6px;">${t("round_n", { n: cur })}${planned > 1 ? ` <span class="tiny">/ ${planned}</span>` : ""}</h3>
+        ${edit && !fix && cur === firstOpen && nScored === 0 ? `<p class="tiny" style="margin:0 0 10px;">${t("live_hint_admin")}</p>` : ""}
+        ${byR(cur).map(match).join("")}
+        ${resting.length ? `<p class="tiny rest-line">💤 ${t("rest")}: ${resting.join(", ")}</p>` : ""}
+        ${controls ? `<div style="margin:12px 0;">${controls}</div>` : ""}`}
+      ${finishCard}`;
+  }
+  // сохранение счёта матча (читаем оба поля карточки)
+  async function saveScoreFrom(box) {
+    const g = byId(state.games, box.dataset.gid); if (!g) return;
+    const [ia, ib] = ["A", "B"].map(s => box.querySelector(`input.sc-in[data-side="${s}"]`));
+    const num = x => x.value === "" ? null : Math.max(0, Math.min(99, Math.round(+x.value)));
+    const a = num(ia), b = num(ib);
+    if ((a == null) !== (b == null)) return; // ждём второе число
+    if (a === g.scoreA && b === g.scoreB) return;
+    const tt = byId(state.tournaments, g.tournamentId);
+    if (tt.format === "playoff" && a != null && a === b) { toast(t("need_winner")); return; }
+    const wasDone = tGamesOf(tt.id).filter(x => x.round === g.round).every(scoredG);
+    g.scoreA = a; g.scoreB = b;
+    box.classList.toggle("is-done", a != null);
+    const [pa, pb] = box.querySelectorAll(".pair"); pa.classList.toggle("winner", a != null && a > b); pb.classList.toggle("winner", a != null && b > a);
+    try { await db.saveScore(g.id, a, b); } catch (e) { err(e); return; }
+    if (tt.format === "playoff") { try { await playoffAdvance(tt); } catch (e) { err(e); } }
+    const nowDone = tGamesOf(tt.id).filter(x => x.round === g.round).every(scoredG);
+    if (nowDone && !wasDone) { if (state.view.liveRound === g.round) state.view.liveRound = null; toast(t("round_done", { n: g.round })); }
+    if (isField(document.activeElement)) pendingLive = true; else render();
+  }
+  async function playoffAdvance(tt) {
+    const gs = tGamesOf(tt.id), maxR = Math.max(...gs.map(g => g.round)), upd = [];
+    for (let r = 1; r <= maxR; r++) {
+      const nx = playoffNext(gs.filter(g => g.round <= r)); if (!nx) continue;
+      const ex = gs.filter(g => g.round === r + 1).sort((a, b) => a.court - b.court);
+      if (!ex.length) nx.forEach((m, i) => { const g = { id: gameId(tt.id, r + 1, i + 1), tournamentId: tt.id, round: r + 1, court: i + 1, teamA: m.teamA, teamB: m.teamB, scoreA: null, scoreB: null, label: m.label }; upd.push(g); gs.push(g); state.games.push(g); });
+      else if (ex.every(g => !scoredG(g))) nx.forEach((m, i) => { const g = ex[i]; if (g && (g.teamA.join() !== m.teamA.join() || g.teamB.join() !== m.teamB.join())) { g.teamA = m.teamA; g.teamB = m.teamB; upd.push(g); } });
+    }
+    if (upd.length) { await db.saveGames(upd); toast(t("po_next_ready")); }
+  }
+  async function nextRound(tid) {
+    const tt = byId(state.tournaments, tid), gs = tGamesOf(tid), maxR = gs.length ? Math.max(...gs.map(g => g.round)) : 0;
+    if (gs.some(g => g.round === maxR && !scoredG(g))) { toast(t("fill_round_first", { n: maxR })); return; }
+    const S = strengthFn(), ids = tt.participantIds || [], courts = tt.courts || 2;
+    const ms = tt.format === "mexicano" ? mexicanoRound(ids, gs, courts, S) : swissRound(ids, gs, courts, S, 2);
+    if (!ms || !ms.length) return;
+    const r = maxR + 1, rows = ms.map(([a, b], i) => ({ id: gameId(tid, r, i + 1), tournamentId: tid, round: r, court: i + 1, teamA: a, teamB: b, scoreA: null, scoreB: null, label: null }));
+    try { await db.saveGames(rows); if (r > (tt.rounds || 0)) await db.saveTournament(tRow(tt, { rounds: r })); state.view.liveRound = null; await reload(); toast(t("round_ready", { n: r })); } catch (e) { err(e); }
+  }
+  async function removeLastRound(tid) {
+    const gs = tGamesOf(tid), maxR = Math.max(...gs.map(g => g.round)), last = gs.filter(g => g.round === maxR);
+    if (last.some(scoredG)) return;
+    try { await db.deleteGames(last.map(g => g.id)); state.view.liveRound = null; await reload(); } catch (e) { err(e); }
+  }
+  async function finishRun(tid) {
+    const tt = byId(state.tournaments, tid), gs = tGamesOf(tid), open = gs.filter(g => !scoredG(g));
+    if (open.length === gs.length) { toast(t("no_scores_yet")); return; }
+    if (!(await ask(open.length ? t("finish_confirm_open", { n: open.length }) : t("finish_confirm")))) return;
+    try { await db.deleteGames(open.map(g => g.id)); await db.saveTournament(tRow(tt, { status: "played" })); await db.addLog("Завершив турнір: " + tt.name).catch(() => {});
+      state.view.liveRound = null; state.view.roundsOpen = null; window.scrollTo(0, 0); await reload(); toast(t("finished_toast")); } catch (e) { err(e); }
+  }
+  async function cancelRun(tid) {
+    const tt = byId(state.tournaments, tid); if (!(await ask(t("cancel_start_confirm")))) return;
+    try { await db.deleteGames(tGamesOf(tid).map(g => g.id)); await db.saveTournament(tRow(tt, { status: "scheduled", s: { ...tt.s, reg_open: tt.s.reg_was ?? tt.s.reg_open } })); state.view.liveRound = null; await reload(); } catch (e) { err(e); }
   }
   function tournamentFormHtml(tt) {
     const f = state._tf || (state._tf = { id: tt.id, name: tt.name || "", date: tt.date || "", format: tt.format || "americano", courts: tt.courts || 2, status: tt.status || "scheduled", s: { reg_open: true, ...tt.s } });
@@ -349,7 +591,7 @@ setLang(detectLang(BOOT.tgLang));
         <div class="field"><span class="lbl">${t("t_format")}</span><div class="wrap-tags">${fmts.map(x => `<span class="chip ${f.format===x?'active':''}" data-act="tf-format" data-val="${x}">${t(x)}</span>`).join("")}</div></div>
         <label class="row tf-toggle"><span>${t("t_pairs_mode")}<br><span class="tiny">${t("t_pairs_hint")}</span></span><input type="checkbox" id="tfPairs" data-act="tf-pairs" ${s.pairs ? "checked" : ""}></label>
         <div class="grid3">${inp("tfCourts", t("t_courts"), f.courts, "number", 'min="1" max="12"')}${inp("tfSlots", s.pairs ? t("t_pairs") : t("t_slots"), s.slots, "number", 'min="0" max="64"')}${inp("tfPrice", t("t_price"), s.price, "number", 'min="0"')}</div>
-        <div class="grid2">${inp("tfMin", t("t_level_min"), s.level_min, "number", 'min="0" max="7" step="0.001" inputmode="decimal"')}${inp("tfMax", t("t_level_max"), s.level_max, "number", 'min="0" max="7" step="0.001" inputmode="decimal"')}</div>
+        <div class="grid2">${inp("tfMin", t("t_level_min"), s.level_min, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}${inp("tfMax", t("t_level_max"), s.level_max, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}</div>
         <p class="tiny" style="margin:-6px 0 12px;">${t("level_range")}: <b>${esc(rangeLabel(s))}</b></p>
         ${inp("tfContact", t("t_contact"), s.contact, "url", 'placeholder="https://t.me/…"')}
         <label class="field"><span class="lbl">${t("t_note")}</span><textarea id="tfNote" rows="3">${esc(s.note || "")}</textarea></label>
@@ -370,7 +612,8 @@ setLang(detectLang(BOOT.tgLang));
   }
   async function saveTf() {
     const f = readTf(); if (!f.name) { toast(t("t_name") + "?"); return; }
-    try { await db.saveTournament({ id: f.id, seq: f.seq || Date.now() % 1e9, name: f.name, date: f.date, status: f.status, format: f.format, courts: f.courts, s: f.s }); state._tf = null; state.view.editT = null; state.view.t = f.id; await reload(); toast(t("saved")); } catch (e) { err(e); }
+    try { const old = byId(state.tournaments, f.id) || {};
+      await db.saveTournament({ id: f.id, seq: f.seq || old.seq || Date.now() % 1e9, name: f.name, date: f.date, status: f.status, format: f.format, courts: f.courts, s: f.s, participantIds: old.participantIds, teams: old.teams, scoring: old.scoring, rounds: old.rounds }); state._tf = null; state.view.editT = null; state.view.t = f.id; await reload(); toast(t("saved")); } catch (e) { err(e); }
   }
 
   // ---------- рейтинг ----------
@@ -611,7 +854,7 @@ setLang(detectLang(BOOT.tgLang));
         <div style="margin-top:8px;">${rows.map(p => `<div class="adm-row ${p.active?'':'off'}">
           <div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 34)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("src_"+((p.contacts||{}).level_source||"self"))}${(p.contacts||{}).quiz_elo != null ? " " + p.contacts.quiz_elo : ""} · Elo ${Math.round(E.ratings[p.id])} · ${E.tcount[p.id]} ${t("tournaments_played")}</span></span></div>
           <div class="adm-ctl">
-            <label>${t("level_value")}<input type="number" step="0.001" min="0" max="7" data-act="adm-level" data-id="${p.id}" value="${p.level ?? ""}"></label>
+            <label>${t("level_value")}<input type="text" inputmode="decimal" autocomplete="off" class="dec-in" data-act="adm-level" data-id="${p.id}" value="${p.level ?? ""}"></label>
             <label>${t("start_elo")}<input type="number" step="10" data-act="adm-elo" data-id="${p.id}" value="${p.eloStart}"></label>
             <button class="btn sm ${p.confirmed?'primary':''}" data-act="adm-confirm" data-id="${p.id}">${p.confirmed ? "✓" : t("confirm")}</button>
             <button class="btn sm ghost" data-act="adm-active" data-id="${p.id}">${p.active ? "⏸" : "▶"}</button>
@@ -627,7 +870,7 @@ setLang(detectLang(BOOT.tgLang));
           <div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 40)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("src_" + src)} · ${nick ? (appLink(nick) ? `<button class="rv-link" data-act="open-link" data-url="${esc(appLink(nick))}">${t("open_profile")} ↗</button>` : `<b class="rv-nick">${esc(nick)}</b>`) : "—"}${c.level_raw ? ` · ${t("rv_raw")}: <b>${esc(c.level_raw)}</b>` : ""}</span></span></div>
           <div class="rv-claim">${levelBadge(p.levelClaim, "big")}<div><div class="tiny">${t("rv_claimed")}</div><div class="ob-elo">${fmtLv(p.levelClaim)} · ${letter(p.levelClaim)} · ${levelElo(p.levelClaim)}</div></div></div>
           <div class="rv-actions">
-            <label>${t("level_value")}<input type="number" step="0.001" min="0" max="7" inputmode="decimal" id="rv_${p.id}" value="${p.levelClaim ?? ""}"></label>
+            <label>${t("level_value")}<input type="text" inputmode="decimal" autocomplete="off" class="dec-in" id="rv_${p.id}" value="${p.levelClaim ?? ""}"></label>
             <button class="btn sm primary" data-act="rv-approve" data-id="${p.id}">✓ ${t("rv_approve")}</button>
             <button class="btn sm" data-act="rv-quiz" data-id="${p.id}">${t("rv_ask_quiz")}</button>
             ${isAdmin() ? `<button class="btn sm ghost danger" data-act="adm-reset" data-id="${p.id}">↺ ${t("reset_short")}</button>` : ""}
@@ -709,9 +952,9 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "quiz-back") on(() => { const d = state._onb; if (d.step > 0) d.step--; else if (d.retest) state._onb = null; else d.step = null; render(); });
       else if (a === "retest-start") on(() => { state._onb = { retest: true, source: "quiz", step: 0, answers: [], name: "", ig: "" }; window.scrollTo(0, 0); render(); });
 
-      else if (a === "open-t") on(() => { state.view.t = id; window.scrollTo(0, 0); render(); });
+      else if (a === "open-t") on(() => { state.view.t = id; state.view.liveRound = null; state.view.liveTab = "m"; window.scrollTo(0, 0); render(); });
       else if (a === "open-t-tab") on(() => { state.tab = "tournaments"; state.view.t = id; state.view.pid = null; window.scrollTo(0, 0); render(); });
-      else if (a === "t-back") on(() => { state.view.t = null; render(); });
+      else if (a === "t-back") on(() => { state.view.t = null; state.view.fix = null; state.view.run = null; state.view.liveRound = null; render(); });
       else if (a === "new-t") on(() => { const nid = uid(); state._tf = { id: nid, isNew: true, name: "", date: today(), format: "americano", courts: 2, status: "scheduled", s: { reg_open: true, slots: 8, approval: true } }; state.view.t = nid; state.view.editT = nid; render(); });
       else if (a === "edit-t") on(() => { state._tf = null; state.view.editT = id; render(); });
       else if (a === "tf-format") on(() => { const f = readTf(), was = f.format; f.format = el.dataset.val; if (f.format === "team_americano") f.s.pairs = true; else if (was === "team_americano") f.s.pairs = false; render(); });
@@ -735,6 +978,20 @@ setLang(detectLang(BOOT.tgLang));
         const team = ts ? (ts.value ? +ts.value : null) : null; try { await db.addRegistration(id, sel.value, ts && !ts.value ? "reserve" : "main", team); await reload(); } catch (e) { err(e); } });
       else if (a === "p-edit-contacts") on(() => { state._pf = null; state.view.editP = id; render(); const f = document.getElementById("pfContacts"); if (f) f.scrollIntoView({ block: "start", behavior: "smooth" }); const i = document.getElementById("pfc_phone"); if (i) i.focus({ preventScroll: true }); });
       else if (a === "lv-step") on(() => { keepPf(); const pf = state._pf; pf.level = Math.round((pf.level + +el.dataset.val) * 10) / 10; render(); });
+      else if (a === "run-open") on(() => { const tt = byId(state.tournaments, id); state._run = initRun(tt); state.view.run = id; window.scrollTo(0, 0); render(); });
+      else if (a === "run-cancel") on(() => { state._run = null; state.view.run = null; render(); });
+      else if (a === "run-format") on(() => { const r = readRun(), tt = byId(state.tournaments, r.tid); r.format = el.dataset.val; r.teams = buildTeams(tt, runPlayers(tt.id), false); r.touched = false; r.rounds = runDefaultRounds(r, runPlayers(tt.id).length); render(); });
+      else if (a === "run-mode") on(() => { const r = readRun(); r.mode = el.dataset.val; if (r.mode === "race" && (r.target == null || r.target > 15)) r.target = 6; if (r.mode === "total" && (r.target == null || r.target < 10)) r.target = 21; render(); });
+      else if (a === "run-shuffle") on(() => { const r = readRun(), tt = byId(state.tournaments, r.tid); r.teams = buildTeams(tt, runPlayers(tt.id), true); render(); });
+      else if (a === "run-start") on(async () => { el.disabled = true; await startRun(); el.disabled = false; });
+      else if (a === "live-tab") on(() => { state.view.liveTab = el.dataset.val; render(); });
+      else if (a === "live-round") on(() => { state.view.liveRound = +el.dataset.val; render(); });
+      else if (a === "live-next") on(async () => { el.disabled = true; await nextRound(id); });
+      else if (a === "live-remove") on(() => removeLastRound(id));
+      else if (a === "live-finish") on(() => finishRun(id));
+      else if (a === "live-cancel") on(() => cancelRun(id));
+      else if (a === "fix-open") on(() => { state.view.fix = id; state.view.liveTab = "m"; state.view.liveRound = 1; window.scrollTo(0, 0); render(); });
+      else if (a === "fix-done") on(() => { state.view.fix = null; state.view.liveRound = null; window.scrollTo(0, 0); render(); });
       else if (a === "toggle-rounds") on(() => { state.view.roundsOpen = state.view.roundsOpen === id ? null : id; render(); });
       else if (a === "toggle-ach") on(() => { state.view.achOpen = state.view.achOpen === id ? null : id; render(); });
       else if (a === "mh-all") on(() => { state.view.mhAll = state.view.mhAll === id ? null : id; render(); });
@@ -771,19 +1028,34 @@ setLang(detectLang(BOOT.tgLang));
     const keepOnb = () => { const n = document.getElementById("obName"), l = document.getElementById("obLevel"), i = document.getElementById("obIg"), k = document.getElementById("obNick"); if (n) state._onb.name = n.value; if (l) state._onb.level = l.value; if (i) state._onb.ig = i.value; if (k) state._onb.nick = k.value; };
     // ввод в анкете: страницу не перерисовываем (иначе курсор прыгает в начало) — обновляем только превью и кнопку
     ["obName", "obLevel", "obIg", "obNick"].forEach(id => { const el = document.getElementById(id); if (el) el.oninput = () => {
+      if (el.classList.contains("dec-in")) decFix(el);
       keepOnb(); const d = state._onb, lv = toRaketo(d.source, d.level), ok = lv != null && lv >= 0 && lv <= 7;
       const pv = v.querySelector(".ob-preview");
       if (pv && id === "obLevel") { pv.classList.toggle("dim", !ok); pv.innerHTML = `${levelBadge(ok ? lv : null, "big")}<div><div class="tiny">${d.source === "raketo" ? "" : t("as_raketo") + " · "}${t("letter")} · ${t("start_elo")}</div><div class="ob-elo">${ok ? (d.source === "raketo" ? "" : fmtLv(lv) + " · ") + letter(lv) + " · " + levelElo(lv) : "—"}</div></div>`; }
       const b = v.querySelector('[data-act="ob-save"]'); if (b) b.disabled = d.name.trim().length < 2 || !ok || (d.source !== "quiz" && !(d.nick || "").trim());
     }; });
     const keepPf = () => { const n = document.getElementById("pfName"), b = document.getElementById("pfBio"); if (state._pf && n) { state._pf.name = n.value; state._pf.bio = b.value; CONTACTS.forEach(([k]) => { const el = document.getElementById("pfc_" + k); if (el) state._pf.c[k] = el.value; }); } };
+    // дробные поля — обычный текст с цифровой клавиатурой: в Telegram на Android/iPhone поле type=number не принимает точку
+    // (или запятую), если в системе другой десятичный разделитель. Запятую превращаем в точку, лишнее убираем.
+    v.querySelectorAll("input.dec-in").forEach(inp => inp.addEventListener("input", () => decFix(inp), true));
     v.querySelectorAll(".ok-wrap input").forEach(inp => { inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); const b = inp.parentElement.querySelector(".ok-btn"); if (b) b.click(); } }; });
     const pfPhoto = document.getElementById("pfPhoto"); if (pfPhoto) pfPhoto.onchange = async () => { const f = pfPhoto.files && pfPhoto.files[0]; if (!f) return; try { keepPf(); state._pf.avatar = await readAvatarFile(f); render(); } catch (e) { err(e); } };
     const q = document.getElementById("admQ"); if (q) q.oninput = () => { state.view.q = q.value; render(); const e2 = document.getElementById("admQ"); e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length); };
     const ls = document.getElementById("langSel"); if (ls) ls.onchange = () => { setLang(ls.value); document.documentElement.lang = ls.value; render(); };
+    // счёт: при «сумме очков» второе число подставляется само; сохраняем, когда поле теряет фокус или Enter
+    v.querySelectorAll("input.sc-in").forEach(inp => {
+      const box = inp.closest(".match"), other = () => box.querySelector(`input.sc-in[data-side="${inp.dataset.side === "A" ? "B" : "A"}"]`);
+      inp.oninput = () => { const g = byId(state.games, inp.dataset.gid), tt = g && byId(state.tournaments, g.tournamentId), sc = (tt && tt.scoring) || {};
+        delete inp.dataset.auto; if (sc.mode !== "total" || !sc.target || inp.value === "") return; const o = other();
+        if (o.value === "" || o.dataset.auto) { const val = sc.target - Math.round(+inp.value); if (val >= 0) { o.value = val; o.dataset.auto = "1"; } } };
+      inp.onchange = () => saveScoreFrom(box);
+      inp.onkeydown = e => { if (e.key !== "Enter") return; e.preventDefault(); const all = [...v.querySelectorAll("input.sc-in")], i = all.indexOf(inp);
+        const nx = all.slice(i + 1).find(x => x.value === "" && x.dataset.side === "A") || all.slice(i + 1).find(x => x.value === ""); if (nx) nx.focus(); else inp.blur(); };
+    });
+    ["runCourts", "runRounds", "runTarget"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { const r = readRun(); if (id === "runCourts" && !r.touched) { const tt = byId(state.tournaments, r.tid); r.rounds = runDefaultRounds(r, runPlayers(tt.id).length); } render(); }; });
     ["tfName","tfDate","tfTime","tfTimeEnd","tfPlace","tfCourts","tfSlots","tfPrice","tfMin","tfMax","tfContact","tfNote"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { readTf(); if (id === "tfMin" || id === "tfMax") render(); }; });
   }
-  document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; state.view.t = null; state.view.editT = null; state.view.pid = null; state.view.editP = null; window.scrollTo(0, 0); render(); });
+  document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; state.view.t = null; state.view.editT = null; state.view.run = null; state.view.fix = null; state.view.pid = null; state.view.editP = null; window.scrollTo(0, 0); render(); });
   const hb = homeBtnEl(); if (hb) { hb.onclick = addToHome; hb.title = t("home_add_long"); const hl = hb.querySelector(".home-lbl"); if (hl) hl.textContent = t("home_btn"); }
   const lo = document.getElementById("logoutBtn"); if (lo) lo.onclick = async () => { await db.signOut(); location.reload(); };
   const who = document.getElementById("whoami"); if (who) who.textContent = (myPlayer() && myPlayer().name) || U.name || "";

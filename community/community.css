@@ -206,3 +206,29 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
   font: 800 11px/1 "Manrope", sans-serif; color: #fff; background: #FF3B30; border: 2px solid #0A0A0B; box-shadow: 0 2px 8px rgba(255,59,48,.45); }
 .nav-badge { position: absolute; top: 0; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
   font: 800 10.5px/1 "Manrope", sans-serif; color: #fff; background: #FF3B30; border: 2px solid #0C0C0E; pointer-events: none; }
+
+/* ---------- проведение турнира ---------- */
+.run-card { border-color: rgba(255,122,26,.35); background: linear-gradient(150deg, rgba(255,122,26,.10), rgba(255,255,255,.02)); }
+.run-teams { display: grid; gap: 6px; margin-top: 10px; }
+.run-team { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: rgba(255,255,255,.02); font-size: 14px; }
+.run-n { flex: none; width: 24px; height: 24px; border-radius: 50%; background: rgba(255,122,26,.16); color: var(--court); display: inline-flex; align-items: center; justify-content: center; font: 700 12px "Unbounded", sans-serif; }
+.run-tn { min-width: 0; line-height: 1.35; }
+.run-p b { color: var(--court); font-weight: 700; }
+.warn-t { color: #FFC94D; }
+.run-sum { margin: 4px 0 12px; font-size: 14px; font-weight: 600; text-align: center; color: var(--ink-2); }
+.live-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.live-head .t-title { margin-bottom: 8px; }
+.live-tabs { margin: 0 0 12px; }
+.rnd-chips { margin-top: 0; }
+.rnd-chip { min-width: 38px; justify-content: center; }
+.rnd-chip.done:not(.active) { color: #4ADE80; border-color: rgba(74,222,128,.35); }
+.rnd-chip.future { opacity: .35; cursor: default; }
+.live-m.is-done { border-color: rgba(74,222,128,.22); }
+.live-m.mine { border-color: #FF7A1A; box-shadow: 0 0 18px rgba(255,122,26,.18); }
+.your-m { color: var(--court); }
+.po-lbl { color: var(--court); text-transform: uppercase; letter-spacing: .04em; }
+.rest-line { margin: 4px 2px 0; }
+.live-end .row { justify-content: space-between; align-items: center; }
+.team-cell { white-space: normal !important; font-size: 13.5px; line-height: 1.35; }
+.match .score input.sc-in { font-size: 19px; }
+.match .score input.sc-in:focus { border-color: var(--court); box-shadow: 0 0 0 3px rgba(255,122,26,.25); }

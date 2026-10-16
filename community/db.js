@@ -92,6 +92,11 @@ export function createDb(cfg) {
     if (t.money) row.money = t.money;
     const { error } = await sb.from("tournaments").upsert(row, { onConflict: "league_id,id" }); if (error) throw error;
   }
+  // ---------- проведение турнира: матчи ----------
+  const gameRow = g => ({ id: g.id, league_id: L, tournament_id: g.tournamentId, round: g.round, court: g.court ?? null, team_a: g.teamA, team_b: g.teamB, score_a: g.scoreA ?? null, score_b: g.scoreB ?? null, label: g.label || null });
+  async function saveGames(games) { if (!games.length) return; await ensureSession(); const { error } = await sb.from("games").upsert(games.map(gameRow), { onConflict: "league_id,id" }); if (error) throw error; }
+  async function saveScore(gid, a, b) { await ensureSession(); const { error } = await sb.from("games").update({ score_a: a, score_b: b }).eq("league_id", L).eq("id", gid); if (error) throw error; }
+  async function deleteGames(ids) { if (!ids.length) return; await ensureSession(); const { error } = await sb.from("games").delete().eq("league_id", L).in("id", ids); if (error) throw error; }
   async function deleteTournament(tid) { await ensureSession(); const { error } = await sb.from("tournaments").delete().eq("league_id", L).eq("id", tid); if (error) throw error; }
   async function setRegistration(tid, pid, patch) { await ensureSession(); const { error } = await sb.from("registrations").update(patch).eq("league_id", L).eq("tournament_id", tid).eq("player_id", pid); if (error) throw error; }
   async function removeRegistration(tid, pid) { await ensureSession(); const { error } = await sb.from("registrations").delete().eq("league_id", L).eq("tournament_id", tid).eq("player_id", pid); if (error) throw error; }
@@ -122,5 +127,5 @@ export function createDb(cfg) {
 
   return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinOpen, loadAll,
     createMyPlayer, updateMyCard, adjustMyLevel, reviewLevel, submitQuiz, register, unregister, reviewRegistration, resetPlayer, adminMembers, promoteReserve, setDisplayName,
-    saveTournament, deleteTournament, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, listMembers, setMemberRole, profileNames, subscribe };
+    saveTournament, deleteTournament, saveGames, saveScore, deleteGames, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, listMembers, setMemberRole, profileNames, subscribe };
 }
