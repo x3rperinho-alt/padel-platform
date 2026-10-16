@@ -34,7 +34,12 @@ setLang(detectLang(BOOT.tgLang));
     try { tgApp.onEvent("homeScreenAdded", () => { hideHome(); toast(t("home_added")); }); } catch (e) {}
   } else window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); pwaPrompt = e; showHome("pwa"); });
   async function addToHome() {
-    if (homeMode === "tg") { try { tgApp.addToHomeScreen(); } catch (e) { err(e); } }
+    if (homeMode === "tg") {
+      const go = () => { try { tgApp.addToHomeScreen(); } catch (e) { err(e); } };
+      // на iPhone Telegram открывает свою страницу в Safari, а там кнопка «Поделиться» спрятана в «⋯» — подсказываем заранее
+      if (tgApp.platform === "ios" && tgApp.showPopup) { try { tgApp.showPopup({ title: t("home_add_long"), message: t("home_ios_hint"), buttons: [{ id: "go", type: "default", text: t("home_ios_ok") }, { type: "cancel" }] }, id => { if (id === "go") go(); }); return; } catch (e) {} }
+      go();
+    }
     else if (homeMode === "pwa" && pwaPrompt) { pwaPrompt.prompt(); try { const r = await pwaPrompt.userChoice; if (r.outcome === "accepted") { hideHome(); toast(t("home_added")); } } catch (e) {} }
   }
 
