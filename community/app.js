@@ -104,8 +104,16 @@ setLang(detectLang(BOOT.tgLang));
   const decFix = inp => { const cur = inp.value; let x = cur.replace(/,/g, ".").replace(/[^0-9.]/g, ""); const i = x.indexOf("."); if (i >= 0) x = x.slice(0, i + 1) + x.slice(i + 1).replace(/\./g, "");
     if (x !== cur) { const pos = inp.selectionStart; inp.value = x; try { inp.setSelectionRange(Math.min(pos, x.length), Math.min(pos, x.length)); } catch (e) {} } };
   const isField = el => !!el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !["checkbox", "radio", "file", "button", "submit"].includes(el.type)));
-  // подтверждение: в Telegram — родное окно, в браузере — обычный confirm
-  const ask = msg => new Promise(res => { const tg = window.Telegram && window.Telegram.WebApp; if (tg && tg.showConfirm && tg.initData) { try { tg.showConfirm(msg, ok => res(!!ok)); return; } catch (e) {} } res(confirm(msg)); });
+  // подтверждение: в Telegram — родное окно; иначе — своё окно в приложении (системный confirm() в некоторых встроенных браузерах заблокирован и молча отвечает «нет»)
+  const ask = msg => new Promise(res => {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (tg && tg.initData && tg.showConfirm && (!tg.isVersionAtLeast || tg.isVersionAtLeast("6.2"))) { try { tg.showConfirm(msg, ok => res(!!ok)); return; } catch (e) {} }
+    const wrap = document.createElement("div"); wrap.className = "ask-modal";
+    wrap.innerHTML = `<div class="ask-box" role="dialog" aria-modal="true"><p>${esc(msg)}</p><div class="ask-btns"><button type="button" class="btn" data-v="0">${t("cancel")}</button><button type="button" class="btn primary" data-v="1">OK</button></div></div>`;
+    const fin = v => { wrap.remove(); res(v); };
+    wrap.onclick = e => { const b = e.target.closest("[data-v]"); if (b) fin(b.dataset.v === "1"); else if (e.target === wrap) fin(false); };
+    document.body.appendChild(wrap); const ok = wrap.querySelector('[data-v="1"]'); if (ok) ok.focus();
+  });
   async function reload() { try { Object.assign(state, await db.loadAll()); render(); } catch (e) { console.error(e); } }
   let reloadTimer, pendingLive = false;
   const liveReload = () => { if (isField(document.activeElement)) { pendingLive = true; return; } pendingLive = false; reload(); };
@@ -494,13 +502,14 @@ setLang(detectLang(BOOT.tgLang));
       : `<span class="chip sm rnd-chip future">${r}</span>`).join("");
     let controls = "";
     if (edit && !fix) {
-      if (STEP_F.includes(tt.format)) {
-        const lastEmpty = maxR > 1 && byR(maxR).every(g => !scoredG(g));
-        controls = done(maxR)
-          ? `<button class="btn primary block" data-act="live-next" data-id="${tid}">${maxR < planned ? t("next_round", { n: maxR + 1 }) : t("extra_round")}</button>`
-          : `<p class="tiny" style="text-align:center;margin:4px 0;">${t("fill_round_first", { n: maxR })}${maxR < planned ? " · " + t("then_next", { n: maxR + 1 }) : ""}</p>`;
-        if (lastEmpty) controls += `<button class="btn ghost sm danger block" style="margin-top:8px;" data-act="live-remove" data-id="${tid}">${t("remove_round", { n: maxR })}</button>`;
-      } else if (tt.format === "playoff" && !done(maxR)) controls = `<p class="tiny" style="text-align:center;margin:4px 0;">${t("po_auto")}</p>`;
+      const curDone = done(cur), nextLbl = r => { const g0 = byR(r)[0]; return g0 && g0.label ? t("po_" + g0.label) : t("round_n", { n: r }); };
+      if (curDone && cur < maxR) controls = `<button class="btn primary block" data-act="live-round" data-val="${cur + 1}">${t("go_next", { what: nextLbl(cur + 1) })} ▸</button>`;
+      else if (STEP_F.includes(tt.format) && cur === maxR) controls = curDone
+        ? `<button class="btn primary block" data-act="live-next" data-id="${tid}">${maxR < planned ? t("next_round", { n: maxR + 1 }) : t("extra_round")}</button>`
+        : `<p class="tiny" style="text-align:center;margin:4px 0;">${t("fill_round_first", { n: maxR })}${maxR < planned ? " · " + t("then_next", { n: maxR + 1 }) : ""}</p>`;
+      else if (!curDone) controls = `<p class="tiny" style="text-align:center;margin:4px 0;">${tt.format === "playoff" ? t("po_auto") : t("fill_round_first", { n: cur })}</p>`;
+      else if (cur === maxR) controls = `<div class="all-done">🏁 ${t("all_rounds_done")}</div>`;
+      if (STEP_F.includes(tt.format) && cur === maxR && maxR > 1 && byR(maxR).every(g => !scoredG(g))) controls += `<button class="btn ghost sm danger block" style="margin-top:8px;" data-act="live-remove" data-id="${tid}">${t("remove_round", { n: maxR })}</button>`;
     }
     const allDone = games.length && games.every(scoredG);
     const finishCard = edit ? (fix
@@ -538,7 +547,8 @@ setLang(detectLang(BOOT.tgLang));
     try { await db.saveScore(g.id, a, b); } catch (e) { err(e); return; }
     if (tt.format === "playoff") { try { await playoffAdvance(tt); } catch (e) { err(e); } }
     const nowDone = tGamesOf(tt.id).filter(x => x.round === g.round).every(scoredG);
-    if (nowDone && !wasDone) { if (state.view.liveRound === g.round) state.view.liveRound = null; toast(t("round_done", { n: g.round })); }
+    state.view.liveRound = g.round;
+    if (nowDone && !wasDone) toast(t("round_done", { n: g.round }));
     if (isField(document.activeElement)) pendingLive = true; else render();
   }
   async function playoffAdvance(tt) {
@@ -558,7 +568,7 @@ setLang(detectLang(BOOT.tgLang));
     const ms = tt.format === "mexicano" ? mexicanoRound(ids, gs, courts, S) : swissRound(ids, gs, courts, S, 2);
     if (!ms || !ms.length) return;
     const r = maxR + 1, rows = ms.map(([a, b], i) => ({ id: gameId(tid, r, i + 1), tournamentId: tid, round: r, court: i + 1, teamA: a, teamB: b, scoreA: null, scoreB: null, label: null }));
-    try { await db.saveGames(rows); if (r > (tt.rounds || 0)) await db.saveTournament(tRow(tt, { rounds: r })); state.view.liveRound = null; await reload(); toast(t("round_ready", { n: r })); } catch (e) { err(e); }
+    try { await db.saveGames(rows); if (r > (tt.rounds || 0)) await db.saveTournament(tRow(tt, { rounds: r })); state.view.liveRound = r; window.scrollTo(0, 0); await reload(); toast(t("round_ready", { n: r })); } catch (e) { err(e); }
   }
   async function removeLastRound(tid) {
     const gs = tGamesOf(tid), maxR = Math.max(...gs.map(g => g.round)), last = gs.filter(g => g.round === maxR);
@@ -961,7 +971,7 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "tf-pairs") { el.onchange = () => { readTf(); render(); }; }
       else if (a === "tf-cancel") on(() => { const f = state._tf; state._tf = null; state.view.editT = null; if (f && f.isNew) state.view.t = null; render(); });
       else if (a === "tf-save") on(saveTf);
-      else if (a === "tf-delete") on(async () => { const f = state._tf; if (!confirm(t("delete_confirm", { name: f.name }))) return; try { await db.deleteTournament(f.id); state._tf = null; state.view.editT = null; state.view.t = null; await reload(); } catch (e) { err(e); } });
+      else if (a === "tf-delete") on(async () => { const f = state._tf; if (!(await ask(t("delete_confirm", { name: f.name })))) return; try { await db.deleteTournament(f.id); state._tf = null; state.view.editT = null; state.view.t = null; await reload(); } catch (e) { err(e); } });
       else if (a === "reg") on(async () => { try { const r = await db.register(id); await reload(); toast(regToast(r)); } catch (e) { toast(regErrMsg(String(e.message || ""))); } });
       else if (a === "reg-team") on(async () => { try { const r = await db.register(id, +el.dataset.team); await reload(); toast(regToast(r)); } catch (e) { toast(regErrMsg(String(e.message || ""))); } });
       else if (a === "partner-open") on(() => { state.view.partnerFor = id; render(); });
@@ -985,7 +995,7 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "run-shuffle") on(() => { const r = readRun(), tt = byId(state.tournaments, r.tid); r.teams = buildTeams(tt, runPlayers(tt.id), true); render(); });
       else if (a === "run-start") on(async () => { el.disabled = true; await startRun(); el.disabled = false; });
       else if (a === "live-tab") on(() => { state.view.liveTab = el.dataset.val; render(); });
-      else if (a === "live-round") on(() => { state.view.liveRound = +el.dataset.val; render(); });
+      else if (a === "live-round") on(() => { state.view.liveRound = +el.dataset.val; render(); if (el.tagName === "BUTTON") { const c = document.querySelector(".rnd-chips"); if (c) c.scrollIntoView({ block: "start", behavior: "smooth" }); else window.scrollTo(0, 0); } });
       else if (a === "live-next") on(async () => { el.disabled = true; await nextRound(id); });
       else if (a === "live-remove") on(() => removeLastRound(id));
       else if (a === "live-finish") on(() => finishRun(id));

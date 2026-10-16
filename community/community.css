@@ -232,3 +232,9 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
 .team-cell { white-space: normal !important; font-size: 13.5px; line-height: 1.35; }
 .match .score input.sc-in { font-size: 19px; }
 .match .score input.sc-in:focus { border-color: var(--court); box-shadow: 0 0 0 3px rgba(255,122,26,.25); }
+.all-done { text-align: center; font-weight: 700; color: #4ADE80; padding: 10px 12px; border: 1px solid rgba(74,222,128,.3); border-radius: 14px; background: rgba(74,222,128,.08); }
+.ask-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 16px; backdrop-filter: blur(4px); }
+.ask-box { width: 100%; max-width: 360px; background: #17171A; border: 1px solid rgba(255,255,255,.12); border-radius: 20px; padding: 20px 18px 16px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+.ask-box p { margin: 0 0 16px; font-size: 15px; line-height: 1.45; }
+.ask-btns { display: flex; gap: 8px; justify-content: flex-end; }
+.ask-btns .btn { min-width: 96px; }

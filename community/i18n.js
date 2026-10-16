@@ -1,6 +1,7 @@
 // Три языка интерфейса. Ключ → строка. Подстановки {n}, {name} и т.п.
 const D = {
   uk: {
+    go_next: "Далі: {what}", all_rounds_done: "Усі раунди зіграно — тисни «Завершити турнір» нижче", 
     run_title: "Провести турнір", run_hint: "Згенеруємо пари й розклад раундів з основного складу. Рахунки вносиш тут же — гравці бачать матчі й таблицю наживо.", run_participants: "Учасники", run_pending_excluded: "{n} заявок не підтверджено — вони не грають", run_setup: "Налаштувати й почати",
     fmt_americano: "Партнери змінюються щораунду, партнер не повторюється. Залік особистий — сума очок за всі матчі.", fmt_mexicano: "1-й раунд — за рівнем, далі четвірки збираються за таблицею: 1+4 проти 2+3. Наступний раунд — після рахунків попереднього.", fmt_swiss: "Кожен раунд алгоритм збирає максимально рівні матчі за поточною таблицею, напарники не повторюються. Залік особистий.", fmt_team_americano: "Постійні пари, кожна грає з кожною. Залік — за парами.", fmt_playoff: "Постійні пари, гра на виліт: сітка за рівнем пар, фінал і матч за 3-тє місце створюються самі.",
     run_left_out: "Без пари (непарна кількість): {names}", run_teams_from_reg: "{n} пар — як записались. Решту зібрали за рівнем: сильніший + слабший.", run_teams_auto: "Пари зібрано за рівнем: сильніший + слабший.", run_teams_all_reg: "Пари — як записались.", run_shuffle: "Інші пари",
@@ -68,6 +69,7 @@ const D = {
     lv_in_raketo: "Рейтинг Raketo (наприклад 2.434)", lv_in_playtomic: "Рівень Playtomic (наприклад 3.25)", lv_in_pado: "Рейтинг Pado — Elo (наприклад 1450) або рівень Industry", as_raketo: "у шкалі Raketo", rv_raw: "ввів",
   },
   ru: {
+    go_next: "Дальше: {what}", all_rounds_done: "Все раунды сыграны — жми «Завершить турнир» ниже", 
     run_title: "Провести турнир", run_hint: "Сгенерируем пары и расписание раундов из основного состава. Счёт вносишь здесь же — игроки видят матчи и таблицу вживую.", run_participants: "Участники", run_pending_excluded: "{n} заявок не подтверждено — они не играют", run_setup: "Настроить и начать",
     fmt_americano: "Партнёры меняются каждый раунд, партнёр не повторяется. Зачёт личный — сумма очков за все матчи.", fmt_mexicano: "1-й раунд — по уровню, дальше четвёрки собираются по таблице: 1+4 против 2+3. Следующий раунд — после счетов предыдущего.", fmt_swiss: "Каждый раунд алгоритм собирает максимально равные матчи по текущей таблице, напарники не повторяются. Зачёт личный.", fmt_team_americano: "Постоянные пары, каждая играет с каждой. Зачёт — по парам.", fmt_playoff: "Постоянные пары, игра на вылет: сетка по уровню пар, финал и матч за 3-е место создаются сами.",
     run_left_out: "Без пары (нечётное число): {names}", run_teams_from_reg: "{n} пар — как записались. Остальных собрали по уровню: сильный + слабый.", run_teams_auto: "Пары собраны по уровню: сильный + слабый.", run_teams_all_reg: "Пары — как записались.", run_shuffle: "Другие пары",
@@ -135,6 +137,7 @@ const D = {
     lv_in_raketo: "Рейтинг Raketo (например 2.434)", lv_in_playtomic: "Уровень Playtomic (например 3.25)", lv_in_pado: "Рейтинг Pado — Elo (например 1450) или уровень Industry", as_raketo: "в шкале Raketo", rv_raw: "ввёл",
   },
   en: {
+    go_next: "Next: {what}", all_rounds_done: "All rounds played — tap “Finish tournament” below", 
     run_title: "Run the tournament", run_hint: "We'll generate pairs and the round schedule from the main list. Enter scores right here — players see matches and standings live.", run_participants: "Participants", run_pending_excluded: "{n} requests not approved — they won't play", run_setup: "Set up & start",
     fmt_americano: "Partners rotate every round and never repeat. Individual ranking — total points across all matches.", fmt_mexicano: "Round 1 by level, then groups of four by standings: 1+4 vs 2+3. Next round after the previous one's scores.", fmt_swiss: "Each round the algorithm builds the most even matches from current standings, partners don't repeat. Individual ranking.", fmt_team_americano: "Fixed pairs, everyone plays everyone. Ranking by pairs.", fmt_playoff: "Fixed pairs, knockout: bracket seeded by level, final and 3rd-place match are created automatically.",
     run_left_out: "No partner (odd number): {names}", run_teams_from_reg: "{n} pairs as registered. The rest matched by level: stronger + weaker.", run_teams_auto: "Pairs matched by level: stronger + weaker.", run_teams_all_reg: "Pairs as registered.", run_shuffle: "Other pairs",
