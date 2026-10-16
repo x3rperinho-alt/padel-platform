@@ -23,6 +23,21 @@ setLang(detectLang(BOOT.tgLang));
   const canEdit = () => isAdmin() || (U && U.role === "editor");
   const myPlayer = () => state.players.find(p => p.userId === U.id) || null;
 
+  // ---------- «на главный экран»: в Telegram — родная функция (откроет мини-приложение с входом), в браузере Android — установка PWA ----------
+  const tgApp = window.Telegram && window.Telegram.WebApp;
+  let homeMode = null, pwaPrompt = null;
+  const homeBtnEl = () => document.getElementById("homeBtn");
+  const showHome = mode => { homeMode = mode; const b = homeBtnEl(); if (b) b.hidden = false; };
+  const hideHome = () => { homeMode = null; const b = homeBtnEl(); if (b) b.hidden = true; };
+  if (tgApp && tgApp.initData && tgApp.isVersionAtLeast && tgApp.isVersionAtLeast("8.0") && tgApp.checkHomeScreenStatus) {
+    try { tgApp.checkHomeScreenStatus(st => { if (st === "missed" || st === "unknown") showHome("tg"); }); } catch (e) {}
+    try { tgApp.onEvent("homeScreenAdded", () => { hideHome(); toast(t("home_added")); }); } catch (e) {}
+  } else window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); pwaPrompt = e; showHome("pwa"); });
+  async function addToHome() {
+    if (homeMode === "tg") { try { tgApp.addToHomeScreen(); } catch (e) { err(e); } }
+    else if (homeMode === "pwa" && pwaPrompt) { pwaPrompt.prompt(); try { const r = await pwaPrompt.userChoice; if (r.outcome === "accepted") { hideHome(); toast(t("home_added")); } } catch (e) {} }
+  }
+
   // ---------- уровни ----------
     // Буквы по шкале Raketo (уровень = Эло / 1000). Выше B+ (4.5) Raketo границ не дал — A-, A, A+ взяты с шагом как у B+.
   const letter = lv => lv == null ? "—" : lv < 1.9 ? "D-" : lv < 2.2 ? "D" : lv < 2.5 ? "D+" : lv < 2.75 ? "C-" : lv < 3.1 ? "C" : lv < 3.5 ? "C+" : lv < 3.75 ? "B-" : lv < 4 ? "B" : lv < 4.5 ? "B+" : lv < 5 ? "A-" : lv < 6 ? "A" : "A+";
@@ -71,6 +86,7 @@ setLang(detectLang(BOOT.tgLang));
   const board = () => { const E = computeElo(); return { E, list: state.players.filter(p => p.active && p.levelStatus === "ok").sort((a, b) => E.ratings[b.id] - E.ratings[a.id]) }; };
 
   // ---------- общие кусочки ----------
+  const HOME_IC = `<svg class="home-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.5 9v11h13V9"/><path d="M12 11.5v5M9.5 14h5"/></svg>`;
   const SIL = `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="24" r="12"/><path d="M8 60c2-14 12-22 24-22s22 8 24 22z"/></svg>`;
   const avatarHtml = (pid, sz) => { const p = byId(state.players, pid); sz = sz || 44; return p && p.avatar ? `<span class="avatar" style="width:${sz}px;height:${sz}px;"><img src="${p.avatar}" alt=""></span>` : `<span class="avatar ph" style="width:${sz}px;height:${sz}px;">${SIL}</span>`; };
   const pname = pid => { const p = byId(state.players, pid); return p ? p.name : "?"; };
@@ -565,6 +581,7 @@ setLang(detectLang(BOOT.tgLang));
       <div class="stack" style="margin-top:8px;">
         <div class="row"><span class="muted">${t("language")}</span><select id="langSel" style="width:auto;">${LANGS.map(([k, l]) => `<option value="${k}" ${getLang()===k?"selected":""}>${l}</option>`).join("")}</select></div>
         <div class="row"><span class="muted">${t("role")}</span><strong>${esc(U.role)}</strong></div>
+        ${homeMode ? `<button class="btn sm" data-act="add-home">${HOME_IC} ${t("home_add_long")}</button>` : ""}
         <button class="btn sm ghost" data-act="logout">${t("logout")}</button>
       </div></div>`;
   }
@@ -685,6 +702,7 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "p-edit") on(() => { state._pf = null; state.view.editP = id; render(); });
       else if (a === "pf-cancel") on(() => { state._pf = null; state.view.editP = null; render(); });
       else if (a === "pf-save") on(() => savePf(id));
+      else if (a === "add-home") on(addToHome);
       else if (a === "field-ok") on(() => { const sc = el.dataset.scope || ""; const inp = el.parentElement && el.parentElement.querySelector("input,textarea"); if (inp) inp.blur();
         if (sc === "ob") { keepOnb(); el.classList.add("done"); setTimeout(() => el.classList.remove("done"), 900); }
         else if (sc.startsWith("pf:")) savePf(sc.slice(3), true); });
@@ -719,6 +737,7 @@ setLang(detectLang(BOOT.tgLang));
     ["tfName","tfDate","tfTime","tfTimeEnd","tfPlace","tfCourts","tfSlots","tfPrice","tfMin","tfMax","tfContact","tfNote"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { readTf(); if (id === "tfMin" || id === "tfMax") render(); }; });
   }
   document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; state.view.t = null; state.view.editT = null; state.view.pid = null; state.view.editP = null; window.scrollTo(0, 0); render(); });
+  const hb = homeBtnEl(); if (hb) { hb.onclick = addToHome; hb.title = t("home_add_long"); const hl = hb.querySelector(".home-lbl"); if (hl) hl.textContent = t("home_btn"); }
   const lo = document.getElementById("logoutBtn"); if (lo) lo.onclick = async () => { await db.signOut(); location.reload(); };
   const who = document.getElementById("whoami"); if (who) who.textContent = (myPlayer() && myPlayer().name) || U.name || "";
   document.documentElement.lang = getLang();
