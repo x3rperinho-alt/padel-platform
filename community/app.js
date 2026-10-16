@@ -77,8 +77,15 @@ setLang(detectLang(BOOT.tgLang));
   const pl = pid => `<span class="plink" data-act="open-profile" data-id="${pid}">${esc(pname(pid))}</span>`;
   let toastTimer; function toast(m) { const el = document.getElementById("toast"); el.textContent = m; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2200); }
   const err = e => toast(t("error", { msg: (e && e.message) || e }));
+  // поле ввода с кнопкой ✓ справа: прячет клавиатуру и сохраняет (scope: ob — анкета, pf:<id> — профиль)
+  const okWrap = (inner, scope) => `<span class="ok-wrap">${inner}<button type="button" class="ok-btn" data-act="field-ok" data-scope="${scope}" aria-label="${t("save")}">✓</button></span>`;
+  const isField = el => !!el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !["checkbox", "radio", "file", "button", "submit"].includes(el.type)));
+  // подтверждение: в Telegram — родное окно, в браузере — обычный confirm
+  const ask = msg => new Promise(res => { const tg = window.Telegram && window.Telegram.WebApp; if (tg && tg.showConfirm && tg.initData) { try { tg.showConfirm(msg, ok => res(!!ok)); return; } catch (e) {} } res(confirm(msg)); });
   async function reload() { try { Object.assign(state, await db.loadAll()); render(); } catch (e) { console.error(e); } }
-  let reloadTimer; db.subscribe(() => { clearTimeout(reloadTimer); reloadTimer = setTimeout(reload, 600); });
+  let reloadTimer, pendingLive = false;
+  const liveReload = () => { if (isField(document.activeElement)) { pendingLive = true; return; } pendingLive = false; reload(); };
+  db.subscribe(() => { clearTimeout(reloadTimer); reloadTimer = setTimeout(liveReload, 600); });
   const timeRange = s => s.time ? esc(s.time) + (s.time_end ? "–" + esc(s.time_end) : "") : "";
   const regsOf = tid => state.registrations.filter(r => r.tournamentId === tid && r.status !== "cancelled").sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
   const myReg = tid => { const me = myPlayer(); return me ? regsOf(tid).find(r => r.playerId === me.id) : null; };
@@ -108,14 +115,14 @@ setLang(detectLang(BOOT.tgLang));
       <div class="section-head"><h2>${t("welcome")}</h2></div>
       <div class="card">
         <p class="tiny" style="margin:0 0 14px;">${t("onboarding_hint")}</p>
-        <label class="field"><span class="lbl">${t("your_name")}</span><input type="text" id="obName" value="${esc(d.name)}" maxlength="40"></label>
-        <label class="field"><span class="lbl">${t("instagram_opt")}</span><input type="text" id="obIg" value="${esc(d.ig)}" placeholder="@nickname"></label>
+        <label class="field"><span class="lbl">${t("your_name")}</span>${okWrap(`<input type="text" id="obName" value="${esc(d.name)}" maxlength="40" enterkeyhint="done">`, "ob")}</label>
+        <label class="field"><span class="lbl">${t("instagram_opt")}</span>${okWrap(`<input type="text" id="obIg" value="${esc(d.ig)}" placeholder="@nickname" enterkeyhint="done">`, "ob")}</label>
         <div class="field"><span class="lbl">${t("level_source")}</span><div class="wrap-tags">${["playtomic","pado","raketo","quiz"].map(x => `<span class="chip ${d.source===x?'active':''} ${x==="quiz"?"chip-quiz":""}" data-act="ob-source" data-val="${x}">${t("src_"+x)}</span>`).join("")}</div></div>
         ${isQuiz ? `
         <div class="quiz-intro"><div class="quiz-intro-ic">?</div><p>${t("quiz_intro")}</p></div>
         <button class="btn primary block" data-act="quiz-start">${t("quiz_start")} →</button>` : `
-        <label class="field"><span class="lbl">${t("app_nick", { app: t("src_" + d.source) })}</span><input type="text" id="obNick" value="${esc(d.nick || "")}" placeholder="nick / ID" maxlength="40"></label>
-        <label class="field"><span class="lbl">${t("lv_in_" + d.source)}</span><input type="number" id="obLevel" inputmode="decimal" min="0" max="${d.source === "pado" ? 4000 : 7}" step="${d.source === "pado" ? "any" : "0.001"}" value="${esc(d.level)}" placeholder="${{ raketo: "2.434", pado: "1450", playtomic: "3.25" }[d.source]}"></label>
+        <label class="field"><span class="lbl">${t("app_nick", { app: t("src_" + d.source) })}</span>${okWrap(`<input type="text" id="obNick" value="${esc(d.nick || "")}" placeholder="nick / ID" maxlength="40" enterkeyhint="done">`, "ob")}</label>
+        <label class="field"><span class="lbl">${t("lv_in_" + d.source)}</span>${okWrap(`<input type="number" id="obLevel" enterkeyhint="done" inputmode="decimal" min="0" max="${d.source === "pado" ? 4000 : 7}" step="${d.source === "pado" ? "any" : "0.001"}" value="${esc(d.level)}" placeholder="${{ raketo: "2.434", pado: "1450", playtomic: "3.25" }[d.source]}">`, "ob")}</label>
         <div class="ob-preview ${lv==null?'dim':''}">${levelBadge(lv, "big")}<div><div class="tiny">${d.source === "raketo" ? "" : t("as_raketo") + " · "}${t("letter")} · ${t("start_elo")}</div><div class="ob-elo">${lv==null?"—":(d.source === "raketo" ? "" : fmtLv(lv) + " · ") + letter(lv)+" · "+levelElo(lv)}</div></div></div>
         <div class="review-note">${t("review_note", { app: t("src_" + d.source) })}</div>
         <button class="btn primary block" style="margin-top:14px;" data-act="ob-save" ${d.name.trim().length<2||lv==null||lv<0||lv>7||!(d.nick||"").trim()?"disabled":""}>${t("send_review")}</button>`}
@@ -526,13 +533,13 @@ setLang(detectLang(BOOT.tgLang));
     return `<div class="card hero">
       <div class="pf-edit">
         <label class="pf-avatar-pick">${av ? `<span class="avatar" style="width:88px;height:88px;"><img src="${av}" alt=""></span>` : `<span class="avatar ph" style="width:88px;height:88px;">${SIL}</span>`}<input type="file" id="pfPhoto" accept="image/*" hidden><span class="pf-cam">📷</span></label>
-        <div class="pf-fields"><label class="field"><span class="lbl">${t("your_name")}</span><input type="text" id="pfName" value="${esc(pf.name)}" maxlength="40"></label>
+        <div class="pf-fields"><label class="field"><span class="lbl">${t("your_name")}</span>${okWrap(`<input type="text" id="pfName" value="${esc(pf.name)}" maxlength="40" enterkeyhint="done">`, "pf:" + p.id)}</label>
           <div class="pf-actions"><button class="btn sm" data-act="pf-photo">${av ? t("photo_change") : t("photo_add")}</button>${av ? `<button class="btn sm ghost" data-act="pf-photo-clear">${t("photo_remove")}</button>` : ""}</div></div>
       </div>
       ${adjBlock}
-      <label class="field" style="margin-top:12px;"><span class="lbl">${t("bio")}</span><textarea id="pfBio" rows="2" maxlength="200">${esc(pf.bio)}</textarea></label>
+      <label class="field" style="margin-top:12px;"><span class="lbl">${t("bio")}</span>${okWrap(`<textarea id="pfBio" rows="2" maxlength="200">${esc(pf.bio)}</textarea>`, "pf:" + p.id)}</label>
       ${mine ? `<h3 id="pfContacts" style="margin:6px 0 4px;scroll-margin-top:40px;">${t("contacts")}</h3><p class="tiny" style="margin:0 0 10px;">${t("contacts_hint")}</p>
-      <div class="ct-form">${CONTACTS.map(([k, ic]) => `<label class="ct-field"><span class="ct-ic ct-${k}">${ic}</span><input type="${k === "phone" ? "tel" : "text"}" id="pfc_${k}" value="${esc(pf.c[k])}" placeholder="${t("c_" + k)}${k === "phone" ? " +380…" : ["playtomic","pado","raketo"].includes(k) ? " — nick / ID" : " @nick"}" maxlength="60"></label>`).join("")}</div>` : ""}
+      <div class="ct-form">${CONTACTS.map(([k, ic]) => `<label class="ct-field"><span class="ct-ic ct-${k}">${ic}</span>${okWrap(`<input type="${k === "phone" ? "tel" : "text"}" id="pfc_${k}" value="${esc(pf.c[k])}" placeholder="${t("c_" + k)}${k === "phone" ? " +380…" : ["playtomic","pado","raketo"].includes(k) ? " — nick / ID" : " @nick"}" maxlength="60" enterkeyhint="done">`, "pf:" + p.id)}</label>`).join("")}</div>` : ""}
       <div class="pf-actions" style="justify-content:flex-end;"><button class="btn sm" data-act="pf-cancel">${t("cancel")}</button><button class="btn sm primary" data-act="pf-save" data-id="${p.id}">${t("save")}</button></div>
     </div>`;
   }
@@ -541,15 +548,16 @@ setLang(detectLang(BOOT.tgLang));
       img.onload = () => { const S = 256, c = document.createElement("canvas"); c.width = S; c.height = S; const x = c.getContext("2d"); const m = Math.min(img.naturalWidth, img.naturalHeight); x.drawImage(img, (img.naturalWidth-m)/2, (img.naturalHeight-m)/2, m, m, 0, 0, S, S); URL.revokeObjectURL(url); res(c.toDataURL("image/jpeg", .82)); };
       img.onerror = () => rej(new Error("bad image")); img.src = url; });
   }
-  async function savePf(pid) {
+  async function savePf(pid, keep) {
     const p = byId(state.players, pid); const pf = state._pf; const g = id => document.getElementById(id);
+    if (keep && pf && g("pfName")) { pf.name = g("pfName").value; pf.bio = g("pfBio").value; CONTACTS.forEach(([k]) => { const el = g("pfc_" + k); if (el) pf.c[k] = el.value; }); }
     const name = g("pfName").value.trim(), bio = g("pfBio").value.trim();
     const contacts = { ...(p.contacts || {}) }; CONTACTS.forEach(([k]) => { const el = g("pfc_" + k); if (el) { const v = cleanContact(k, el.value); if (v) contacts[k] = v; else delete contacts[k]; } });
     const avatar = pf.avatar === undefined ? (p.avatar || null) : pf.avatar;
     try {
       if (myPlayer() && myPlayer().id === pid) { await db.updateMyCard(name, avatar, contacts, bio); if (pf.level != null && Math.abs(pf.level - p.level) > 1e-9) await db.adjustMyLevel(+pf.level.toFixed(1)); }
       else await db.updatePlayer(pid, { name });
-      state._pf = null; state.view.editP = null; await reload(); toast(t("saved"));
+      if (!keep) { state._pf = null; state.view.editP = null; } await reload(); toast(t("saved"));
     } catch (e) { err(e); }
   }
   function accountCardHtml() {
@@ -580,12 +588,13 @@ setLang(detectLang(BOOT.tgLang));
             <label>${t("start_elo")}<input type="number" step="10" data-act="adm-elo" data-id="${p.id}" value="${p.eloStart}"></label>
             <button class="btn sm ${p.confirmed?'primary':''}" data-act="adm-confirm" data-id="${p.id}">${p.confirmed ? "✓" : t("confirm")}</button>
             <button class="btn sm ghost" data-act="adm-active" data-id="${p.id}">${p.active ? "⏸" : "▶"}</button>
+            ${isAdmin() && p.userId ? `<button class="btn sm ghost danger" data-act="adm-reset" data-id="${p.id}" title="${t("reset_player")}">↺ ${t("reset_short")}</button>` : ""}
           </div></div>`).join("")}</div></div>`;
     } else if (sub === "roles") body = membersCardHtml();
     else if (sub === "review") body = !queue.length ? `<div class="card"><div class="empty"><div class="ic">✓</div>${t("review_empty")}</div></div>`
       : `<p class="tiny" style="margin:0 0 10px;">${t("review_hint")}</p>` + queue.sort((a, b) => (a.levelStatus === "pending" ? 0 : 1) - (b.levelStatus === "pending" ? 0 : 1)).map(p => {
         const c = p.contacts || {}, src = c.level_source || "", nick = c[src];
-        if (p.levelStatus === "quiz_required") return `<div class="card rv-card wait"><div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 40)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("rv_waiting_quiz")} · ${t("src_" + src)} ${p.levelClaim ?? ""}</span></span></div></div>`;
+        if (p.levelStatus === "quiz_required") return `<div class="card rv-card wait"><div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 40)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("rv_waiting_quiz")} · ${t("src_" + src)} ${p.levelClaim ?? ""}</span></span></div>${isAdmin() ? `<div class="rv-actions" style="margin-top:10px;"><button class="btn sm ghost danger" data-act="adm-reset" data-id="${p.id}">↺ ${t("reset_short")}</button></div>` : ""}</div>`;
         return `<div class="card rv-card">
           <div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 40)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("src_" + src)} · ${nick ? `<b class="rv-nick">${esc(nick)}</b>` : "—"}${c.level_raw ? ` · ${t("rv_raw")}: <b>${esc(c.level_raw)}</b>` : ""}</span></span></div>
           <div class="rv-claim">${levelBadge(p.levelClaim, "big")}<div><div class="tiny">${t("rv_claimed")}</div><div class="ob-elo">${fmtLv(p.levelClaim)} · ${letter(p.levelClaim)} · ${levelElo(p.levelClaim)}</div></div></div>
@@ -593,6 +602,7 @@ setLang(detectLang(BOOT.tgLang));
             <label>${t("level_value")}<input type="number" step="0.001" min="0" max="7" inputmode="decimal" id="rv_${p.id}" value="${p.levelClaim ?? ""}"></label>
             <button class="btn sm primary" data-act="rv-approve" data-id="${p.id}">✓ ${t("rv_approve")}</button>
             <button class="btn sm" data-act="rv-quiz" data-id="${p.id}">${t("rv_ask_quiz")}</button>
+            ${isAdmin() ? `<button class="btn sm ghost danger" data-act="adm-reset" data-id="${p.id}">↺ ${t("reset_short")}</button>` : ""}
           </div></div>`;
       }).join("");
     return `<div class="section-head"><h2>${t("admin")}</h2></div>
@@ -675,6 +685,11 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "p-edit") on(() => { state._pf = null; state.view.editP = id; render(); });
       else if (a === "pf-cancel") on(() => { state._pf = null; state.view.editP = null; render(); });
       else if (a === "pf-save") on(() => savePf(id));
+      else if (a === "field-ok") on(() => { const sc = el.dataset.scope || ""; const inp = el.parentElement && el.parentElement.querySelector("input,textarea"); if (inp) inp.blur();
+        if (sc === "ob") { keepOnb(); el.classList.add("done"); setTimeout(() => el.classList.remove("done"), 900); }
+        else if (sc.startsWith("pf:")) savePf(sc.slice(3), true); });
+      else if (a === "adm-reset") on(async () => { const p = byId(state.players, id); if (!p) return; if (!(await ask(t("reset_confirm", { name: p.name })))) return;
+        try { await db.resetPlayer(id); await reload(); toast(t("reset_done", { name: p.name })); } catch (e) { err(e); } });
       else if (a === "pf-photo") on(() => { const f = document.getElementById("pfPhoto"); if (f) f.click(); });
       else if (a === "pf-photo-clear") on(() => { keepPf(); state._pf.avatar = null; render(); });
       else if (a === "open-link") on(() => { const u = el.dataset.url; const tg = window.Telegram && window.Telegram.WebApp; if (tg && /t\.me/.test(u) && tg.openTelegramLink) tg.openTelegramLink(u); else window.open(u, "_blank", "noopener"); });
@@ -697,6 +712,7 @@ setLang(detectLang(BOOT.tgLang));
       const b = v.querySelector('[data-act="ob-save"]'); if (b) b.disabled = d.name.trim().length < 2 || !ok || (d.source !== "quiz" && !(d.nick || "").trim());
     }; });
     const keepPf = () => { const n = document.getElementById("pfName"), b = document.getElementById("pfBio"); if (state._pf && n) { state._pf.name = n.value; state._pf.bio = b.value; CONTACTS.forEach(([k]) => { const el = document.getElementById("pfc_" + k); if (el) state._pf.c[k] = el.value; }); } };
+    v.querySelectorAll(".ok-wrap input").forEach(inp => { inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); const b = inp.parentElement.querySelector(".ok-btn"); if (b) b.click(); } }; });
     const pfPhoto = document.getElementById("pfPhoto"); if (pfPhoto) pfPhoto.onchange = async () => { const f = pfPhoto.files && pfPhoto.files[0]; if (!f) return; try { keepPf(); state._pf.avatar = await readAvatarFile(f); render(); } catch (e) { err(e); } };
     const q = document.getElementById("admQ"); if (q) q.oninput = () => { state.view.q = q.value; render(); const e2 = document.getElementById("admQ"); e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length); };
     const ls = document.getElementById("langSel"); if (ls) ls.onchange = () => { setLang(ls.value); document.documentElement.lang = ls.value; render(); };
@@ -706,5 +722,11 @@ setLang(detectLang(BOOT.tgLang));
   const lo = document.getElementById("logoutBtn"); if (lo) lo.onclick = async () => { await db.signOut(); location.reload(); };
   const who = document.getElementById("whoami"); if (who) who.textContent = (myPlayer() && myPlayer().name) || U.name || "";
   document.documentElement.lang = getLang();
+  const scrollField = el => { if (!isField(el)) return; const vv = window.visualViewport, h = vv ? vv.height : window.innerHeight, r = el.getBoundingClientRect();
+    if (r.bottom > h - 24 || r.top < 70) window.scrollBy({ top: r.top - h * 0.3, behavior: "smooth" }); };
+  let kbTimer;
+  document.addEventListener("focusin", e => { if (!isField(e.target)) return; document.body.classList.add("kb"); clearTimeout(kbTimer); kbTimer = setTimeout(() => scrollField(e.target), 320); });
+  document.addEventListener("focusout", () => setTimeout(() => { if (isField(document.activeElement)) return; document.body.classList.remove("kb"); if (pendingLive) liveReload(); }, 150));
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", () => { clearTimeout(kbTimer); kbTimer = setTimeout(() => scrollField(document.activeElement), 120); });
   render();
 })();
