@@ -114,9 +114,12 @@ setLang(detectLang(BOOT.tgLang));
     wrap.onclick = e => { const b = e.target.closest("[data-v]"); if (b) fin(b.dataset.v === "1"); else if (e.target === wrap) fin(false); };
     document.body.appendChild(wrap); const ok = wrap.querySelector('[data-v="1"]'); if (ok) ok.focus();
   });
-  async function reload() { try { Object.assign(state, await db.loadAll()); render(); } catch (e) { console.error(e); } }
+  let savingN = 0, saveEpoch = 0; // сколько счетов сейчас сохраняется; номер «поколения» сохранений
+  async function reload() { try { const ep = saveEpoch; const d = await db.loadAll();
+      if (savingN || ep !== saveEpoch) { pendingLive = true; return; } // пока грузили, ушёл новый счёт — эти данные уже устарели
+      Object.assign(state, d); render(); } catch (e) { console.error(e); } }
   let reloadTimer, pendingLive = false;
-  const liveReload = () => { if (isField(document.activeElement)) { pendingLive = true; return; } pendingLive = false; reload(); };
+  const liveReload = () => { if (isField(document.activeElement) || savingN) { pendingLive = true; return; } pendingLive = false; reload(); };
   db.subscribe(() => { clearTimeout(reloadTimer); reloadTimer = setTimeout(liveReload, 600); });
   const timeRange = s => s.time ? esc(s.time) + (s.time_end ? "–" + esc(s.time_end) : "") : "";
   const regsOf = tid => state.registrations.filter(r => r.tournamentId === tid && r.status !== "cancelled").sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
@@ -287,6 +290,7 @@ setLang(detectLang(BOOT.tgLang));
           <div><span class="tiny">${t("format")}</span><b>${t(tt.format)}</b></div>
           <div><span class="tiny">${t("level_range")}</span><b>${esc(rangeLabel(tt.s))}</b></div>
           <div><span class="tiny">${t("price")}</span><b>${tt.s.price ? esc(tt.s.price) + " ₴" : "—"}</b></div>
+          ${(tt.s.court_nums || []).length ? `<div><span class="tiny">${t("courts_lbl")}</span><b>${tt.s.court_nums.map(esc).join(", ")}</b></div>` : ""}
         </div>
         ${tt.s.note ? `<p class="tiny" style="margin:10px 0 0;white-space:pre-line;">${esc(tt.s.note)}</p>` : ""}
         <div style="margin-top:14px;">${regBtn}</div>
@@ -360,6 +364,9 @@ setLang(detectLang(BOOT.tgLang));
   const teamsOf = tt => (tt.teams || []).map(x => x.players || x).filter(x => Array.isArray(x) && x.length === 2);
   const pairName = tm => `${pl(tm[0])} + ${pl(tm[1])}`;
   const gameId = (tid, r, c) => `${tid}-r${r}-c${c}`;
+  // номера кортов, на которых идёт турнир («2, 3, 5»); пусто — корты 1, 2, 3…
+  const parseCourts = v => [...new Set(String(v || "").split(/[^0-9]+/).filter(Boolean).map(Number).filter(n => n > 0 && n < 100))];
+  const courtNo = (nums, i) => (nums && nums[i - 1]) || i; // i — порядковый номер матча в раунде (с 1)
   // пары: как записались парами, остальных — «сильный + слабый»
   function buildTeams(tt, ids, shuffle) {
     const S = strengthFn(), used = new Set(), list = [];
@@ -376,12 +383,14 @@ setLang(detectLang(BOOT.tgLang));
   }
   function initRun(tt) {
     const ids = runPlayers(tt.id), sc = tt.scoring || {};
-    const r = { tid: tt.id, format: tt.format || "americano", courts: tt.courts || 2, mode: sc.mode || "total", target: sc.target ?? 21, touched: false };
+    const cn = parseCourts((tt.s.court_nums || []).join(","));
+    const r = { tid: tt.id, format: tt.format || "americano", courts: cn.length || tt.courts || 2, courtNums: cn, mode: sc.mode || "total", target: sc.target ?? 21, touched: false };
     r.teams = buildTeams(tt, ids, false); r.rounds = runDefaultRounds(r, ids.length); return r;
   }
   function readRun() {
     const r = state._run, g = id => document.getElementById(id); if (!r) return r;
     if (g("runCourts")) r.courts = Math.max(1, Math.min(12, +g("runCourts").value || 1));
+    if (g("runCourtNums")) { const before = r.courtNums.join(); r.courtNums = parseCourts(g("runCourtNums").value); if (r.courtNums.length && r.courtNums.join() !== before) r.courts = r.courtNums.length; }
     if (g("runRounds")) { const v = Math.max(1, Math.min(40, +g("runRounds").value || 1)); if (v !== r.rounds) r.touched = true; r.rounds = v; }
     if (g("runTarget")) r.target = g("runTarget").value === "" ? null : Math.max(1, Math.min(99, +g("runTarget").value));
     return r;
@@ -427,6 +436,8 @@ setLang(detectLang(BOOT.tgLang));
           : `<div class="chips-wrap" style="margin-top:8px;">${ids.map(id => `<span class="chip sm run-p">${esc(pname(id))} <b>${lv(id)}</b></span>`).join("")}</div>`}
       </div>
       <div class="card">
+        <label class="field"><span class="lbl">${t("t_court_nums")}</span><input type="text" inputmode="numeric" autocomplete="off" id="runCourtNums" value="${esc(r.courtNums.join(", "))}" placeholder="${t("t_court_nums_ph")}"></label>
+        <p class="tiny" style="margin:-6px 0 12px;">${r.courtNums.length ? t("run_courts_used", { list: r.courtNums.slice(0, r.courts).join(", ") }) : t("t_court_nums_hint")}</p>
         <div class="grid2">${inp("runCourts", t("t_courts"), r.courts, 'min="1" max="12"')}${f === "playoff" ? `<div></div>` : inp("runRounds", t("run_rounds"), r.rounds, `min="1" max="${fullRR || 40}"`)}</div>
         <div class="field"><span class="lbl">${t("run_scoring")}</span><div class="wrap-tags">
           <span class="chip ${r.mode === "total" ? "active" : ""}" data-act="run-mode" data-val="total">${t("run_total")}</span>
@@ -448,12 +459,12 @@ setLang(detectLang(BOOT.tgLang));
     else if (r.format === "playoff") rounds = [playoffFirst(r.teams.list.slice().sort((a, b) => S(b[0]) + S(b[1]) - S(a[0]) - S(a[1])))];
     else rounds = (roundRobinSchedule(r.teams.list, r.courts) || []).slice(0, r.rounds).map(rd => rd.map(M));
     if (!rounds.length || !rounds[0] || !rounds[0].length) { toast(t("run_need_n", { n: 4 })); return; }
-    const games = []; rounds.forEach((rd, i) => rd.forEach((m, c) => games.push({ id: gameId(tt.id, i + 1, c + 1), tournamentId: tt.id, round: i + 1, court: c + 1, teamA: m.teamA, teamB: m.teamB, scoreA: null, scoreB: null, label: m.label })));
+    const games = []; rounds.forEach((rd, i) => rd.forEach((m, c) => games.push({ id: gameId(tt.id, i + 1, c + 1), tournamentId: tt.id, round: i + 1, court: courtNo(r.courtNums, c + 1), teamA: m.teamA, teamB: m.teamB, scoreA: null, scoreB: null, label: m.label })));
     const team = isTeamF(r.format);
     try {
       await db.deleteGames(tGamesOf(tt.id).map(g => g.id));
       await db.saveTournament(tRow(tt, { format: r.format, courts: r.courts, status: "live", participantIds: team ? r.teams.list.flat() : ids, teams: team ? r.teams.list.map((p, i) => ({ id: "tm" + (i + 1), players: p })) : [],
-        scoring: { mode: r.mode, target: r.target }, rounds: r.format === "playoff" ? null : (STEP_F.includes(r.format) ? r.rounds : rounds.length), s: { ...tt.s, reg_open: false, reg_was: !!tt.s.reg_open } }));
+        scoring: { mode: r.mode, target: r.target }, rounds: r.format === "playoff" ? null : (STEP_F.includes(r.format) ? r.rounds : rounds.length), s: { ...tt.s, reg_open: false, reg_was: !!tt.s.reg_open, court_nums: r.courtNums } }));
       await db.saveGames(games); await db.addLog("Старт турніру: " + tt.name).catch(() => {});
       state._run = null; state.view.run = null; state.view.liveTab = "m"; state.view.liveRound = null; window.scrollTo(0, 0); await reload(); toast(t("run_started"));
     } catch (e) { err(e); }
@@ -488,10 +499,10 @@ setLang(detectLang(BOOT.tgLang));
     const scLbl = sc.target ? t(sc.mode === "race" ? "sc_race" : "sc_total", { n: sc.target }) : "";
     const lbl = g => g.label ? `<b class="po-lbl">${t("po_" + g.label)}</b> · ` : "";
     const match = g => { const wa = scoredG(g) && g.scoreA > g.scoreB, wb = scoredG(g) && g.scoreB > g.scoreA, mine = me && g.teamA.concat(g.teamB).includes(me.id);
-      const inp = s => `<input class="sc-in" type="number" inputmode="numeric" pattern="[0-9]*" min="0" max="99" data-gid="${g.id}" data-side="${s}" value="${(s === "A" ? g.scoreA : g.scoreB) ?? ""}" aria-label="${t("score")}">`;
+      const inp = s => `<input class="sc-in" type="number" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" min="0" max="99" data-gid="${g.id}" data-side="${s}" value="${(s === "A" ? g.scoreA : g.scoreB) ?? ""}" aria-label="${t("score")}">`;
       const box = v => `<span class="sbox">${v ?? "–"}</span>`;
       return `<div class="match live-m ${mine ? "mine" : ""} ${scoredG(g) ? "is-done" : ""}" data-gid="${g.id}">
-        <div class="court-lbl">${lbl(g)}${t("court")} ${g.court || "—"}${mine ? ` · <b class="your-m">${t("your_match")}</b>` : ""}</div>
+        <div class="court-lbl"><span>${lbl(g)}${t("court")} ${g.court || "—"}${mine ? ` · <b class="your-m">${t("your_match")}</b>` : ""}</span>${edit ? `<button type="button" class="sc-ok ${scoredG(g) ? "saved" : ""}" aria-label="${t("save")}">✓</button>` : ""}</div>
         <div class="mrow"><div class="pair ${wa ? "winner" : ""}">${pl(g.teamA[0])}<small>${pl(g.teamA[1])}</small></div>
           <div class="score">${edit ? inp("A") : box(g.scoreA)}<span class="colon">:</span>${edit ? inp("B") : box(g.scoreB)}</div>
           <div class="pair right ${wb ? "winner" : ""}">${pl(g.teamB[0])}<small>${pl(g.teamB[1])}</small></div></div></div>`; };
@@ -531,32 +542,38 @@ setLang(detectLang(BOOT.tgLang));
       ${finishCard}`;
   }
   // сохранение счёта матча (читаем оба поля карточки)
-  async function saveScoreFrom(box) {
+  async function saveScoreFrom(box, explicit) {
     const g = byId(state.games, box.dataset.gid); if (!g) return;
     const [ia, ib] = ["A", "B"].map(s => box.querySelector(`input.sc-in[data-side="${s}"]`));
     const num = x => x.value === "" ? null : Math.max(0, Math.min(99, Math.round(+x.value)));
     const a = num(ia), b = num(ib);
-    if ((a == null) !== (b == null)) return; // ждём второе число
-    if (a === g.scoreA && b === g.scoreB) return;
+    if ((a == null) !== (b == null)) { if (explicit) { toast(t("score_both")); (a == null ? ia : ib).focus(); } return false; } // ждём второе число
+    if (a === g.scoreA && b === g.scoreB) { markOk(box, a != null); return true; }
     const tt = byId(state.tournaments, g.tournamentId);
     if (tt.format === "playoff" && a != null && a === b) { toast(t("need_winner")); return; }
     const wasDone = tGamesOf(tt.id).filter(x => x.round === g.round).every(scoredG);
+    const prevA = g.scoreA, prevB = g.scoreB;
     g.scoreA = a; g.scoreB = b;
     box.classList.toggle("is-done", a != null);
     const [pa, pb] = box.querySelectorAll(".pair"); pa.classList.toggle("winner", a != null && a > b); pb.classList.toggle("winner", a != null && b > a);
-    try { await db.saveScore(g.id, a, b); } catch (e) { err(e); return; }
-    if (tt.format === "playoff") { try { await playoffAdvance(tt); } catch (e) { err(e); } }
+    savingN++; saveEpoch++;
+    try { await db.saveScore(g.id, a, b); markOk(box, a != null); }
+    catch (e) { savingN--; g.scoreA = prevA; g.scoreB = prevB; markOk(box, false, true); err(e); return false; }
+    try { if (tt.format === "playoff") { try { await playoffAdvance(tt); } catch (e) { err(e); } } } finally { savingN--; }
     const nowDone = tGamesOf(tt.id).filter(x => x.round === g.round).every(scoredG);
     state.view.liveRound = g.round;
     if (nowDone && !wasDone) toast(t("round_done", { n: g.round }));
-    if (isField(document.activeElement)) pendingLive = true; else render();
+    if (isField(document.activeElement)) pendingLive = true; else if (pendingLive && !savingN) liveReload(); else render();
+    return true;
   }
+  // кнопка ✓ матча: оранжевая — есть несохранённые цифры, зелёная — сохранено
+  const markOk = (box, saved, dirty) => { const ok = box && box.querySelector(".sc-ok"); if (!ok) return; ok.classList.toggle("dirty", !!dirty); ok.classList.toggle("saved", !!saved && !dirty); };
   async function playoffAdvance(tt) {
     const gs = tGamesOf(tt.id), maxR = Math.max(...gs.map(g => g.round)), upd = [];
     for (let r = 1; r <= maxR; r++) {
       const nx = playoffNext(gs.filter(g => g.round <= r)); if (!nx) continue;
       const ex = gs.filter(g => g.round === r + 1).sort((a, b) => a.court - b.court);
-      if (!ex.length) nx.forEach((m, i) => { const g = { id: gameId(tt.id, r + 1, i + 1), tournamentId: tt.id, round: r + 1, court: i + 1, teamA: m.teamA, teamB: m.teamB, scoreA: null, scoreB: null, label: m.label }; upd.push(g); gs.push(g); state.games.push(g); });
+      if (!ex.length) nx.forEach((m, i) => { const g = { id: gameId(tt.id, r + 1, i + 1), tournamentId: tt.id, round: r + 1, court: courtNo(tt.s.court_nums, i + 1), teamA: m.teamA, teamB: m.teamB, scoreA: null, scoreB: null, label: m.label }; upd.push(g); gs.push(g); state.games.push(g); });
       else if (ex.every(g => !scoredG(g))) nx.forEach((m, i) => { const g = ex[i]; if (g && (g.teamA.join() !== m.teamA.join() || g.teamB.join() !== m.teamB.join())) { g.teamA = m.teamA; g.teamB = m.teamB; upd.push(g); } });
     }
     if (upd.length) { await db.saveGames(upd); toast(t("po_next_ready")); }
@@ -567,7 +584,7 @@ setLang(detectLang(BOOT.tgLang));
     const S = strengthFn(), ids = tt.participantIds || [], courts = tt.courts || 2;
     const ms = tt.format === "mexicano" ? mexicanoRound(ids, gs, courts, S) : swissRound(ids, gs, courts, S, 2);
     if (!ms || !ms.length) return;
-    const r = maxR + 1, rows = ms.map(([a, b], i) => ({ id: gameId(tid, r, i + 1), tournamentId: tid, round: r, court: i + 1, teamA: a, teamB: b, scoreA: null, scoreB: null, label: null }));
+    const r = maxR + 1, rows = ms.map(([a, b], i) => ({ id: gameId(tid, r, i + 1), tournamentId: tid, round: r, court: courtNo(tt.s.court_nums, i + 1), teamA: a, teamB: b, scoreA: null, scoreB: null, label: null }));
     try { await db.saveGames(rows); if (r > (tt.rounds || 0)) await db.saveTournament(tRow(tt, { rounds: r })); state.view.liveRound = r; window.scrollTo(0, 0); await reload(); toast(t("round_ready", { n: r })); } catch (e) { err(e); }
   }
   async function removeLastRound(tid) {
@@ -600,6 +617,8 @@ setLang(detectLang(BOOT.tgLang));
         ${inp("tfPlace", t("t_place"), s.place)}
         <div class="field"><span class="lbl">${t("t_format")}</span><div class="wrap-tags">${fmts.map(x => `<span class="chip ${f.format===x?'active':''}" data-act="tf-format" data-val="${x}">${t(x)}</span>`).join("")}</div></div>
         <label class="row tf-toggle"><span>${t("t_pairs_mode")}<br><span class="tiny">${t("t_pairs_hint")}</span></span><input type="checkbox" id="tfPairs" data-act="tf-pairs" ${s.pairs ? "checked" : ""}></label>
+        ${inp("tfCourtNums", t("t_court_nums"), (s.court_nums || []).join(", "), "text", 'inputmode="numeric" autocomplete="off" placeholder="' + t("t_court_nums_ph") + '"')}
+        <p class="tiny" style="margin:-6px 0 12px;">${t("t_court_nums_hint")}</p>
         <div class="grid3">${inp("tfCourts", t("t_courts"), f.courts, "number", 'min="1" max="12"')}${inp("tfSlots", s.pairs ? t("t_pairs") : t("t_slots"), s.slots, "number", 'min="0" max="64"')}${inp("tfPrice", t("t_price"), s.price, "number", 'min="0"')}</div>
         <div class="grid2">${inp("tfMin", t("t_level_min"), s.level_min, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}${inp("tfMax", t("t_level_max"), s.level_max, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}</div>
         <p class="tiny" style="margin:-6px 0 12px;">${t("level_range")}: <b>${esc(rangeLabel(s))}</b></p>
@@ -616,6 +635,7 @@ setLang(detectLang(BOOT.tgLang));
   function readTf() {
     const f = state._tf; const g = id => document.getElementById(id); if (!f || !g("tfName")) return f;
     f.name = g("tfName").value.trim(); f.date = g("tfDate").value; f.courts = +g("tfCourts").value || 1;
+    if (g("tfCourtNums")) { f.s.court_nums = parseCourts(g("tfCourtNums").value); if (f.s.court_nums.length) f.courts = f.s.court_nums.length; }
     const num = v => v === "" ? null : +v;
     Object.assign(f.s, { time: g("tfTime").value, time_end: g("tfTimeEnd").value, place: g("tfPlace").value.trim(), slots: num(g("tfSlots").value), price: num(g("tfPrice").value), level_min: num(g("tfMin").value), level_max: num(g("tfMax").value), contact: g("tfContact").value.trim(), note: g("tfNote").value.trim(), reg_open: g("tfOpen").checked, pairs: g("tfPairs").checked, approval: g("tfApproval").checked });
     return f;
@@ -1056,14 +1076,17 @@ setLang(detectLang(BOOT.tgLang));
     v.querySelectorAll("input.sc-in").forEach(inp => {
       const box = inp.closest(".match"), other = () => box.querySelector(`input.sc-in[data-side="${inp.dataset.side === "A" ? "B" : "A"}"]`);
       inp.oninput = () => { const g = byId(state.games, inp.dataset.gid), tt = g && byId(state.tournaments, g.tournamentId), sc = (tt && tt.scoring) || {};
-        delete inp.dataset.auto; if (sc.mode !== "total" || !sc.target || inp.value === "") return; const o = other();
+        delete inp.dataset.auto; markOk(box, false, true); if (sc.mode !== "total" || !sc.target || inp.value === "") return; const o = other();
         if (o.value === "" || o.dataset.auto) { const val = sc.target - Math.round(+inp.value); if (val >= 0) { o.value = val; o.dataset.auto = "1"; } } };
       inp.onchange = () => saveScoreFrom(box);
+      const ok = box.querySelector(".sc-ok");
+      if (ok && !ok.dataset.bound) { ok.dataset.bound = "1"; ok.onpointerdown = e => e.preventDefault(); // фокус не уходит, пока не прочитали обе цифры
+        ok.onclick = async () => { if (!(await saveScoreFrom(box, true))) return; const ae = document.activeElement; if (ae && box.contains(ae) && ae.blur) ae.blur(); }; }
       inp.onkeydown = e => { if (e.key !== "Enter") return; e.preventDefault(); const all = [...v.querySelectorAll("input.sc-in")], i = all.indexOf(inp);
         const nx = all.slice(i + 1).find(x => x.value === "" && x.dataset.side === "A") || all.slice(i + 1).find(x => x.value === ""); if (nx) nx.focus(); else inp.blur(); };
     });
-    ["runCourts", "runRounds", "runTarget"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { const r = readRun(); if (id === "runCourts" && !r.touched) { const tt = byId(state.tournaments, r.tid); r.rounds = runDefaultRounds(r, runPlayers(tt.id).length); } render(); }; });
-    ["tfName","tfDate","tfTime","tfTimeEnd","tfPlace","tfCourts","tfSlots","tfPrice","tfMin","tfMax","tfContact","tfNote"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { readTf(); if (id === "tfMin" || id === "tfMax") render(); }; });
+    ["runCourtNums", "runCourts", "runRounds", "runTarget"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { const r = readRun(); if ((id === "runCourts" || id === "runCourtNums") && !r.touched) { const tt = byId(state.tournaments, r.tid); r.rounds = runDefaultRounds(r, runPlayers(tt.id).length); } render(); }; });
+    ["tfName","tfDate","tfTime","tfTimeEnd","tfPlace","tfCourtNums","tfCourts","tfSlots","tfPrice","tfMin","tfMax","tfContact","tfNote"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { readTf(); if (id === "tfMin" || id === "tfMax" || id === "tfCourtNums") render(); }; });
   }
   document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; state.view.t = null; state.view.editT = null; state.view.run = null; state.view.fix = null; state.view.pid = null; state.view.editP = null; window.scrollTo(0, 0); render(); });
   const hb = homeBtnEl(); if (hb) { hb.onclick = addToHome; hb.title = t("home_add_long"); const hl = hb.querySelector(".home-lbl"); if (hl) hl.textContent = t("home_btn"); }
