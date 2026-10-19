@@ -330,3 +330,9 @@ nav.tabs button.active .nav-avatar { border-color: var(--court); box-shadow: 0 0
 /* прокрутка: не «протягиваем» жест наружу (в Telegram это сворачивало приложение) */
 html, body { overscroll-behavior-y: none; }
 .card:has(table.tbl), .chips-scroll { overscroll-behavior: contain; touch-action: pan-x pan-y; }
+/* кнопка ✓ подтверждения счёта */
+.match .court-lbl { display: flex; align-items: center; gap: 4px; }
+.sc-ok { margin-left: auto; width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: var(--ink-3); font-size: 16px; font-weight: 800; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent; }
+.sc-ok.dirty { background: var(--court); border-color: var(--court); color: var(--court-ink, #0A0A0B); box-shadow: 0 0 14px rgba(255,122,26,.45); }
+.sc-ok.saved { border-color: rgba(74,222,128,.55); color: #4ADE80; }
+.sc-ok:active { transform: scale(.92); }

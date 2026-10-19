@@ -113,20 +113,30 @@ const DATA = BOOT.data;
       console.error("sync failed", e);
     } finally { saving = false; updateSyncLabel(); }
   }
+  // идёт ввод в поле — экран не перерисовываем (иначе пропадает набранный счёт и прыгает клавиатура)
+  const typing = () => { const el = document.activeElement; return !!el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !["checkbox","radio","file","button"].includes(el.type))); };
+  let pendingReload = false, pendingRender = false;
+  function bgRender() { if (typing()) { pendingRender = true; return; } render(); }
+  document.addEventListener("focusout", () => setTimeout(() => {
+    if (typing()) return;
+    if (pendingReload) { pendingReload = false; reloadFromDb(); }
+    else if (pendingRender) { pendingRender = false; render(); }
+  }, 250));
   async function reloadFromDb() {
+    if (typing()) { pendingReload = true; return; }
     if (dirty || saving) { reloadTimer = setTimeout(reloadFromDb, 2000); return; } // свои несохранённые правки важнее
     try {
       const d = await db.loadAll();
       state.players = d.players; state.clubs = d.clubs; state.bookings = d.bookings;
       state.tournaments = d.tournaments.slice().sort((a,b)=>(a.seq||0)-(b.seq||0)); state.games = d.games; state.log = d.log;
-      render(); loadPublicNames();
+      if (typing()) { pendingRender = true; } else render(); loadPublicNames();
     } catch(e) { console.error("reload failed", e); }
   }
   // Публичные имена аккаунтов (как в Телеграме) для привязанных игроков — показываем в скобках рядом с именем в лиге
   async function loadPublicNames() {
     const ids = state.players.map(p => p.userId).filter(id => id && !(id in profileCache));
     if (!ids.length) return;
-    try { const m = await db.profileNames(ids); let ch = false; ids.forEach(id => { profileCache[id] = m[id] || ""; if (m[id]) ch = true; }); if (ch) render(); } catch(e) {}
+    try { const m = await db.profileNames(ids); let ch = false; ids.forEach(id => { profileCache[id] = m[id] || ""; if (m[id]) ch = true; }); if (ch) bgRender(); } catch(e) {}
   }
   function publicName(pid) {
     const p = byId(state.players, pid); if (!p || !p.userId) return "";
@@ -1415,13 +1425,13 @@ const DATA = BOOT.data;
     }
     return `
       <div class="match">
-        <div class="court-lbl">Корт ${g.court}${g.label ? " · "+esc(g.label) : ""}${canWrite ? ` <button class="edit-pen" data-act="edit-game" data-gid="${g.id}" title="поменять состав">✎</button>` : ""}</div>
+        <div class="court-lbl">Корт ${g.court}${g.label ? " · "+esc(g.label) : ""}${canWrite ? ` <button class="edit-pen" data-act="edit-game" data-gid="${g.id}" title="поменять состав">✎</button>` : ""}${canWrite ? `<button type="button" class="sc-ok ${a!=null&&b!=null?"saved":""}" data-act="score-ok" data-gid="${g.id}" aria-label="сохранить счёт">✓</button>` : ""}</div>
         <div class="mrow">
           <div class="pair ${winA?'winner':''}">${pl(g.teamA[0])}<small>${pl(g.teamA[1])}</small></div>
           <div class="score">
-            <input type="number" min="0" max="99" data-act="score" data-gid="${g.id}" data-side="A" value="${a==null?"":a}"${canWrite?"":" disabled"}>
+            <input type="number" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" min="0" max="99" data-act="score" data-gid="${g.id}" data-side="A" value="${a==null?"":a}"${canWrite?"":" disabled"}>
             <span class="colon">:</span>
-            <input type="number" min="0" max="99" data-act="score" data-gid="${g.id}" data-side="B" value="${b==null?"":b}"${canWrite?"":" disabled"}>
+            <input type="number" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" min="0" max="99" data-act="score" data-gid="${g.id}" data-side="B" value="${b==null?"":b}"${canWrite?"":" disabled"}>
           </div>
           <div class="pair right ${winB?'winner':''}">${pl(g.teamB[0])}<small>${pl(g.teamB[1])}</small></div>
         </div>
@@ -2397,7 +2407,18 @@ const DATA = BOOT.data;
       };
       else if (act==="toggle-form") el.onclick = () => { toggleInArr(state.view.formSel, el.dataset.id); render(); };
       else if (act==="toggle-dyn") el.onclick = () => { toggleInArr(state.view.dynSel, el.dataset.id); render(); };
-      else if (act==="score") el.onchange = () => saveScore(el.dataset.gid, el.dataset.side, el.value);
+      else if (act==="score") {
+        el.onchange = () => saveScore(el.dataset.gid, el.dataset.side, el.value);
+        el.oninput = () => { const ok = el.closest(".match")?.querySelector(".sc-ok"); if (ok) { ok.classList.add("dirty"); ok.classList.remove("saved"); } };
+        // Enter / «Готово» — к следующему пустому полю, иначе закрыть клавиатуру
+        el.onkeydown = e => { if (e.key !== "Enter") return; e.preventDefault(); const all = [...document.querySelectorAll('input[data-act="score"]')], i = all.indexOf(el);
+          const nx = all.slice(i + 1).find(x => x.value === ""); if (nx) nx.focus(); else el.blur(); };
+      }
+      else if (act==="score-ok") {
+        // нажатие не отнимает фокус до сохранения: сначала читаем обе цифры, сохраняем, потом закрываем клавиатуру
+        el.onpointerdown = e => e.preventDefault();
+        el.onclick = () => saveMatchScores(el.dataset.gid, true);
+      }
     });
 
     const fmt = document.getElementById("tFormat");
@@ -2709,9 +2730,19 @@ const DATA = BOOT.data;
     toast("Состав изменён");
     render(); commit(1500);
   }
+  // сохранить обе цифры матча сразу (кнопка ✓)
+  function saveMatchScores(gid, closeKb) {
+    const m = document.querySelector('.sc-ok[data-gid="' + gid + '"]')?.closest(".match"); if (!m) return;
+    const ia = m.querySelector('input[data-side="A"]'), ib = m.querySelector('input[data-side="B"]');
+    if (ia && ib && ((ia.value === "") !== (ib.value === ""))) { toast("Впиши счёт обеих пар"); (ia.value === "" ? ia : ib).focus(); return; }
+    if (ia) saveScore(gid, "A", ia.value); if (ib) saveScore(gid, "B", ib.value);
+    const ok = m.querySelector(".sc-ok"); if (ok) { ok.classList.remove("dirty"); ok.classList.toggle("saved", !!(ia && ia.value !== "")); }
+    if (closeKb && document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    saveNow();
+  }
   function saveScore(gid, side, val) {
     const g = state.games.find(x=>x.id===gid); if (!g) return;
-    const v = val===""? null : Math.max(0, parseInt(val,10));
+    const v = val===""? null : Math.min(99, Math.max(0, parseInt(val,10)));
     const before = (g.scoreA==null?"—":g.scoreA) + ":" + (g.scoreB==null?"—":g.scoreB);
     if (side==="A") g.scoreA = Number.isNaN(v)?null:v; else g.scoreB = Number.isNaN(v)?null:v;
     g.decided = g.scoreA!=null && g.scoreB!=null && g.scoreA!==g.scoreB;
