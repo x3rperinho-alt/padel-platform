@@ -436,7 +436,7 @@ setLang(detectLang(BOOT.tgLang));
           : `<div class="chips-wrap" style="margin-top:8px;">${ids.map(id => `<span class="chip sm run-p">${esc(pname(id))} <b>${lv(id)}</b></span>`).join("")}</div>`}
       </div>
       <div class="card">
-        <label class="field"><span class="lbl">${t("t_court_nums")}</span><input type="text" inputmode="numeric" autocomplete="off" id="runCourtNums" value="${esc(r.courtNums.join(", "))}" placeholder="${t("t_court_nums_ph")}"></label>
+        <label class="field"><span class="lbl">${t("t_court_nums")}</span><input type="text" inputmode="decimal" autocomplete="off" id="runCourtNums" value="${esc(r.courtNums.join(", "))}" placeholder="${t("t_court_nums_ph")}"></label>
         <p class="tiny" style="margin:-6px 0 12px;">${r.courtNums.length ? t("run_courts_used", { list: r.courtNums.slice(0, r.courts).join(", ") }) : t("t_court_nums_hint")}</p>
         <div class="grid2">${inp("runCourts", t("t_courts"), r.courts, 'min="1" max="12"')}${f === "playoff" ? `<div></div>` : inp("runRounds", t("run_rounds"), r.rounds, `min="1" max="${fullRR || 40}"`)}</div>
         <div class="field"><span class="lbl">${t("run_scoring")}</span><div class="wrap-tags">
@@ -617,7 +617,7 @@ setLang(detectLang(BOOT.tgLang));
         ${inp("tfPlace", t("t_place"), s.place)}
         <div class="field"><span class="lbl">${t("t_format")}</span><div class="wrap-tags">${fmts.map(x => `<span class="chip ${f.format===x?'active':''}" data-act="tf-format" data-val="${x}">${t(x)}</span>`).join("")}</div></div>
         <label class="row tf-toggle"><span>${t("t_pairs_mode")}<br><span class="tiny">${t("t_pairs_hint")}</span></span><input type="checkbox" id="tfPairs" data-act="tf-pairs" ${s.pairs ? "checked" : ""}></label>
-        ${inp("tfCourtNums", t("t_court_nums"), (s.court_nums || []).join(", "), "text", 'inputmode="numeric" autocomplete="off" placeholder="' + t("t_court_nums_ph") + '"')}
+        ${inp("tfCourtNums", t("t_court_nums"), (s.court_nums || []).join(", "), "text", 'inputmode="decimal" autocomplete="off" placeholder="' + t("t_court_nums_ph") + '"')}
         <p class="tiny" style="margin:-6px 0 12px;">${t("t_court_nums_hint")}</p>
         <div class="grid3">${inp("tfCourts", t("t_courts"), f.courts, "number", 'min="1" max="12"')}${inp("tfSlots", s.pairs ? t("t_pairs") : t("t_slots"), s.slots, "number", 'min="0" max="64"')}${inp("tfPrice", t("t_price"), s.price, "number", 'min="0"')}</div>
         <div class="grid2">${inp("tfMin", t("t_level_min"), s.level_min, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}${inp("tfMax", t("t_level_max"), s.level_max, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}</div>
