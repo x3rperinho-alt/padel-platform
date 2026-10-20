@@ -616,20 +616,45 @@ const DATA = BOOT.data;
   ];
   // ---- TeamAmericano (fixed pairs) helpers ----
   function teamTable(t, games) {
+    // порядок пар: очки → победы → личные встречи (победы, затем разница) → общая разница
     const key = p => p.slice().sort().join("|");
     const map = {};
-    (t.teams||[]).forEach(tm => { map[key(tm.players)] = { players: tm.players.slice(), pts:0, pa:0, w:0, l:0, gp:0 }; });
+    const mk = players => ({ players: players.slice(), k: key(players), pts:0, pa:0, w:0, l:0, d:0, gp:0, h2h:{} });
+    (t.teams||[]).forEach(tm => { map[key(tm.players)] = mk(tm.players); });
     games.forEach(g => {
       if (g.scoreA==null || g.scoreB==null) return;
-      [[g.teamA, g.scoreA, g.scoreB],[g.teamB, g.scoreB, g.scoreA]].forEach(([team, own, opp]) => {
-        const k = key(team); const r = map[k] || (map[k] = { players: team.slice(), pts:0, pa:0, w:0, l:0, gp:0 });
-        r.pts += own; r.pa += opp; r.gp++;
-        if (g.decided!==false) { if (own>opp) r.w++; else if (opp>own) r.l++; }
-        if (own===opp) r.d = (r.d||0)+1;
+      [[g.teamA, g.teamB, g.scoreA, g.scoreB],[g.teamB, g.teamA, g.scoreB, g.scoreA]].forEach(([team, opp, own, oppS]) => {
+        const k = key(team); const r = map[k] || (map[k] = mk(team));
+        r.pts += own; r.pa += oppS; r.gp++;
+        if (g.decided!==false) { if (own>oppS) r.w++; else if (oppS>own) r.l++; }
+        if (own===oppS) r.d++;
+        const h = r.h2h[key(opp)] || (r.h2h[key(opp)] = { w:0, diff:0 });
+        if (g.decided!==false && own>oppS) h.w++;
+        h.diff += own - oppS;
       });
     });
-    Object.values(map).forEach(r => { r.d = r.d||0; });
-    return Object.values(map).sort((a,b) => (b.pts-a.pts) || (b.w-a.w) || ((b.pts-b.pa)-(a.pts-a.pa)));
+    const base = (a,b) => (b.pts-a.pts) || (b.w-a.w);
+    const rows = Object.values(map).sort(base);
+    const out = [];
+    for (let i = 0; i < rows.length; ) {
+      let j = i; while (j+1 < rows.length && !base(rows[i], rows[j+1])) j++;
+      const grp = rows.slice(i, j+1);
+      if (grp.length > 1) {
+        const ks = new Set(grp.map(r => r.k));
+        grp.forEach(r => { r.hw = 0; r.hd = 0; Object.entries(r.h2h).forEach(([k,v]) => { if (ks.has(k)) { r.hw += v.w; r.hd += v.diff; } }); });
+        grp.sort((a,b) => (b.hw-a.hw) || (b.hd-a.hd) || ((b.pts-b.pa)-(a.pts-a.pa)));
+      }
+      out.push(...grp); i = j+1;
+    }
+    const same = (a,b) => !base(a,b) && (a.hw||0)===(b.hw||0) && (a.hd||0)===(b.hd||0) && (a.pts-a.pa)===(b.pts-b.pa);
+    out.forEach((r,i) => {
+      const p = out[i-1], nx = out[i+1];
+      r.place = p && same(p,r) ? p.place : i+1;
+      // чем решилось место относительно соседа с теми же очками
+      const nb = (p && !base(p,r)) ? p : (nx && !base(r,nx)) ? nx : null;
+      r.tb = !nb ? "" : r.w!==nb.w ? "wins" : (r.hw||0)!==(nb.hw||0) || (r.hd||0)!==(nb.hd||0) ? "h2h" : (r.pts-r.pa)!==(nb.pts-nb.pa) ? "diff" : "tie";
+    });
+    return out;
   }
   function plural(n, one, few, many) { const m = n%10, h = n%100; return n + " " + (m===1 && h!==11 ? one : (m>=2 && m<=4 && (h<10||h>=20)) ? few : many); }
   function teamRoundsPlan(teamsCount, courts) {
@@ -1057,11 +1082,11 @@ const DATA = BOOT.data;
     const standingsRows = isTeam ? `<table class="tbl">
       <tr><th></th><th>Пара</th><th title="победы-ничьи-поражения">W-D-L</th><th>Очки</th><th>+/−</th></tr>
       ${teamTable(t, games).map((r,i) => `<tr>
-        <td><span class="pos-badge ${i===0?'gold':''}">${i+1}</span></td>
+        <td><span class="pos-badge ${r.place===1?'gold':''}">${r.place}</span>${r.tb==="h2h" ? `<div class="tiny" title="место решила личная встреча" style="font-size:10px;white-space:nowrap;">⚔ л/в</div>` : ""}</td>
         <td style="white-space:normal;">${pl(r.players[0])}${hasElo ? ` <span class="tiny">${dCell(r.players[0])}</span>` : ""} + ${pl(r.players[1])}${hasElo ? ` <span class="tiny">${dCell(r.players[1])}</span>` : ""}</td>
         <td>${r.w}-${r.d}-${r.l}</td><td class="lb-elo">${r.pts}</td><td class="tiny">${(r.pts-r.pa)>=0?"+":""}${r.pts-r.pa}</td>
       </tr>`).join("")}
-    </table>` : `<table class="tbl">
+    </table><p class="tiny" style="margin:6px 0 0;">При равенстве очков: победы → личные встречи → разница.</p>` : `<table class="tbl">
       <tr><th></th><th>Игрок</th><th>Очки</th><th title="победы-ничьи-поражения">W-D-L</th>${hasElo ? `<th title="изменение Эло за турнир">Эло</th>` : ""}${isSwiss ? `<th title="Buchholz — сумма очков соперников">Bh</th>` : ""}</tr>
       ${standings.map((s,i) => `<tr>
         <td><span class="pos-badge ${i===0?'gold':''}">${i+1}</span></td>
@@ -1148,7 +1173,39 @@ const DATA = BOOT.data;
     const tb = tournamentTable(t.id);
     return tb.order.length ? tb.order : (t.participantIds || []);
   }
+  function isPairFormat(t) { return (t.format==="roundrobin" || t.format==="playoff") && (t.teams||[]).length>=2; }
+  function pairStandings(t) {
+    // командные форматы: место у пары, оба партнёра делят его
+    const games = state.games.filter(g => g.tournamentId===t.id);
+    let rows = teamTable(t, games).filter(r => r.gp > 0);
+    if (t.format==="playoff") {
+      const fin = games.find(g => g.round===2 && g.label==="Финал"), third = games.find(g => g.round===2 && g.label!=="Финал");
+      const done = g => g && g.scoreA!=null && g.scoreB!=null && g.scoreA!==g.scoreB;
+      if (done(fin)) {
+        const k = p => p.slice().sort().join("|");
+        const order = [fin.scoreA>fin.scoreB ? fin.teamA : fin.teamB, fin.scoreA>fin.scoreB ? fin.teamB : fin.teamA];
+        if (done(third)) order.push(third.scoreA>third.scoreB ? third.teamA : third.teamB, third.scoreA>third.scoreB ? third.teamB : third.teamA);
+        const ks = order.map(k);
+        const top = ks.map(x => rows.find(r => r.k===x)).filter(Boolean);
+        const rest = rows.filter(r => !ks.includes(r.k));
+        top.forEach((r,i) => { r.place = i+1; }); rest.forEach(r => { r.place = top.length+1; });
+        rows = top.concat(rest);
+      }
+    }
+    return rows;
+  }
+  function champions(t) { return rankedForPrizes(t).filter(r => r.place===1).map(r => r.id); }
   function rankedForPrizes(t) {
+    // каждый элемент: { id, key, place, n } — place общий у равных/у партнёров, n — сколько мест (игроков или пар)
+    if (isPairFormat(t)) {
+      const rows = pairStandings(t);
+      if (rows.length) {
+        const out = [];
+        rows.forEach(r => r.players.forEach(id => out.push({ id, key: "pair" + r.place, place: r.place, n: rows.length })));
+        return out;
+      }
+    }
+    const withPlace = arr => arr.map((x,i) => Object.assign(x, { place: i+1, n: arr.length }));
     // by points, then wins, then point diff (as in the tournament table)
     const tb = tournamentTable(t.id);
     const diff = {};
@@ -1157,11 +1214,11 @@ const DATA = BOOT.data;
       // SwissCourt: очки → Buchholz → победы → разница; у продолжения — общая таблица с первым этапом
       const sw = swissStats(t, stageGames(t));
       const order = Object.keys(sw.gp).filter(id => sw.gp[id] > 0);
-      return order.sort((a,b) => (sw.pts[b]-sw.pts[a]) || ((sw.bh[b]||0)-(sw.bh[a]||0)) || ((sw.wins[b]||0)-(sw.wins[a]||0)) || ((sw.diff[b]||0)-(sw.diff[a]||0)))
-        .map(id => ({ id, key: [sw.pts[id], sw.bh[id]||0, sw.wins[id]||0, sw.diff[id]||0].join("|") }));
+      return withPlace(order.sort((a,b) => (sw.pts[b]-sw.pts[a]) || ((sw.bh[b]||0)-(sw.bh[a]||0)) || ((sw.wins[b]||0)-(sw.wins[a]||0)) || ((sw.diff[b]||0)-(sw.diff[a]||0)))
+        .map(id => ({ id, key: [sw.pts[id], sw.bh[id]||0, sw.wins[id]||0, sw.diff[id]||0].join("|") })));
     }
-    return tb.order.slice().sort((a,b) => (tb.pts[b]-tb.pts[a]) || ((tb.wins[b]||0)-(tb.wins[a]||0)) || ((diff[b]||0)-(diff[a]||0)))
-      .map(id => ({ id, key: [tb.pts[id], tb.wins[id]||0, diff[id]||0].join("|") }));
+    return withPlace(tb.order.slice().sort((a,b) => (tb.pts[b]-tb.pts[a]) || ((tb.wins[b]||0)-(tb.wins[a]||0)) || ((diff[b]||0)-(diff[a]||0)))
+      .map(id => ({ id, key: [tb.pts[id], tb.wins[id]||0, diff[id]||0].join("|") })));
   }
   function prizePool(t) { const pr = moneyOf(t).prize; return pr.enabled && pr.fee ? (+pr.fee) * tournamentParticipants(t).length : 0; }
   function defaultAmounts(pool, places) {
@@ -1185,14 +1242,16 @@ const DATA = BOOT.data;
     const pool = prizePool(t);
     const amounts = prizeAmounts(t);
     const ranked = rankedForPrizes(t);
+    const per = isPairFormat(t) && ranked.length && ranked[0].key.startsWith("pair") ? 2 : 1; // в парных форматах приз — на пару
     const payouts = [];
-    let i = 0;
-    while (i < ranked.length && i < amounts.length) {
+    let i = 0, u = 0; // i — индекс игрока, u — индекс призового места (игрок или пара)
+    while (i < ranked.length && u < amounts.length) {
       let j = i; while (j+1 < ranked.length && ranked[j+1].key === ranked[i].key) j++;
       const ids = ranked.slice(i, j+1).map(r => r.id);
-      const total = amounts.slice(i, j+1).reduce((a,b)=>a+b, 0);
-      payouts.push({ place: i+1, to: j+1, ids, total, each: Math.round(total / ids.length) });
-      i = j+1;
+      const units = Math.max(1, Math.round(ids.length / per));
+      const total = amounts.slice(u, u+units).reduce((a,b)=>a+b, 0);
+      payouts.push({ place: u+1, to: u+units, ids, total, each: Math.round(total / ids.length) });
+      i = j+1; u += units;
     }
     return { pool, amounts, payouts };
   }
@@ -1325,7 +1384,7 @@ const DATA = BOOT.data;
     const lines = [`🎾 ${t.name} — итоги`, fmtDate(t.date) + " · " + tLabel(t) + (scoringLabel(t) ? " · " + scoringLabel(t) : ""), ""];
     const medal = i => i===0 ? "🥇" : i===1 ? "🥈" : i===2 ? "🥉" : (i+1)+".";
     const ed = eloDetail(t.id, linkedParent(t) ? [linkedParent(t).id] : []); const dl = id => (id in ed.delta) ? ", Эло " + fmtDelta(ed.delta[id]) : "";
-    if (t.format==="roundrobin" && (t.teams||[]).length>=2) teamTable(t, state.games.filter(g=>g.tournamentId===t.id)).forEach((r, i) => lines.push(`${medal(i)} ${playerName(r.players[0])} + ${playerName(r.players[1])} — ${r.pts} очк., ${r.w}-${r.d}-${r.l}`));
+    if (isPairFormat(t) && pairStandings(t).length) pairStandings(t).forEach(r => lines.push(`${medal(r.place-1)} ${playerName(r.players[0])} + ${playerName(r.players[1])} — ${r.pts} очк., ${r.w}-${r.d}-${r.l}`));
     else if (t.format==="swiss") { const sw = swissStats(t, stageGames(t)); if (linkedParent(t)) lines.splice(1, 0, "Американо → SwissCourt · итог по двум этапам"); ranked.forEach((r, i) => lines.push(`${medal(i)} ${playerName(r.id)} — ${sw.pts[r.id]||0} очк., ${sw.wins[r.id]||0}-${sw.draws[r.id]||0}-${(sw.gp[r.id]||0)-(sw.wins[r.id]||0)-(sw.draws[r.id]||0)}${dl(r.id)}`)); }
     else ranked.forEach((r, i) => lines.push(`${medal(i)} ${playerName(r.id)} — ${tb.pts[r.id]} очк., ${tb.wdl(r.id)}${dl(r.id)}`));
     const pp = prizePayouts(t);
@@ -1345,8 +1404,8 @@ const DATA = BOOT.data;
   }
   async function tablePng(t) {
     const tb = tournamentTable(t.id);
-    const ranked = (t.format==="roundrobin" && (t.teams||[]).length>=2)
-      ? teamTable(t, state.games.filter(g=>g.tournamentId===t.id)).map(r => ({ name: playerName(r.players[0]) + " + " + playerName(r.players[1]), pts: r.pts, wl: r.w + "-" + r.d + "-" + r.l }))
+    const ranked = isPairFormat(t) && pairStandings(t).length
+      ? pairStandings(t).map(r => ({ place: r.place, name: playerName(r.players[0]) + " + " + playerName(r.players[1]), pts: r.pts, wl: r.w + "-" + r.d + "-" + r.l }))
       : t.format==="swiss" ? (() => { const sw = swissStats(t, stageGames(t)); return rankedForPrizes(t).map(r => ({ name: playerName(r.id), pts: sw.pts[r.id]||0, wl: (sw.wins[r.id]||0) + "-" + (sw.draws[r.id]||0) + "-" + ((sw.gp[r.id]||0)-(sw.wins[r.id]||0)-(sw.draws[r.id]||0)) })); })()
       : rankedForPrizes(t).map(r => ({ name: playerName(r.id), pts: tb.pts[r.id], wl: tb.wdl(r.id) }));
     const W = 720, rowH = 46, top = 120, H = top + rowH*ranked.length + 40;
@@ -1361,8 +1420,9 @@ const DATA = BOOT.data;
     ranked.forEach((r, i) => {
       const y = top + i*rowH;
       x.fillStyle = i%2 ? "#141417" : "#101013"; x.fillRect(16, y, W-32, rowH);
-      x.fillStyle = i===0 ? "#FF7A1A" : "#1C1C20"; x.beginPath(); x.arc(44, y+rowH/2, 14, 0, Math.PI*2); x.fill();
-      x.fillStyle = i===0 ? "#0A0A0B" : "#B5B0A8"; x.font = "700 14px Manrope, Arial, sans-serif"; x.textAlign = "center"; x.fillText(String(i+1), 44, y+rowH/2+5); x.textAlign = "left";
+      const pl = r.place || i+1;
+      x.fillStyle = pl===1 ? "#FF7A1A" : "#1C1C20"; x.beginPath(); x.arc(44, y+rowH/2, 14, 0, Math.PI*2); x.fill();
+      x.fillStyle = pl===1 ? "#0A0A0B" : "#B5B0A8"; x.font = "700 14px Manrope, Arial, sans-serif"; x.textAlign = "center"; x.fillText(String(pl), 44, y+rowH/2+5); x.textAlign = "left";
       x.fillStyle = "#F4F1EC"; x.font = "600 15px 'Unbounded', 'Manrope', sans-serif"; x.fillText(r.name, 90, y+rowH/2+7);
       x.textAlign = "right"; x.font = "700 17px 'Unbounded', 'Manrope', sans-serif"; x.fillText(String(r.pts), W-140, y+rowH/2+7);
       x.fillStyle = "#B5B0A8"; x.font = "500 15px Manrope, Arial, sans-serif"; x.fillText(r.wl, W-40, y+rowH/2+6); x.textAlign = "left";
@@ -1592,7 +1652,7 @@ const DATA = BOOT.data;
     const prof = computeProfile(pid);
     const rank = board.findIndex(p => p.id === pid);
     const ts = leagueTournaments().filter(t => tournamentTable(t.id).order.includes(pid));
-    const places = ts.map(t => { const r = rankedForPrizes(t); const i = r.findIndex(x => x.id === pid); return { t, place: i+1, n: r.length }; });
+    const places = ts.map(t => { const x = rankedForPrizes(t).find(x => x.id === pid); return { t, place: x ? x.place : 0, n: x ? x.n : 0 }; });
     const podium = places.filter(p => p.place >= 1 && p.place <= 3).length, wins = places.filter(p => p.place === 1).length;
     const s = streakInfo(playerSeqs()[pid]||[]);
     const p = byId(state.players, pid);
@@ -1614,7 +1674,7 @@ const DATA = BOOT.data;
   }
   function profileTournamentsHtml(pid) {
     const ts = leagueTournaments().filter(t => tournamentTable(t.id).order.includes(pid));
-    const places = ts.map(t => { const r = rankedForPrizes(t); const i = r.findIndex(x => x.id === pid); return { t, place: i+1, n: r.length }; });
+    const places = ts.map(t => { const x = rankedForPrizes(t).find(x => x.id === pid); return { t, place: x ? x.place : 0, n: x ? x.n : 0 }; });
     if (!places.length) return "";
     return `<div class="card"><h3>Турниры</h3><div class="stack" style="margin-top:8px;">${places.slice().reverse().map(p => `<div class="row" style="cursor:pointer;" data-act="open-tournament-tab" data-id="${p.t.id}"><span>${esc(p.t.name)}<br><span class="tiny">${fmtDate(p.t.date)} · ${tLabel(p.t)}</span></span><strong>${p.place===1?"🥇":p.place===2?"🥈":p.place===3?"🥉":""} ${p.place}<span class="tiny">/${p.n}</span></strong></div>`).join("")}</div></div>`;
   }
@@ -1831,8 +1891,9 @@ const DATA = BOOT.data;
     const tables = {}; ts.forEach(t => tables[t.id] = tournamentTable(t.id));
     if (last) {
       const tb = tables[last.id];
-      title(titles, "🏆", "Чемпион", "победитель последнего турнира", holders(top(tb.order.map(id=>({id, v: tb.pts[id], n:1})),"v",1), x => x.v+" очков · "+last.name));
-      title(anti, "🥄", "Деревянная ложка", "последнее место в последнем турнире", holders(top(tb.order.map(id=>({id, v: tb.pts[id], n:1})),"v",-1), x => x.v+" очков · "+last.name));
+      const rk = rankedForPrizes(last), lastPl = Math.max(...rk.map(r => r.place));
+      title(titles, "🏆", "Чемпион", "победитель последнего турнира", holders(rk.filter(r => r.place===1).map(r => ({ id: r.id, v: tb.pts[r.id] })), x => x.v+" очков · "+last.name));
+      title(anti, "🥄", "Деревянная ложка", "последнее место в последнем турнире", holders(rk.filter(r => r.place===lastPl && lastPl>1).map(r => ({ id: r.id, v: tb.pts[r.id] })), x => x.v+" очков · "+last.name));
     }
     const ebt = eloByTournament();
     if (ts.length>=2) {
@@ -1912,7 +1973,7 @@ const DATA = BOOT.data;
     const totals = played.map(id => ({ id, w: seqs[id].filter(r=>r.win).length, pf: seqs[id].reduce((a,r)=>a+r.own,0) }));
     rec("🏆", "Больше всех побед", holders(top(totals.map(x=>({id:x.id, v:x.w, n:1})),"v",1), x => x.v+" побед"));
     rec("🎯", "Больше всех очков", holders(top(totals.map(x=>({id:x.id, v:x.pf, n:1})),"v",1), x => x.v+" очков"));
-    rec("👑", "Чемпионы турниров", ts.map(t => ({ label: N(tables[t.id].order[0]), sub: t.name+" · "+tables[t.id].pts[tables[t.id].order[0]]+" очков" })));
+    rec("👑", "Чемпионы турниров", ts.map(t => { const c = champions(t); return { label: c.map(N).join(" + "), sub: t.name+" · "+(tables[t.id].pts[c[0]]||0)+" очков" }; }));
 
     return { titles, anti, personal, milestones, records, last, tables };
   }
@@ -2058,11 +2119,11 @@ const DATA = BOOT.data;
     const ord = orderedGames().filter(g => g.scoreA!=null && g.scoreB!=null);
     if (ord.length) { const f = ord[0]; const w = f.scoreA>f.scoreB ? f.teamA : f.teamB; add("🥇", "Первая игра лиги", `${N(f.teamA[0])} + ${N(f.teamA[1])}  ${f.scoreA}:${f.scoreB}  ${N(f.teamB[0])} + ${N(f.teamB[1])}`, f.scoreA!==f.scoreB ? "первая победа — " + N(w[0]) + " + " + N(w[1]) : "и сразу ничья"); }
     // чемпионы: кто чаще всех выигрывал турниры
-    const champs = {}; ts.forEach(t => { const r = rankedForPrizes(t); if (r.length) champs[r[0].id] = (champs[r[0].id]||0)+1; });
+    const champs = {}; ts.forEach(t => champions(t).forEach(id => champs[id] = (champs[id]||0)+1));
     const cs = Object.entries(champs).sort((a,b)=>b[1]-a[1]);
     if (cs.length) add("👑", "Больше всех титулов", cs.filter(x=>x[1]===cs[0][1]).map(x=>N(x[0])).join(", "), plural(cs[0][1], "победа", "победы", "побед") + " в турнирах из " + ts.length);
     // подиумы
-    const pod = {}; ts.forEach(t => rankedForPrizes(t).slice(0,3).forEach(r => pod[r.id]=(pod[r.id]||0)+1));
+    const pod = {}; ts.forEach(t => rankedForPrizes(t).filter(r => r.place<=3).forEach(r => pod[r.id]=(pod[r.id]||0)+1));
     const ps = Object.entries(pod).sort((a,b)=>b[1]-a[1]);
     if (ps.length && ts.length>=2) add("🏅", "Чаще всех на подиуме", ps.filter(x=>x[1]===ps[0][1]).map(x=>N(x[0])).join(", "), plural(ps[0][1], "раз", "раза", "раз") + " в тройке из " + ts.length);
     // самый частый напарник / самая частая пара
@@ -2099,7 +2160,7 @@ const DATA = BOOT.data;
       const r = rankedForPrizes(t);
       return `<div class="card" style="padding:10px 12px;">
         <div class="row" data-act="hall-toggle" data-id="${t.id}" style="cursor:pointer;">
-          <div><strong>${esc(t.name)}</strong><div class="tiny">${fmtDate(t.date)} · ${tLabel(t)}${r.length ? " · 🥇 " + esc(playerName(r[0].id)) : ""}</div></div>
+          <div><strong>${esc(t.name)}</strong><div class="tiny">${fmtDate(t.date)} · ${tLabel(t)}${r.length ? " · 🥇 " + esc(champions(t).map(playerName).join(" + ")) : ""}</div></div>
           <span class="tiny">${open[t.id] ? "▴" : "▾"}</span>
         </div>
         ${open[t.id] ? `<div style="margin-top:8px;">${linkedParent(t) ? `<p class="tiny" style="margin:0 0 6px;">По обоим этапам вместе.</p>` : ""}${factsListHtml(gameFacts(games, ed))}</div>` : ""}
@@ -2135,12 +2196,12 @@ const DATA = BOOT.data;
     const ts = leagueTournaments().filter(t => tournamentTable(t.id).order.length);
     if (ts.length < 2) return `<div class="empty">Нужно минимум 2 турнира</div>`;
     const places = {}; // pid -> [{ti, place, n}]
-    ts.forEach((t, ti) => { const r = rankedForPrizes(t); r.forEach((x, i) => { (places[x.id] = places[x.id]||[]).push({ ti, place: i+1, n: r.length }); }); });
+    ts.forEach((t, ti) => { const r = rankedForPrizes(t); r.forEach(x => { (places[x.id] = places[x.id]||[]).push({ ti, place: x.place, n: x.n }); }); });
     const played = state.players.filter(p => places[p.id]);
     const sel = state.view.dynSel.length ? state.view.dynSel : played.filter(p=>p.active).slice(0,4).map(p=>p.id);
     const chips = played.map(p => `<span class="chip ${sel.includes(p.id)?'active':''}" data-act="toggle-dyn" data-id="${p.id}" style="font-size:12.5px;padding:5px 10px;">${esc(p.name)}</span>`).join("");
     const colors = ["#FF7A1A","#F4F1EC","#FF5C5C","#8E8A84","#FFB05C","#3BB2A0","#C96BFF","#5CA8FF"];
-    const maxN = Math.max(...ts.map(t => tournamentTable(t.id).order.length));
+    const maxN = Math.max(...ts.map(t => (rankedForPrizes(t)[0]||{n:1}).n));
     const W=340, H=180, padL=26, padR=14, padT=12, padB=24;
     const x = ti => padL + (W-padL-padR) * (ts.length===1 ? 0.5 : ti/(ts.length-1));
     const y = pl => padT + (H-padT-padB) * (pl-1)/Math.max(1, maxN-1);
