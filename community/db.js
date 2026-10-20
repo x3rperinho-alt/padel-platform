@@ -97,7 +97,10 @@ export function createDb(cfg) {
   async function saveGames(games) { if (!games.length) return; await ensureSession(); const { error } = await sb.from("games").upsert(games.map(gameRow), { onConflict: "league_id,id" }); if (error) throw error; }
   async function saveScore(gid, a, b) { await ensureSession(); const { error } = await sb.from("games").update({ score_a: a, score_b: b }).eq("league_id", L).eq("id", gid); if (error) throw error; }
   async function deleteGames(ids) { if (!ids.length) return; await ensureSession(); const { error } = await sb.from("games").delete().eq("league_id", L).in("id", ids); if (error) throw error; }
-  async function deleteTournament(tid) { await ensureSession(); const { error } = await sb.from("tournaments").delete().eq("league_id", L).eq("id", tid); if (error) throw error; }
+  async function deleteTournament(tid) { await ensureSession();
+    // матчи удаляем явно (в базе они и так удаляются каскадом вместе с турниром — это подстраховка, чтобы рейтинг не учёл «осиротевшие» игры)
+    await sb.from("games").delete().eq("league_id", L).eq("tournament_id", tid);
+    const { error } = await sb.from("tournaments").delete().eq("league_id", L).eq("id", tid); if (error) throw error; }
   async function setRegistration(tid, pid, patch) { await ensureSession(); const { error } = await sb.from("registrations").update(patch).eq("league_id", L).eq("tournament_id", tid).eq("player_id", pid); if (error) throw error; }
   async function removeRegistration(tid, pid) { await ensureSession(); const { error } = await sb.from("registrations").delete().eq("league_id", L).eq("tournament_id", tid).eq("player_id", pid); if (error) throw error; }
   async function addRegistration(tid, pid, status, team) { await ensureSession(); const { error } = await sb.from("registrations").upsert({ league_id: L, tournament_id: tid, player_id: pid, status: status || "main", paid: false, team_no: team ?? null, approval: "ok", created_at: new Date().toISOString() }, { onConflict: "league_id,tournament_id,player_id" }); if (error) throw error; }

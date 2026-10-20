@@ -310,7 +310,7 @@ setLang(detectLang(BOOT.tgLang));
     const row = {}; const R = id => row[id] = row[id] || { id, pts: 0, pa: 0, w: 0, l: 0, d: 0, g: 0 };
     tGames.forEach(g => { [[g.teamA, g.scoreA, g.scoreB], [g.teamB, g.scoreB, g.scoreA]].forEach(([team, own, opp]) => team.forEach(id => { const r = R(id); r.g++; r.pts += own; r.pa += opp; if (own > opp) r.w++; else if (own < opp) r.l++; else r.d++; })); });
     const eloD = id => (E.seq[id] || []).filter(x => x.g.tournamentId === tid).reduce((a, x) => a + x.d, 0);
-    const rows = Object.values(row).sort((a, b) => b.pts - a.pts || (b.pts - b.pa) - (a.pts - a.pa));
+    const rows = Object.values(row).sort((a, b) => b.pts - a.pts || b.w - a.w || (b.pts - b.pa) - (a.pts - a.pa));
     const finished = tt.status === "played" || (tt.date && tt.date < today());
     const roundsOpen = !finished || state.view.roundsOpen === tid;
     const byRound = {}; tGames.forEach(g => (byRound[g.round] = byRound[g.round] || []).push(g));
@@ -603,6 +603,127 @@ setLang(detectLang(BOOT.tgLang));
     const tt = byId(state.tournaments, tid); if (!(await ask(t("cancel_start_confirm")))) return;
     try { await db.deleteGames(tGamesOf(tid).map(g => g.id)); await db.saveTournament(tRow(tt, { status: "scheduled", s: { ...tt.s, reg_open: tt.s.reg_was ?? tt.s.reg_open } })); state.view.liveRound = null; await reload(); } catch (e) { err(e); }
   }
+  // ---------- сезон: очки за места в турнирах, таблица по лигам, финал ----------
+  // Новый сезон — просто добавить строку сюда (даты включительно)
+  const SEASONS = [{ id: "s1", n: 1, start: "2026-10-24", end: "2026-12-25", finalists: 8 }];
+  const curSeason = () => SEASONS.find(s => today() <= s.end) || SEASONS[SEASONS.length - 1];
+  const LEAGUES = ["D", "C"];
+  // лига турнира: вручную из настроек или по уровню допуска
+  const tLeague = tt => { const v = tt.s.season_league; if (v === "none") return null; if (LEAGUES.includes(v)) return v;
+    const lo = tt.s.level_min != null ? +tt.s.level_min : null, hi = tt.s.level_max != null ? +tt.s.level_max : null;
+    const ref = lo != null ? lo : hi != null ? hi - 0.001 : null; if (ref == null) return "D";
+    return ref < 2.5 ? "D" : ref < 3.5 ? "C" : null; };
+  // итоговые места турнира: группы с одинаковым результатом делят место; beaten — сколько игроков ниже
+  function tournamentPlaces(tt) {
+    const sg = tGamesOf(tt.id).filter(scoredG); if (!sg.length) return null;
+    let rows, unitPairs = false;
+    const teams = teamsOf(tt);
+    if (isTeamF(tt.format) && teams.length) {
+      unitPairs = true;
+      rows = (tt.format === "playoff" ? playoffPlaces(teams, sg).map(r => ({ ids: r.players, key: [r.place || 99, -r.out, -r.pts].join() }))
+        : teamTable(teams, sg).map(r => ({ ids: r.players, key: [r.pts, r.w, r.pts - r.pa].join() }))).filter(r => r.ids.length);
+    } else {
+      const ids = [...new Set(sg.flatMap(g => g.teamA.concat(g.teamB)))];
+      rows = playerTable(ids, sg).filter(r => r.g > 0).map(r => ({ ids: [r.id], key: [r.pts, r.w, r.pts - r.pa].join() }));
+    }
+    const N = rows.reduce((a, r) => a + r.ids.length, 0), out = {};
+    let i = 0, above = 0;
+    while (i < rows.length) {
+      let j = i; while (j + 1 < rows.length && rows[j + 1].key === rows[i].key) j++;
+      const grp = rows.slice(i, j + 1), inGrp = grp.reduce((a, r) => a + r.ids.length, 0), place = i + 1;
+      const beaten = N - above - inGrp, bonus = place === 1 ? 10 : place === 2 ? 6 : place === 3 ? 3 : 0;
+      grp.forEach(r => r.ids.forEach(id => out[id] = { place, of: rows.length, pairs: unitPairs, beaten, bonus, pts: 5 + beaten + bonus }));
+      above += inGrp; i = j + 1;
+    }
+    return out;
+  }
+  // таблица сезона для лиги
+  function seasonTable(season, lg) {
+    const ts = state.tournaments.filter(tt => tt.status === "played" && tt.date && tt.date >= season.start && tt.date <= season.end && tLeague(tt) === lg)
+      .sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.seq - b.seq);
+    const by = {};
+    ts.forEach(tt => { const pl = tournamentPlaces(tt); if (!pl) return;
+      Object.entries(pl).forEach(([id, r]) => { const x = by[id] = by[id] || { id, pts: 0, n: 0, wins: 0, pod: 0, list: [] }; x.pts += r.pts; x.n++; if (r.place === 1) x.wins++; if (r.place <= 3) x.pod++; x.list.push({ tt, ...r }); }); });
+    const rows = Object.values(by).sort((a, b) => b.pts - a.pts || b.wins - a.wins || b.pod - a.pod || pname(a.id).localeCompare(pname(b.id)));
+    rows.forEach((r, k) => { const pr = rows[k - 1]; r.pos = pr && pr.pts === r.pts && pr.wins === r.wins && pr.pod === r.pod ? pr.pos : k + 1; r.z = k < season.finalists; });
+    return { ts: ts.filter(tt => tGamesOf(tt.id).some(scoredG)), rows };
+  }
+  const ptsWord = n => t(n % 10 === 1 && n % 100 !== 11 ? "pt1" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? "pt2" : "pt5", { n });
+  function viewSeason() {
+    const S = curSeason(), me = myPlayer();
+    const daysLeft = Math.max(0, Math.ceil((new Date(S.end + "T23:59:59") - new Date()) / 864e5));
+    const started = today() >= S.start;
+    const tabs = LEAGUES.map(lg => ({ lg, ...seasonTable(S, lg) }));
+    let lg = state.view.sLeague;
+    if (!lg) { const mine = me && tabs.find(x => x.rows.some(r => r.id === me.id)); lg = mine ? mine.lg : "D"; }
+    const cur = tabs.find(x => x.lg === lg), rows = cur.rows, F = S.finalists;
+    const myRow = me && rows.find(r => r.id === me.id), cut = rows[F - 1];
+    let myCard;
+    if (myRow) {
+      const inZone = myRow.z, gap = !inZone && cut ? cut.pts - myRow.pts + 1 : 0;
+      myCard = `<div class="card hot-card s-me"><div class="s-me-pos un">${myRow.pos}</div>
+        <div style="flex:1;min-width:0;"><div class="un" style="font-weight:700;font-size:16px;">${t("s_my_place", { n: myRow.pos })}</div>
+        <div class="tiny" style="margin-top:3px;">${ptsWord(myRow.pts)} · ${t("s_tourn_n", { n: myRow.n })}</div>
+        <div class="s-me-zone ${inZone ? "in" : ""}">${inZone ? "🔥 " + t("s_in_zone") : t("s_to_zone", { n: gap })}</div></div></div>`;
+    } else myCard = `<div class="card s-me"><div class="tiny" style="line-height:1.5;">${me ? t("s_not_yet", { lg }) : t("need_card")}</div></div>`;
+    const lgChips = `<div class="seg s-lg">${tabs.map(x => `<button class="${x.lg === lg ? "active" : ""}" data-act="s-league" data-val="${x.lg}">${t("s_league", { lg: x.lg })} <span class="s-lg-n">${x.rows.length}</span></button>`).join("")}</div>`;
+    const detail = r => r.list.map(x => `<div class="s-det"><div><b>${esc(x.tt.name)}</b><div class="tiny">${dateFmt(x.tt.date)} · ${t(x.pairs ? "s_place_pairs" : "s_place", { p: x.place, of: x.of })}</div></div>
+      <div class="s-calc"><span class="tiny">5 + ${x.beaten}${x.bonus ? " + " + x.bonus : ""} =</span> <b>${x.pts}</b></div></div>`).join("");
+    const table = rows.length ? `<table class="tbl s-tbl"><tr><th></th><th>${t("players")}</th><th>${t("s_t_short")}</th><th>${t("s_pts")}</th></tr>
+      ${rows.map((r, k) => { const open = state.view.sOpen === r.id, isMe = me && r.id === me.id;
+        return `${k === F && rows.length > F ? `<tr class="s-cut"><td colspan="4"><span>${t("s_final_zone", { n: F })}</span></td></tr>` : ""}
+        <tr class="s-row ${isMe ? "me" : ""} ${r.z ? "z" : ""}" data-act="s-open" data-id="${r.id}">
+          <td><span class="pos-badge ${r.pos === 1 ? "gold" : ""}">${r.pos}</span></td>
+          <td class="lb-name"><span class="lb-p">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span></span></td>
+          <td>${r.n}</td><td class="lb-elo">${r.pts}<span class="s-chev ${open ? "open" : ""}">›</span></td></tr>
+        ${open ? `<tr class="s-open-row"><td colspan="4">${detail(r)}<div class="s-det-foot"><span class="tiny">${t("s_total")}</span><b>${ptsWord(r.pts)}</b></div>
+          <button class="btn sm ghost" style="margin-top:8px;" data-act="open-profile" data-id="${r.id}">${t("open_profile_btn")}</button></td></tr>` : ""}`; }).join("")}</table>`
+      : `<div class="empty" style="padding:22px 6px;"><div class="ic">🏆</div>${started ? t("s_empty_lg", { lg }) : t("s_soon", { d: dateFmt(S.start) })}</div>`;
+    const how = state.view.sHow;
+    return `<div class="section-head"><h2>${t("season")}</h2></div>
+      <div class="card s-hero">
+        <div class="kick-s">${t("s_name", { n: S.n })}</div>
+        <div class="un" style="font-weight:800;font-size:22px;margin-top:6px;">${dateFmt(S.start)} — ${dateFmt(S.end)}</div>
+        <div class="s-stats">
+          <div><b class="un">${started ? daysLeft : Math.max(0, Math.ceil((new Date(S.start + "T00:00:00") - new Date()) / 864e5))}</b><span class="tiny">${t(started ? "s_days_left" : "s_days_to_start")}</span></div>
+          <div><b class="un">${cur.ts.length}</b><span class="tiny">${t("s_played", { lg })}</span></div>
+          <div><b class="un">${t("s_top", { n: F })}</b><span class="tiny">${t("s_to_final")}</span></div>
+        </div>
+      </div>
+      ${lgChips}
+      ${myCard}
+      <div class="card">${table}</div>
+      <div class="card s-how"><button class="rounds-toggle ${how ? "open" : ""}" data-act="s-how" style="margin:0;">${t("s_how")}<span class="chev">›</span></button>
+        ${how ? `<div class="s-how-body">
+          <div class="s-rule"><b class="un">+5</b><span>${t("s_r1")}</span></div>
+          <div class="s-rule"><b class="un">+1</b><span>${t("s_r2")}</span></div>
+          <div class="s-rule"><b class="un">+10 / +6 / +3</b><span>${t("s_r3")}</span></div>
+          <p class="tiny" style="margin:12px 0 6px;">${t("s_ex_h")}</p>
+          <div class="s-ex">${[[1, 10], [2, 6], [3, 3], [8, 0], [16, 0]].map(([p, bn]) => `<div><span>${t("s_place_short", { p })}</span><span class="tiny">5 + ${16 - p}${bn ? " + " + bn : ""}</span><b class="un">${5 + 16 - p + bn}</b></div>`).join("")}</div>
+          <p class="tiny" style="margin:12px 0 0;line-height:1.55;">${t("s_pairs_note")}</p>
+          <p class="tiny" style="margin:8px 0 0;line-height:1.55;">${t("s_final_note", { n: F, d: dateFmt(S.end) })}</p>
+          <p class="tiny" style="margin:8px 0 0;line-height:1.55;">${t("s_after_note")}</p>
+          <p class="tiny" style="margin:8px 0 0;line-height:1.55;">${t("s_tie_note")}</p>
+        </div>` : ""}</div>`;
+  }
+  // ---------- секретные номинации (видит только админ) ----------
+  function nominationsHtml() {
+    const S = curSeason(), E = computeElo();
+    const ts = state.tournaments.filter(tt => tt.status === "played" && tt.date >= S.start && tt.date <= S.end && tLeague(tt));
+    const tids = new Set(ts.map(tt => tt.id)), sg = state.games.filter(g => tids.has(g.tournamentId) && scoredG(g));
+    const cnt = {}, wins = {}; ts.forEach(tt => { const pl = tournamentPlaces(tt); if (!pl) return; Object.entries(pl).forEach(([id, r]) => { cnt[id] = (cnt[id] || 0) + 1; if (r.place === 1) wins[id] = (wins[id] || 0) + 1; }); });
+    const elo = {}; Object.entries(E.seq).forEach(([id, arr]) => arr.forEach(x => { if (tids.has(x.g.tournamentId)) elo[id] = (elo[id] || 0) + x.d; }));
+    const pairs = {}; sg.forEach(g => [[g.teamA, g.scoreA - g.scoreB], [g.teamB, g.scoreB - g.scoreA]].forEach(([tm, df]) => { const k = tm.slice().sort().join("|"); const q = pairs[k] = pairs[k] || { ids: tm, n: 0, df: 0 }; q.n++; q.df += df; }));
+    const top = (obj, fmt) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 3).filter(([, v]) => v > 0).map(([id, v]) => `<div class="nom-row">${avatarHtml(id, 26)}<span>${esc(pname(id))}</span><b>${fmt(v)}</b></div>`).join("") || `<div class="tiny">—</div>`;
+    const bp = Object.values(pairs).filter(p => p.n >= 2).sort((a, b) => b.df / b.n - a.df / a.n).slice(0, 3);
+    const nom = (ic, title, body) => `<div class="nom"><div class="nom-h">${ic} <b>${title}</b></div>${body}</div>`;
+    return `<div class="card"><h3>${t("nom_title")}</h3><p class="tiny" style="margin:4px 0 12px;">🔒 ${t("nom_hint", { n: S.n })}</p>
+      ${nom("🔥", t("nom_active"), top(cnt, v => t("s_tourn_n", { n: v })))}
+      ${nom("📈", t("nom_progress"), top(elo, v => "+" + Math.round(v) + " Elo"))}
+      ${nom("🏆", t("nom_wins"), top(wins, v => "×" + v))}
+      ${nom("🤝", t("nom_pair"), bp.length ? bp.map(p => `<div class="nom-row"><span>${esc(pname(p.ids[0]))} + ${esc(pname(p.ids[1]))}</span><b>${p.df >= 0 ? "+" : ""}${(p.df / p.n).toFixed(1)}</b></div>`).join("") : `<div class="tiny">—</div>`)}
+      <p class="tiny" style="margin:10px 0 0;">${t("nom_fair")}</p></div>`;
+  }
   function tournamentFormHtml(tt) {
     const f = state._tf || (state._tf = { id: tt.id, name: tt.name || "", date: tt.date || "", format: tt.format || "americano", courts: tt.courts || 2, status: tt.status || "scheduled", s: { reg_open: true, ...tt.s } });
     const s = f.s;
@@ -625,6 +746,7 @@ setLang(detectLang(BOOT.tgLang));
         ${inp("tfContact", t("t_contact"), s.contact, "url", 'placeholder="https://t.me/…"')}
         <label class="field"><span class="lbl">${t("t_note")}</span><textarea id="tfNote" rows="3">${esc(s.note || "")}</textarea></label>
         <label class="row" style="cursor:pointer;"><span>${t("t_reg_open")}</span><input type="checkbox" id="tfOpen" ${s.reg_open ? "checked" : ""} style="width:22px;height:22px;"></label>
+        <label class="field"><span class="lbl">${t("t_season")}</span><select id="tfSeason">${[["auto", t("t_season_auto", { lg: tLeague({ s: { ...s, season_league: "auto" } }) || "—" })], ["D", t("s_league", { lg: "D" })], ["C", t("s_league", { lg: "C" })], ["none", t("t_season_none")]].map(([v, l]) => `<option value="${v}" ${(s.season_league || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="row tf-toggle"><span>${t("t_approval")}<br><span class="tiny">${t("t_approval_hint")}</span></span><input type="checkbox" id="tfApproval" ${s.approval ? "checked" : ""}></label>
         <div class="pf-actions" style="margin-top:14px;justify-content:space-between;">
           ${f.isNew ? "<span></span>" : `<button class="btn sm ghost danger" data-act="tf-delete">${t("delete")}</button>`}
@@ -635,6 +757,7 @@ setLang(detectLang(BOOT.tgLang));
   function readTf() {
     const f = state._tf; const g = id => document.getElementById(id); if (!f || !g("tfName")) return f;
     f.name = g("tfName").value.trim(); f.date = g("tfDate").value; f.courts = +g("tfCourts").value || 1;
+    if (g("tfSeason")) f.s.season_league = g("tfSeason").value;
     if (g("tfCourtNums")) { f.s.court_nums = parseCourts(g("tfCourtNums").value); if (f.s.court_nums.length) f.courts = f.s.court_nums.length; }
     const num = v => v === "" ? null : +v;
     Object.assign(f.s, { time: g("tfTime").value, time_end: g("tfTimeEnd").value, place: g("tfPlace").value.trim(), slots: num(g("tfSlots").value), price: num(g("tfPrice").value), level_min: num(g("tfMin").value), level_max: num(g("tfMax").value), contact: g("tfContact").value.trim(), note: g("tfNote").value.trim(), reg_open: g("tfOpen").checked, pairs: g("tfPairs").checked, approval: g("tfApproval").checked });
@@ -875,7 +998,7 @@ setLang(detectLang(BOOT.tgLang));
     const queue = state.players.filter(p => p.levelStatus !== "ok");
     const pendingN = queue.filter(p => p.levelStatus === "pending").length;
     const sub = state.view.adm || (pendingN ? "review" : "ratings");
-    const tabs = [["review", t("review_tab"), pendingN], ["ratings", t("ratings_admin")], ...(isAdmin() ? [["visits", t("visits_tab")]] : []), ["roles", t("roles")]];
+    const tabs = [["review", t("review_tab"), pendingN], ["ratings", t("ratings_admin")], ...(isAdmin() ? [["visits", t("visits_tab")], ["nom", "🔒 " + t("nom_tab")]] : []), ["roles", t("roles")]];
     let body = "";
     if (sub === "ratings") {
       const q = (state.view.q || "").toLowerCase(); const E = computeElo();
@@ -892,6 +1015,7 @@ setLang(detectLang(BOOT.tgLang));
           </div></div>`).join("")}</div></div>`;
     } else if (sub === "roles") body = membersCardHtml();
     else if (sub === "visits") body = visitsHtml();
+    else if (sub === "nom" && isAdmin()) body = nominationsHtml();
     else if (sub === "review") body = !queue.length ? `<div class="card"><div class="empty"><div class="ic">✓</div>${t("review_empty")}</div></div>`
       : `<p class="tiny" style="margin:0 0 10px;">${t("review_hint")}</p>` + queue.sort((a, b) => (a.levelStatus === "pending" ? 0 : 1) - (b.levelStatus === "pending" ? 0 : 1)).map(p => {
         const c = p.contacts || {}, src = c.level_source || "", nick = c[src];
@@ -951,10 +1075,11 @@ setLang(detectLang(BOOT.tgLang));
     else if (!me && state.tab !== "admin") v.innerHTML = viewOnboarding();
     else if (state.tab === "tournaments") v.innerHTML = viewTournaments();
     else if (state.tab === "rating") v.innerHTML = viewRating();
+    else if (state.tab === "season") v.innerHTML = viewSeason();
     else if (state.tab === "admin") v.innerHTML = viewAdmin();
     else v.innerHTML = viewProfile();
     document.querySelectorAll("nav.tabs button").forEach(b => { b.classList.toggle("active", b.dataset.tab === state.tab); if (b.dataset.tab === "admin") b.hidden = !canEdit(); });
-    const labels = { tournaments: t("tournaments"), rating: t("rating"), admin: t("admin"), profile: t("profile") };
+    const labels = { tournaments: t("tournaments"), season: t("season"), rating: t("rating"), admin: t("admin"), profile: t("profile") };
     document.querySelectorAll("nav.tabs button .lbl").forEach(l => l.textContent = labels[l.parentElement.dataset.tab]);
     updateNavAvatar(); updateNavBadges(); bind(v);
   }
@@ -1022,6 +1147,9 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "live-cancel") on(() => cancelRun(id));
       else if (a === "fix-open") on(() => { state.view.fix = id; state.view.liveTab = "m"; state.view.liveRound = 1; window.scrollTo(0, 0); render(); });
       else if (a === "fix-done") on(() => { state.view.fix = null; state.view.liveRound = null; window.scrollTo(0, 0); render(); });
+      else if (a === "s-league") on(() => { state.view.sLeague = el.dataset.val; state.view.sOpen = null; render(); });
+      else if (a === "s-open") on(() => { state.view.sOpen = state.view.sOpen === id ? null : id; render(); });
+      else if (a === "s-how") on(() => { state.view.sHow = !state.view.sHow; render(); });
       else if (a === "toggle-rounds") on(() => { state.view.roundsOpen = state.view.roundsOpen === id ? null : id; render(); });
       else if (a === "toggle-ach") on(() => { state.view.achOpen = state.view.achOpen === id ? null : id; render(); });
       else if (a === "mh-all") on(() => { state.view.mhAll = state.view.mhAll === id ? null : id; render(); });
