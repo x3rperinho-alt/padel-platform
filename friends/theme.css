@@ -336,3 +336,12 @@ html, body { overscroll-behavior-y: none; }
 .sc-ok.dirty { background: var(--court); border-color: var(--court); color: var(--court-ink, #0A0A0B); box-shadow: 0 0 14px rgba(255,122,26,.45); }
 .sc-ok.saved { border-color: rgba(74,222,128,.55); color: #4ADE80; }
 .sc-ok:active { transform: scale(.92); }
+
+/* раунды полосой (как в приложении сообщества) */
+.rnd-chips { margin-top: 2px; }
+.rnd-chip { min-width: 38px; justify-content: center; }
+.rnd-chip.done:not(.active) { color: #4ADE80; border-color: rgba(74,222,128,.35); }
+.rnd-chip.future { opacity: .35; cursor: default; }
+.rest-line { margin: 4px 2px 0; }
+.all-done { text-align: center; font-weight: 700; color: #4ADE80; padding: 10px 12px; border: 1px solid rgba(74,222,128,.3); border-radius: 14px; background: rgba(74,222,128,.08); }
+.live-tabs { margin: 0 0 12px; }

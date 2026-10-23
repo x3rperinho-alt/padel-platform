@@ -2,13 +2,36 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
 export function createDb(cfg) {
-  const sb = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  // Хранилище сессии: память + localStorage. В Telegram на iPhone localStorage не сохраняется, и после выбора фото
+  // или переключения приложений библиотека «теряла» вход. Память держит сессию, пока открыто приложение.
+  const mem = {};
+  const storage = {
+    getItem: k => { if (k in mem) return mem[k]; try { return localStorage.getItem(k); } catch (e) { return null; } },
+    setItem: (k, v) => { mem[k] = v; try { localStorage.setItem(k, v); } catch (e) {} },
+    removeItem: k => { delete mem[k]; try { localStorage.removeItem(k); } catch (e) {} },
+  };
+  const sb = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage } });
   const L = cfg.LEAGUE;
+  // Подстраховка: если вход всё же пропал, а мы внутри Telegram — тихо входим заново и повторяем действие
+  let tgInitData = null;
+  async function ensureSession() {
+    const { data } = await sb.auth.getSession(); if (data.session) return data.session;
+    if (tgInitData) { try { await signInTelegram(tgInitData); } catch (e) {} const r = await sb.auth.getSession(); return r.data.session; }
+    return null;
+  }
+  const authLost = e => /not signed in|not a member|JWT|jwt/.test(String((e && e.message) || ""));
+  async function R(fn, args) {
+    await ensureSession();
+    let r = await sb.rpc(fn, args);
+    if (r.error && authLost(r.error) && tgInitData) { try { await signInTelegram(tgInitData); } catch (e) {} r = await sb.rpc(fn, args); }
+    return r;
+  }
   let snapshot = {}; // table -> { id -> JSON } последнее известное состояние базы
 
   // ---------- вход ----------
   async function session() { const { data } = await sb.auth.getSession(); return data.session; }
   async function signInTelegram(initData) {
+    tgInitData = initData;
     const { data, error } = await sb.functions.invoke("telegram-auth", { body: { initData, league: L } });
     if (error || !data || !data.session) throw new Error((data && data.error) || (error && error.message) || "telegram auth failed");
     await sb.auth.setSession({ access_token: data.session.access_token, refresh_token: data.session.refresh_token });
@@ -33,18 +56,19 @@ export function createDb(cfg) {
     const s = await session(); if (!s) return;
     await sb.from("profiles").upsert({ user_id: s.user.id, display_name: name || s.user.user_metadata?.name || s.user.email || "" }, { onConflict: "user_id", ignoreDuplicates: true });
   }
-  async function joinLeague(code) { const { error } = await sb.rpc("join_league", { p_league: L, p_code: code }); if (error) throw error; }
-  async function claimPlayer(playerId) { const { error } = await sb.rpc("claim_player", { p_league: L, p_player: playerId }); if (error) throw error; }
-  async function updateMyProfile(name, avatar) { const { error } = await sb.rpc("update_my_profile", { p_league: L, p_name: name, p_avatar: avatar || null }); if (error) throw error; }
+  async function joinLeague(code) { const { error } = await R("join_league", { p_league: L, p_code: code }); if (error) throw error; }
+  async function claimPlayer(playerId) { const { error } = await R("claim_player", { p_league: L, p_player: playerId }); if (error) throw error; }
+  async function updateMyProfile(name, avatar) { const { error } = await R("update_my_profile", { p_league: L, p_name: name, p_avatar: avatar || null }); if (error) throw error; }
   async function listMembers() {
+    await ensureSession();
     const { data, error } = await sb.from("league_members").select("user_id, role, player_id").eq("league_id", L);
     if (error) throw error;
     const names = await profileNames((data || []).map(m => m.user_id));
     return (data || []).map(m => ({ userId: m.user_id, role: m.role, playerId: m.player_id, name: names[m.user_id] || "" }));
   }
-  async function setMemberRole(userId, role) { const { error } = await sb.rpc("set_member_role", { p_league: L, p_user: userId, p_role: role }); if (error) throw error; }
-  async function removeMember(userId) { const { error } = await sb.rpc("remove_member", { p_league: L, p_user: userId }); if (error) throw error; }
-  async function setDisplayName(name) { const s = await session(); if (!s) return; const { error } = await sb.from("profiles").update({ display_name: name }).eq("user_id", s.user.id); if (error) throw error; }
+  async function setMemberRole(userId, role) { const { error } = await R("set_member_role", { p_league: L, p_user: userId, p_role: role }); if (error) throw error; }
+  async function removeMember(userId) { const { error } = await R("remove_member", { p_league: L, p_user: userId }); if (error) throw error; }
+  async function setDisplayName(name) { await ensureSession(); const s = await session(); if (!s) return; const { error } = await sb.from("profiles").update({ display_name: name }).eq("user_id", s.user.id); if (error) throw error; }
 
   // ---------- загрузка ----------
   const rowsToState = (r) => ({
@@ -71,6 +95,7 @@ export function createDb(cfg) {
   const keyCols = { players: "league_id,id", clubs: "league_id,name", bookings: "league_id,id", tournaments: "league_id,id", games: "league_id,id" };
 
   async function loadAll() {
+    await ensureSession();
     const q = (t, sel) => sb.from(t).select(sel || "*").eq("league_id", L);
     const [players, clubs, bookings, tournaments, games, logs] = await Promise.all([
       q("players"), q("clubs"), q("bookings"), q("tournaments_public"), q("games"), sb.from("logs").select("*").eq("league_id", L).order("at", { ascending: false }).limit(300),
@@ -85,6 +110,7 @@ export function createDb(cfg) {
 
   // ---------- сохранение: сравниваем с последним снимком, пишем только разницу ----------
   async function sync(st, newLogs) {
+    await ensureSession();
     const sr = stateToRows(st);
     // турниры раньше игр (внешний ключ), удаление — игры раньше турниров
     for (const t of ["players", "clubs", "bookings", "tournaments", "games"]) {
@@ -116,7 +142,7 @@ export function createDb(cfg) {
   }
   async function profileNames(ids) {
     if (!ids.length) return {};
-    const { data, error } = await sb.rpc("member_names", { p_league: L });
+    const { data, error } = await R("member_names", { p_league: L });
     if (error) throw error;
     const want = new Set(ids);
     return Object.fromEntries((data || []).filter(p => want.has(p.user_id)).map(p => [p.user_id, p.display_name]));

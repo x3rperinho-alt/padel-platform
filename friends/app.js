@@ -1104,6 +1104,8 @@ const DATA = BOOT.data;
     const factsPanel = state.view.tFacts === tid && !finished ? tournamentFactsHtml(t, allG, ed) : "";
     const stageNote = "";
     const p1Games = parent ? state.games.filter(g=>g.tournamentId===parent.id).sort((a,b)=> a.round-b.round || a.court-b.court) : [];
+    // турнир идёт: как в приложении сообщества — вкладки «Матчи | Таблица»
+    const running = !finished && (allG.length > 0 || p1Games.length > 0), liveTab = state.view.liveTab === "t" ? "t" : "m";
     const p1ByRound = {}; p1Games.forEach(g => { (p1ByRound[g.round] = p1ByRound[g.round]||[]).push(g); });
     const p1Done = p1Games.length && p1Games.every(g => g.scoreA!=null && g.scoreB!=null);
     const stage1Html = parent ? `
@@ -1125,7 +1127,8 @@ const DATA = BOOT.data;
       ${stageNote}
       ${canWrite && state.view.editT === tid ? tournamentEditHtml(t) : ""}
 
-      <div class="card">
+      ${running ? `<div class="seg live-tabs"><button class="${liveTab==="m"?"active":""}" data-act="live-tab" data-val="m">Матчи</button><button class="${liveTab==="t"?"active":""}" data-act="live-tab" data-val="t">Таблица</button></div>` : ""}
+      ${running && liveTab === "m" ? "" : `<div class="card">
         <h3>Таблица</h3>
         <div class="toolbar">
           ${anyScored && !finished ? `<button class="btn sm${state.view.tFacts===tid?' primary':''}" data-act="t-facts" data-id="${tid}" title="интересное за турнир">Факты</button>` : ""}
@@ -1136,11 +1139,11 @@ const DATA = BOOT.data;
         ${Object.keys(ed.perGame).length ? `<p class="tiny" style="margin:6px 0 0;">Эло — изменение за этот турнир по сравнению с рейтингом до его начала${isSwiss ? "; Bh — Buchholz, сумма очков соперников" : ""}${own ? "; в скобках — очки этап 1 + этап 2" : ""}.</p>` : ""}
         ${eloPanel}
         ${factsPanel}
-      </div>
+      </div>`}
       ${finished ? `<div class="card"><h3>Статистика турнира</h3>${linkedParent(t) ? `<p class="tiny" style="margin:4px 0 0;">По обоим этапам вместе.</p>` : ""}<div style="margin-top:8px;">${factsListHtml(gameFacts(allG, ed))}</div></div>` : ""}
 
       ${finished ? `<button class="rounds-toggle ${state.view.roundsOpen === tid ? "open" : ""}" data-act="toggle-rounds" data-id="${tid}">${state.view.roundsOpen === tid ? "Скрыть раунды" : `Посмотреть раунды · ${Object.keys(byRound).length + (parent ? Object.keys(p1ByRound).length : 0)}`}<span class="chev">›</span></button>` : ""}
-      ${!finished || state.view.roundsOpen === tid ? roundsHtml : ""}
+      ${!finished ? (running && liveTab === "t" ? "" : roundStripHtml(t, games, parent, p1Games)) : state.view.roundsOpen === tid ? roundsHtml : ""}
 
       ${financeCardHtml(t)}
 
@@ -1306,6 +1309,44 @@ const DATA = BOOT.data;
       </div>`;
   }
   function setFinance(t, patch) { Object.assign(moneyOf(t), patch); addLog("Финансы «" + t.name + "»: корты " + (patch.court==null?"—":patch.court)); commit(2000); render(); }
+  // ---- раунды полосой, как в приложении сообщества: номера раундов сверху, на экране — один текущий раунд ----
+  function roundStripHtml(t, games, parent, p1Games) {
+    const ent = [];
+    const grp = (gs, stage1, tt) => { const by = {}; gs.forEach(g => (by[g.round] = by[g.round] || []).push(g));
+      Object.keys(by).sort((a,b)=>a-b).forEach(r => ent.push({ key: (stage1 ? "1·" : "") + r, r: +r, label: (stage1 ? "Э1·" : "") + r, games: by[r].slice().sort((a,b)=>a.court-b.court), t: tt, stage1 })); };
+    if (parent) grp(p1Games, true, parent);
+    grp(games, false, t);
+    if (!ent.length) return "";
+    const sc = g => g.scoreA!=null && g.scoreB!=null, done = e => e.games.every(sc);
+    const lr = state.view.liveRound;
+    let ci = lr && lr.tid === t.id && lr.n === ent.length ? ent.findIndex(e => e.key === lr.key) : -1;
+    // только что внесли счёт — остаёмся на этом раунде (покажем кнопку «к следующему»), иначе — первый незаполненный
+    if (ci < 0 && state.view.lastScoredGid) ci = ent.findIndex(e => e.games.some(g => g.id === state.view.lastScoredGid));
+    if (ci < 0) { ci = ent.findIndex(e => !done(e)); if (ci < 0) ci = ent.length - 1; }
+    const cur = ent[ci];
+    const maxR = games.length ? Math.max(...games.map(g=>g.round)) : 0;
+    const planned = t.format==="swiss" ? Math.max(t.rounds||0, maxR) : maxR;
+    const chips = ent.map((e,i) => `<span class="chip sm rnd-chip ${i===ci?"active":""} ${done(e)?"done":""}" data-act="live-round" data-id="${t.id}" data-val="${e.key}" data-n="${ent.length}">${e.label}${done(e)?" ✓":""}</span>`).join("")
+      + Array.from({ length: Math.max(0, planned - maxR) }, (_,i) => `<span class="chip sm rnd-chip future">${maxR+i+1}</span>`).join("");
+    const inR = new Set(cur.games.flatMap(g => g.teamA.concat(g.teamB)));
+    const tt = cur.t, team = (tt.format==="roundrobin" || tt.format==="playoff") && (tt.teams||[]).length>=2;
+    const rest = team ? tt.teams.map(x=>x.players).filter(p => !inR.has(p[0])).map(p => esc(playerName(p[0]))+" + "+esc(playerName(p[1])))
+      : (tt.participantIds||[]).filter(id => !inR.has(id)).map(id => esc(playerName(id)));
+    const swissNote = !cur.stage1 && t.format==="swiss" ? ` <span class="tiny" style="font-weight:400;">${cur.r===1 ? (parent ? "· пары по таблице этапа 1" : "· баланс по Эло") : "· пары по " + (parent ? "общей " : "") + "таблице после раунда " + (cur.r-1)}</span>` : "";
+    let ctl = "";
+    if (canWrite) {
+      if (done(cur) && ci < ent.length-1) ctl = `<button class="btn primary block" data-act="live-round" data-id="${t.id}" data-val="${ent[ci+1].key}" data-n="${ent.length}">${ent[ci+1].stage1 === cur.stage1 ? "Перейти к раунду " + ent[ci+1].r : "Перейти к этапу 2"} ▸</button>`;
+      else if (!done(cur)) ctl = `<p class="tiny" style="text-align:center;margin:4px 0;">Внесите счёт всех матчей раунда ${cur.r}${ci === ent.length-1 && t.format==="swiss" && maxR < planned ? " — потом соберём раунд " + (maxR+1) : ""}</p>`;
+      else if (t.format==="swiss" && maxR < planned) ctl = `<p class="tiny" style="text-align:center;margin:4px 0;">Раунд ${cur.r} заполнен — соберите следующий кнопкой «+ Раунд» ниже</p>`;
+      else ctl = `<div class="all-done">🏁 Все раунды сыграны</div>`;
+    }
+    return `
+      <div class="chips-scroll rnd-chips">${chips}</div>
+      <h3 style="margin:6px 0 8px;">${cur.stage1 ? "Этап 1 · " : parent ? "Этап 2 · " : ""}Раунд ${cur.r}${planned > 1 && !cur.stage1 ? ` <span class="tiny" style="font-weight:400;">/ ${planned}</span>` : ""}${swissNote}</h3>
+      ${cur.games.map(g => matchHtml(g, cur.t)).join("")}
+      ${rest.length ? `<p class="tiny rest-line">💤 Отдыхают: ${rest.join(", ")}</p>` : ""}
+      ${ctl ? `<div style="margin:12px 0;">${ctl}</div>` : ""}`;
+  }
   function roundControlsHtml(t, games) {
     const teams = t.teams.map(x => x.players.slice().sort().join("|"));
     const counts = pairPlayCounts(t, games);
@@ -2429,7 +2470,7 @@ const DATA = BOOT.data;
       else if (act==="new-tournament") el.onclick = () => { state.view.create=true; state._createDraft=null; render(); };
       else if (act==="cancel-create") el.onclick = () => { state.view.create=false; render(); };
       else if (act==="toggle-rounds") el.onclick = () => { state.view.roundsOpen = state.view.roundsOpen === el.dataset.id ? null : el.dataset.id; render(); };
-      else if (act==="open-tournament") el.onclick = () => { state.view.tournament = el.dataset.id; render(); };
+      else if (act==="open-tournament") el.onclick = () => { state.view.tournament = el.dataset.id; state.view.liveRound = null; state.view.lastScoredGid = null; render(); };
       else if (act==="close-tournament") el.onclick = () => { state.view.tournament = null; render(); };
       else if (act==="delete-ask") el.onclick = () => { state.view.confirmDelete = el.dataset.id; render(); };
       else if (act==="delete-cancel") el.onclick = () => { state.view.confirmDelete = null; render(); };
@@ -2468,9 +2509,17 @@ const DATA = BOOT.data;
       };
       else if (act==="toggle-form") el.onclick = () => { toggleInArr(state.view.formSel, el.dataset.id); render(); };
       else if (act==="toggle-dyn") el.onclick = () => { toggleInArr(state.view.dynSel, el.dataset.id); render(); };
+      else if (act==="live-tab") el.onclick = () => { state.view.liveTab = el.dataset.val; render(); };
+      else if (act==="live-round") el.onclick = () => { state.view.liveRound = { tid: el.dataset.id, key: el.dataset.val, n: +el.dataset.n }; state.view.lastScoredGid = null; render();
+        if (el.tagName === "BUTTON") { const c = document.querySelector(".rnd-chips"); if (c) c.scrollIntoView({ block: "start", behavior: "smooth" }); } };
       else if (act==="score") {
-        el.onchange = () => saveScore(el.dataset.gid, el.dataset.side, el.value);
-        el.oninput = () => { const ok = el.closest(".match")?.querySelector(".sc-ok"); if (ok) { ok.classList.add("dirty"); ok.classList.remove("saved"); } };
+        const other = () => el.closest(".match")?.querySelector(`input[data-act="score"][data-side="${el.dataset.side === "A" ? "B" : "A"}"]`);
+        el.onchange = () => { saveScore(el.dataset.gid, el.dataset.side, el.value); const o = other(); if (o && o.dataset.auto) saveScore(el.dataset.gid, o.dataset.side, o.value); };
+        el.oninput = () => { const ok = el.closest(".match")?.querySelector(".sc-ok"); if (ok) { ok.classList.add("dirty"); ok.classList.remove("saved"); }
+          // «всего X очков/геймов»: второе число считается само (пока его не трогали руками)
+          delete el.dataset.auto; const g = state.games.find(x => x.id === el.dataset.gid), t = g && byId(state.tournaments, g.tournamentId), o = other();
+          if (!t || !o || t.scoringMode !== "fixed" || t.scoringType === "time" || !(+t.scoringTarget > 0) || el.value === "") return;
+          if (o.value === "" || o.dataset.auto) { const val = +t.scoringTarget - parseInt(el.value, 10); if (val >= 0 && val <= 99) { o.value = val; o.dataset.auto = "1"; } } };
         // Enter / «Готово» — к следующему пустому полю, иначе закрыть клавиатуру
         el.onkeydown = e => { if (e.key !== "Enter") return; e.preventDefault(); const all = [...document.querySelectorAll('input[data-act="score"]')], i = all.indexOf(el);
           const nx = all.slice(i + 1).find(x => x.value === ""); if (nx) nx.focus(); else el.blur(); };
@@ -2804,6 +2853,9 @@ const DATA = BOOT.data;
   function saveScore(gid, side, val) {
     const g = state.games.find(x=>x.id===gid); if (!g) return;
     const v = val===""? null : Math.min(99, Math.max(0, parseInt(val,10)));
+    state.view.lastScoredGid = gid;
+    const roundGames = () => state.games.filter(x => x.tournamentId===g.tournamentId && x.round===g.round), full = () => roundGames().every(x => x.scoreA!=null && x.scoreB!=null);
+    const wasFull = full();
     const before = (g.scoreA==null?"—":g.scoreA) + ":" + (g.scoreB==null?"—":g.scoreB);
     if (side==="A") g.scoreA = Number.isNaN(v)?null:v; else g.scoreB = Number.isNaN(v)?null:v;
     g.decided = g.scoreA!=null && g.scoreB!=null && g.scoreA!==g.scoreB;
@@ -2819,6 +2871,7 @@ const DATA = BOOT.data;
       if (pairs[1]) pairs[1].classList.toggle("winner", a!=null && b!=null && b>a);
     }
     commit(6000);
+    if (!wasFull && full()) { toast("Раунд " + g.round + " заполнен ✓"); bgRender(); } // покажет кнопку следующего раунда, когда закроется клавиатура
   }
 
   // ---------------- boot ----------------
