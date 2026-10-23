@@ -62,7 +62,25 @@ setLang(detectLang(BOOT.tgLang));
   const fmtLv = lv => lv == null || lv === "" ? "—" : String(+(+lv).toFixed(3));
   const letterClass = l => !l || l === "—" ? "" : "lv-" + l[0].toLowerCase();
   const levelBadge = (lv, size) => `<span class="lvb ${letterClass(letter(lv))} ${size || ""}" title="${lv ?? ""}">${letter(lv)}</span>`;
-  const rangeLabel = s => { const a = s.level_min != null ? letter(+s.level_min) : null, b = s.level_max != null ? letter(+s.level_max) : null; return !a && !b ? t("all_levels") : a && b ? (a === b ? a : a + " – " + b) : a ? a + "+" : "≤ " + b; };
+  // уровни турнира буквами: D / C / B / A — подряд идущие; крайние без границы (D — «от нуля», A — «без верха»)
+  const LV_G = [["D", 0, 2.499], ["C", 2.5, 3.499], ["B", 3.5, 4.499], ["A", 4.5, 7]];
+  const lvLetters = s => { const a = s.level_min, b = s.level_max; if (a == null && b == null) return [];
+    return LV_G.filter(([, lo, hi]) => (a == null || hi >= +a) && (b == null || lo <= +b)).map(g => g[0]); };
+  // точно ли границы совпадают с буквами (тогда подпись «D» / «C–B» вместо цифр)
+  const lvExact = s => { const a = s.level_min, b = s.level_max; if (a == null && b == null) return null;
+    const lo = a == null || +a <= 0.01 ? 0 : LV_G.findIndex(g => Math.abs(g[1] - a) < 0.006);
+    const hi = b == null || +b >= 7 ? LV_G.length - 1 : LV_G.findIndex(g => Math.abs(g[2] - b) < 0.011);
+    if (lo < 0 || hi < 0 || lo > hi) return null; return lo === hi ? LV_G[lo][0] : LV_G[lo][0] + "–" + LV_G[hi][0]; };
+  function setLvLetters(s, L) {
+    if (L === "all") { s.level_min = null; s.level_max = null; return; }
+    let cur = lvLetters(s); const at = x => LV_G.findIndex(g => g[0] === x);
+    if (cur.includes(L)) { const i = cur.indexOf(L); cur = i === 0 || i === cur.length - 1 ? cur.filter(x => x !== L) : [L]; } else cur = cur.concat(L);
+    if (!cur.length) { s.level_min = null; s.level_max = null; return; }
+    const is = cur.map(at), lo = Math.min(...is), hi = Math.max(...is);
+    s.level_min = lo === 0 ? null : LV_G[lo][1]; s.level_max = hi === LV_G.length - 1 ? null : LV_G[hi][2];
+  }
+  const CLUBS = ["Dynamica", "Padel Point", "Beat на Фонтане", "Beat на Шевченка", "UnderAir", "Yellow Padel Club", "JustPadel"];
+  const rangeLabel = s => { const ex = lvExact(s); if (ex) return ex; const a = s.level_min != null ? letter(+s.level_min) : null, b = s.level_max != null ? letter(+s.level_max) : null; return !a && !b ? t("all_levels") : a && b ? (a === b ? a : a + " – " + b) : a ? a + "+" : "≤ " + b; };
 
   // ---------- Эло: старт из анкеты, K удвоен пока не подтверждён (меньше 3 турниров и не подтверждён админом) ----------
   function orderedGames() {
@@ -96,7 +114,12 @@ setLang(detectLang(BOOT.tgLang));
   const SIL = `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="24" r="12"/><path d="M8 60c2-14 12-22 24-22s22 8 24 22z"/></svg>`;
   const avatarHtml = (pid, sz) => { const p = byId(state.players, pid); sz = sz || 44; return p && p.avatar ? `<span class="avatar" style="width:${sz}px;height:${sz}px;"><img src="${p.avatar}" alt=""></span>` : `<span class="avatar ph" style="width:${sz}px;height:${sz}px;">${SIL}</span>`; };
   const pname = pid => { const p = byId(state.players, pid); return p ? p.name : "?"; };
-  const pl = pid => `<span class="plink" data-act="open-profile" data-id="${pid}">${esc(pname(pid))}</span>`;
+  // подпись игрока в текущем турнире (ставит админ): «Имя (подпись)» — видят все; LBL заполняется при показе турнира
+  let LBL = {};
+  const lblHtml = pid => LBL[pid] ? ` <span class="nm-lbl">(${esc(LBL[pid])})</span>` : "";
+  const pnl = pid => esc(pname(pid)) + lblHtml(pid);           // имя + подпись, без ссылки
+  const pnt = pid => pname(pid) + (LBL[pid] ? " (" + LBL[pid] + ")" : ""); // то же простым текстом
+  const pl = pid => `<span class="plink" data-act="open-profile" data-id="${pid}">${esc(pname(pid))}</span>${lblHtml(pid)}`;
   let toastTimer; function toast(m) { const el = document.getElementById("toast"); el.textContent = m; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2200); }
   const err = e => toast(t("error", { msg: (e && e.message) || e }));
   // поле ввода с кнопкой ✓ справа: прячет клавиатуру и сохраняет (scope: ob — анкета, pf:<id> — профиль)
@@ -234,6 +257,7 @@ setLang(detectLang(BOOT.tgLang));
   function viewTournamentDetail(tid) {
     if (state.view.editT === tid && state._tf) return tournamentFormHtml(state._tf);
     const tt = byId(state.tournaments, tid); if (!tt) { state.view.t = null; return viewTournaments(); }
+    LBL = (tt.s && tt.s.labels) || {};
     if (state.view.editT === tid) return tournamentFormHtml(tt);
     if (state.view.run === tid && state._run && canEdit()) return runSetupHtml(tt);
     if (tt.status === "live" || (state.view.fix === tid && canEdit())) return liveHtml(tt, tt.status !== "live");
@@ -248,7 +272,7 @@ setLang(detectLang(BOOT.tgLang));
       ? `<button class="btn sm ok" data-act="reg-approve" data-tid="${tid}" data-pid="${r.playerId}" title="${t("approve")}" aria-label="${t("approve")}">✓</button><button class="btn sm ghost danger" data-act="reg-reject" data-tid="${tid}" data-pid="${r.playerId}" title="${t("reject")}" aria-label="${t("reject")}">✕</button>`
       : `<button class="btn sm ${r.paid?'primary':''}" data-act="reg-paid" data-tid="${tid}" data-pid="${r.playerId}">₴</button><button class="btn sm ghost" data-act="reg-move" data-tid="${tid}" data-pid="${r.playerId}" data-to="${r.status==='main'?'reserve':'main'}" title="${r.status==='main'?t('move_reserve'):t('move_main')}">${r.status==='main'?'↓':'↑'}</button><button class="btn sm ghost danger" data-act="reg-remove" data-tid="${tid}" data-pid="${r.playerId}">✕</button>`;
     const sub = r => `${letter((byId(state.players, r.playerId)||{}).level)}${r.approval === "pending" ? ` · <span class="pend-tag">${t("pending_approval")}</span>` : ""}${isAdmin() && r.approval !== "pending" ? " · " + (r.paid ? "✓ " + t("paid") : t("not_paid")) : ""}`;
-    const row = (r, i) => `<div class="link-row p-row ${r.approval === "pending" ? "is-pending" : ""}"><span class="p-row-main" data-act="open-profile" data-id="${r.playerId}">${avatarHtml(r.playerId, 34)}<span><span class="p-row-name">${esc(pname(r.playerId))}</span><br><span class="tiny">${sub(r)}</span></span></span>
+    const row = (r, i) => `<div class="link-row p-row ${r.approval === "pending" ? "is-pending" : ""}"><span class="p-row-main" data-act="open-profile" data-id="${r.playerId}">${avatarHtml(r.playerId, 34)}<span><span class="p-row-name">${pnl(r.playerId)}</span><br><span class="tiny">${sub(r)}</span></span></span>
       <span class="p-row-side">${isAdmin() ? adminBtns(r) : i != null ? `<span class="tiny">${i+1}</span>` : ""}</span></div>`;
     const approvalNote = tt.s.approval && canReg ? `<p class="tiny" style="margin:8px 0 0;">${t("approval_note")}</p>` : "";
     const rejNote = rej ? `<div class="rej-note">${t("rejected_note")}</div>` : "";
@@ -301,6 +325,7 @@ setLang(detectLang(BOOT.tgLang));
         : `<div class="card"><h3>${t("main_list")} <span class="tiny">· ${main.length}${slots ? "/" + slots : ""}</span></h3><div style="margin-top:6px;">${main.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>`}
       ${res.length || isAdmin() ? `<div class="card"><h3>${t("reserve_list")} <span class="tiny">· ${res.length}</span></h3><div style="margin-top:6px;">${res.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>` : ""}
       ${canEdit() && tt.status !== "played" ? runCardHtml(tt) : ""}
+      ${labelsCardHtml(tt, main.map(r => r.playerId))}
       ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${state.players.filter(p => p.active && !regs.some(r => r.playerId === p.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(p => `<option value="${p.id}">${esc(p.name)} · ${letter(p.level)}</option>`).join("")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
         <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`;
   }
@@ -345,13 +370,93 @@ setLang(detectLang(BOOT.tgLang));
       <div class="card"><h3>${isTeamF(tt.format) && teamsOf(tt).length ? t("players") : t("standings")}</h3>
         <table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("players")}</th><th>${t("pts")}</th><th>W-L</th><th>${t("diff")}</th><th>Elo</th></tr>
         ${rows.map((r, i) => { const d = eloD(r.id); return `<tr><td><span class="pos-badge ${medal(i)}">${i + 1}</span></td>
-          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span></span></td>
+          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span>${lblHtml(r.id)}</span></td>
           <td class="lb-elo">${r.pts}</td><td>${r.w}-${r.l}${r.d ? "-" + r.d : ""}</td><td>${r.pts - r.pa >= 0 ? "+" : ""}${r.pts - r.pa}</td>
           <td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${d >= 0 ? "+" : ""}${Math.round(d)}</td></tr>`; }).join("")}
         </table></div>
       ${facts.length ? `<div class="card"><h3>${t("t_stats")}</h3><div class="facts">${facts.map(([k, who, sub]) => `<div class="fact"><div class="tiny">${k}</div><div class="fact-who">${who}</div><div class="fact-sub">${sub}</div></div>`).join("")}</div></div>` : ""}
+      ${isAdmin() && finished ? announceCardHtml(tt, tGames) : ""}
+      ${labelsCardHtml(tt, rows.map(r => r.id))}
       ${finished ? `<button class="rounds-toggle ${roundsOpen ? "open" : ""}" data-act="toggle-rounds" data-id="${tid}">${roundsOpen ? t("hide_rounds") : t("view_rounds", { n: rKeys.length })}<span class="chev">›</span></button>` : ""}
       ${roundsOpen ? rKeys.map(r => `<h3 style="margin:16px 0 8px;">${t("round").charAt(0).toUpperCase() + t("round").slice(1)} ${r}</h3>${byRound[r].sort((a, b) => (a.court || 0) - (b.court || 0)).map(match).join("")}`).join("") : ""}`;
+  }
+  // ---------- факты для объявления после турнира (видит только админ, текст можно зачитать) ----------
+  function announceFacts(tt, tGames) {
+    const L = [], gs = tGames.filter(scoredG).slice().sort((a, b) => a.round - b.round || (a.court || 0) - (b.court || 0));
+    if (!gs.length) return L;
+    const N = pnt, P = tm => tm.map(N).join(" + "), sc = g => Math.max(g.scoreA, g.scoreB) + ":" + Math.min(g.scoreA, g.scoreB);
+    const W = g => g.scoreA >= g.scoreB ? g.teamA : g.teamB, Lo = g => g.scoreA >= g.scoreB ? g.teamB : g.teamA;
+    const vs = g => P(W(g)) + " — " + P(Lo(g)), rnd = g => t("round") + " " + g.round;
+    const total = gs.reduce((a, g) => a + g.scoreA + g.scoreB, 0);
+    L.push(["📊", t("af_total", { g: gs.length, p: total, r: Math.max(...gs.map(g => g.round)) })]);
+    // победители
+    const team = isTeamF(tt.format) && teamsOf(tt).length;
+    if (team) { const tr = tt.format === "playoff" ? playoffPlaces(teamsOf(tt), gs) : teamTable(teamsOf(tt), gs);
+      if (tr[0]) L.push(["🏆", t("af_winner_team", { who: P(tr[0].players), pts: tr[0].pts, w: tr[0].w, l: tr[0].l })]);
+      if (tt.format !== "playoff" && tr[1]) { const gap = tr[0].pts - tr[1].pts; L.push(["📏", gap === 0 ? t("af_gap0") : t("af_gap", { n: gap, who: P(tr[1].players) })]); } }
+    const ids = [...new Set(gs.flatMap(g => g.teamA.concat(g.teamB)))], R = {}; ids.forEach(id => R[id] = { id, pts: 0, pa: 0, w: 0, l: 0, d: 0, g: 0, seq: [] });
+    gs.forEach(g => [[g.teamA, g.scoreA, g.scoreB], [g.teamB, g.scoreB, g.scoreA]].forEach(([tm, own, opp]) => tm.forEach(id => { const r = R[id]; r.g++; r.pts += own; r.pa += opp; const res = own > opp ? "w" : own < opp ? "l" : "d"; r[res]++; r.seq.push(res); })));
+    const rows = Object.values(R).sort((a, b) => b.pts - a.pts || b.w - a.w || (b.pts - b.pa) - (a.pts - a.pa));
+    if (!team) { const top3 = rows.slice(0, 3);
+      L.push(["🏆", t("af_winner", { who: N(top3[0].id), pts: top3[0].pts, w: top3[0].w, l: top3[0].l })]);
+      if (top3[1]) { const gap = top3[0].pts - top3[1].pts; L.push(["📏", gap === 0 ? t("af_gap0") : t("af_gap", { n: gap, who: N(top3[1].id) })]); }
+      if (top3.length === 3) L.push(["🥈", t("af_podium", { b: N(top3[1].id), c: N(top3[2].id) })]); }
+    // самый длинный матч (больше всего очков разыграно) — если счёт не «всегда одна сумма»
+    const sums = gs.map(g => g.scoreA + g.scoreB);
+    if (new Set(sums).size > 1) { const lg = gs.slice().sort((a, b) => (b.scoreA + b.scoreB) - (a.scoreA + a.scoreB))[0];
+      L.push(["⏱", t("af_longest", { m: vs(lg), s: sc(lg), n: lg.scoreA + lg.scoreB, r: rnd(lg) })]); }
+    // разгром и самый упорный
+    const dec = gs.filter(g => g.scoreA !== g.scoreB);
+    const big = dec.slice().sort((a, b) => Math.abs(b.scoreA - b.scoreB) - Math.abs(a.scoreA - a.scoreB) || (b.scoreA + b.scoreB) - (a.scoreA + a.scoreB))[0];
+    if (big) L.push(["💥", t("af_blowout", { m: vs(big), s: sc(big), r: rnd(big) })]);
+    const tight = dec.filter(g => g !== big).sort((a, b) => Math.abs(a.scoreA - a.scoreB) - Math.abs(b.scoreA - b.scoreB) || (b.scoreA + b.scoreB) - (a.scoreA + a.scoreB));
+    if (tight[0]) { const d = Math.abs(tight[0].scoreA - tight[0].scoreB), many = tight.filter(g => Math.abs(g.scoreA - g.scoreB) === d).length;
+      L.push(["🫀", t("af_tight", { m: vs(tight[0]), s: sc(tight[0]), r: rnd(tight[0]) }) + (many > 1 ? " " + t("af_tight_more", { n: many - 1, d }) : "")]); }
+    const shut = gs.filter(g => Math.min(g.scoreA, g.scoreB) === 0 && g.scoreA !== g.scoreB); if (shut.length) L.push(["🧹", t("af_shutout", { m: shut.map(vs).join("; ") })]);
+    const draws = gs.filter(g => g.scoreA === g.scoreB); if (draws.length) L.push(["🤝", t("af_draws", { n: draws.length })]);
+    // серии и без поражений (индивидуально)
+    const streak = r => { let b = 0, c = 0; r.seq.forEach(x => { c = x === "w" ? c + 1 : 0; b = Math.max(b, c); }); return b; };
+    const st = rows.map(r => ({ id: r.id, n: streak(r) })).sort((a, b) => b.n - a.n);
+    if (st[0] && st[0].n >= 3) { const who = st.filter(x => x.n === st[0].n); if (who.length <= 3) L.push(["🔥", t("af_streak", { who: (team ? [...new Set(who.map(x => P(teamsOf(tt).find(tm => tm.includes(x.id)) || [x.id])))] : who.map(x => N(x.id))).join(", "), n: st[0].n })]); }
+    const unb = rows.filter(r => r.g >= 3 && !r.l); if (unb.length && unb.length <= 4) L.push(["🛡", t("af_unbeaten", { who: (team ? [...new Set(unb.map(x => P(teamsOf(tt).find(tm => tm.includes(x.id)) || [x.id])))] : unb.map(x => N(x.id))).join(", ") })]);
+    if (!team) {
+      // лучшая оборона: меньше всего пропущено за игру
+      const df = rows.filter(r => r.g >= 2).sort((a, b) => a.pa / a.g - b.pa / b.g)[0]; if (df) L.push(["🧱", t("af_defense", { who: N(df.id), n: (df.pa / df.g).toFixed(1) })]);
+      // лучший дуэт (партнёры меняются)
+      const pr = {}; gs.forEach(g => [[g.teamA, g.scoreA - g.scoreB], [g.teamB, g.scoreB - g.scoreA]].forEach(([tm, d]) => { const k = tm.slice().sort().join("|"); const q = pr[k] = pr[k] || { tm, n: 0, d: 0, w: 0 }; q.n++; q.d += d; if (d > 0) q.w++; }));
+      const bp = Object.values(pr).filter(q => q.n >= 2).sort((a, b) => b.d - a.d)[0]; if (bp && bp.d > 0) L.push(["💞", t("af_duo", { who: P(bp.tm), d: bp.d, n: bp.n })]);
+      // камбэк: начал с поражения, а финишировал в тройке
+      const cb = rows.slice(0, 3).filter(r => r.seq[0] === "l"); if (cb.length) L.push(["🔄", t("af_comeback", { who: cb.map(r => N(r.id)).join(", ") })]);
+    }
+    // самый результативный раунд
+    const byR = {}; gs.forEach(g => byR[g.round] = (byR[g.round] || 0) + g.scoreA + g.scoreB);
+    const rk = Object.keys(byR); if (rk.length > 1 && new Set(Object.values(byR)).size > 1) { const r = rk.sort((a, b) => byR[b] - byR[a])[0]; L.push(["🎯", t("af_round", { r, n: byR[r] })]); }
+    // рост Эло
+    const E = computeElo(), eg = ids.map(id => ({ id, d: (E.seq[id] || []).filter(x => x.g.tournamentId === tt.id).reduce((a, x) => a + x.d, 0) })).sort((a, b) => b.d - a.d)[0];
+    if (eg && eg.d >= 1) L.push(["📈", t("af_elo", { who: N(eg.id), n: Math.round(eg.d) })]);
+    return L;
+  }
+  function announceCardHtml(tt, tGames) {
+    const open = state.view.factsOpen === tt.id;
+    const lines = open ? announceFacts(tt, tGames) : [];
+    return `<div class="card af-card"><button type="button" class="fold-h" data-act="facts-toggle" data-id="${tt.id}"><span>🎙 ${t("af_title")} <span class="tiny">· ${t("admins_only")}</span></span><span class="chev ${open ? "open" : ""}">›</span></button>
+      ${open ? `<div id="factsText" class="af-text">${lines.map(([ic, txt]) => `<p>${ic} ${esc(txt)}</p>`).join("")}</div>
+        <button class="btn sm block" style="margin-top:10px;" data-act="facts-copy">⧉ ${t("copy_text")}</button>` : ""}</div>`;
+  }
+  // ---------- подписи игроков в турнире (только админ ставит, видят все) ----------
+  function labelsCardHtml(tt, ids) {
+    if (!isAdmin() || !ids.length) return "";
+    const open = state.view.lblOpen === tt.id, n = ids.filter(id => LBL[id]).length;
+    return `<div class="card lbl-card"><button type="button" class="fold-h" data-act="lbl-toggle" data-id="${tt.id}"><span>✎ ${t("lbl_title")}${n ? ` <span class="tiny">· ${n}</span>` : ""}</span><span class="chev ${open ? "open" : ""}">›</span></button>
+      ${open ? `<p class="tiny" style="margin:8px 0 10px;">${t("lbl_hint")}</p>${ids.slice().sort((a, b) => pname(a).localeCompare(pname(b))).map(id => `<div class="lbl-row"><span class="lbl-name">${esc(pname(id))}</span>
+        <span class="ok-wrap"><input type="text" class="lbl-in" data-tid="${tt.id}" data-pid="${id}" maxlength="30" autocomplete="off" enterkeyhint="done" value="${esc(LBL[id] || "")}" placeholder="${t("lbl_ph")}"><button type="button" class="ok-btn" data-act="lbl-ok" aria-label="${t("save")}">✓</button></span></div>`).join("")}` : ""}</div>`;
+  }
+  async function saveLabel(inp) {
+    const tt = byId(state.tournaments, inp.dataset.tid), pid = inp.dataset.pid; if (!tt) return;
+    const val = String(inp.value || "").replace(/\s+/g, " ").trim().slice(0, 30), cur = (tt.s.labels || {})[pid] || "";
+    if (val === cur) return;
+    const labels = { ...(tt.s.labels || {}) }; if (val) labels[pid] = val; else delete labels[pid];
+    try { await db.saveTournament(tRow(tt, { s: { ...tt.s, labels } })); tt.s = { ...tt.s, labels }; LBL = labels; toast(t("saved")); if (!isField(document.activeElement)) render(); } catch (e) { err(e); }
   }
   // ---------- проведение турнира: старт, раунды, счёт, таблица наживо ----------
   const TEAM_F = ["team_americano", "roundrobin", "playoff"], STEP_F = ["mexicano", "swiss"];
@@ -429,11 +534,11 @@ setLang(detectLang(BOOT.tgLang));
       </div>
       <div class="card"><h3>${t("run_participants")} <span class="tiny">· ${ids.length}</span></h3>
         ${pend ? `<p class="tiny" style="margin:6px 0 0;"><span class="pend-tag">${t("run_pending_excluded", { n: pend })}</span></p>` : ""}
-        ${team ? `<div class="run-teams">${r.teams.list.map((tm, i) => `<div class="run-team"><span class="run-n">${i + 1}</span><span class="run-tn">${esc(pname(tm[0]))} <span class="tiny">${lv(tm[0])}</span> + ${esc(pname(tm[1]))} <span class="tiny">${lv(tm[1])}</span></span></div>`).join("")}</div>
+        ${team ? `<div class="run-teams">${r.teams.list.map((tm, i) => `<div class="run-team"><span class="run-n">${i + 1}</span><span class="run-tn">${pnl(tm[0])} <span class="tiny">${lv(tm[0])}</span> + ${pnl(tm[1])} <span class="tiny">${lv(tm[1])}</span></span></div>`).join("")}</div>
             ${r.teams.left.length ? `<p class="tiny warn-t">${t("run_left_out", { names: r.teams.left.map(pname).map(esc).join(", ") })}</p>` : ""}
             <p class="tiny" style="margin:8px 0;">${r.teams.fromReg === r.teams.list.length ? t("run_teams_all_reg") : r.teams.fromReg ? t("run_teams_from_reg", { n: r.teams.fromReg }) : t("run_teams_auto")}</p>
             ${r.teams.list.length - r.teams.fromReg > 1 ? `<button class="btn sm" data-act="run-shuffle">↻ ${t("run_shuffle")}</button>` : ""}`
-          : `<div class="chips-wrap" style="margin-top:8px;">${ids.map(id => `<span class="chip sm run-p">${esc(pname(id))} <b>${lv(id)}</b></span>`).join("")}</div>`}
+          : `<div class="chips-wrap" style="margin-top:8px;">${ids.map(id => `<span class="chip sm run-p">${pnl(id)} <b>${lv(id)}</b></span>`).join("")}</div>`}
       </div>
       <div class="card">
         <label class="field"><span class="lbl">${t("t_court_nums")}</span><input type="text" inputmode="decimal" autocomplete="off" id="runCourtNums" value="${esc(r.courtNums.join(", "))}" placeholder="${t("t_court_nums_ph")}"></label>
@@ -482,7 +587,7 @@ setLang(detectLang(BOOT.tgLang));
     const eloD = id => (E.seq[id] || []).filter(x => x.g.tournamentId === tid).reduce((a, x) => a + x.d, 0);
     return `<table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("players")}</th><th>${t("pts")}</th><th>W-L</th><th>${t("diff")}</th><th>Elo</th></tr>
       ${playerTable(ids, sg).map((r, i) => { const d = eloD(r.id); return `<tr><td><span class="pos-badge ${i === 0 && r.pts ? "gold" : ""}">${i + 1}</span></td>
-        <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span></span></td>
+        <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span>${lblHtml(r.id)}</span></td>
         <td class="lb-elo">${r.pts}</td><td>${r.w}-${r.l}${r.d ? "-" + r.d : ""}</td><td>${diff(r)}</td>
         <td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${r.g ? (d >= 0 ? "+" : "") + Math.round(d) : "—"}</td></tr>`; }).join("")}</table>`;
   }
@@ -507,7 +612,7 @@ setLang(detectLang(BOOT.tgLang));
           <div class="score">${edit ? inp("A") : box(g.scoreA)}<span class="colon">:</span>${edit ? inp("B") : box(g.scoreB)}</div>
           <div class="pair right ${wb ? "winner" : ""}">${pl(g.teamB[0])}<small>${pl(g.teamB[1])}</small></div></div></div>`; };
     const inRound = new Set(byR(cur).flatMap(g => g.teamA.concat(g.teamB)));
-    const resting = (isTeamF(tt.format) ? teamsOf(tt).filter(tm => !inRound.has(tm[0])).map(tm => esc(pname(tm[0])) + " + " + esc(pname(tm[1]))) : (tt.participantIds || []).filter(id => !inRound.has(id)).map(id => esc(pname(id))));
+    const resting = (isTeamF(tt.format) ? teamsOf(tt).filter(tm => !inRound.has(tm[0])).map(tm => pnl(tm[0]) + " + " + pnl(tm[1])) : (tt.participantIds || []).filter(id => !inRound.has(id)).map(pnl));
     const chips = Array.from({ length: Math.max(planned, maxR) }, (_, i) => i + 1).map(r => r <= maxR
       ? `<span class="chip sm rnd-chip ${r === cur ? "active" : ""} ${done(r) ? "done" : ""}" data-act="live-round" data-val="${r}">${r}${done(r) ? " ✓" : ""}</span>`
       : `<span class="chip sm rnd-chip future">${r}</span>`).join("");
@@ -539,6 +644,7 @@ setLang(detectLang(BOOT.tgLang));
         ${byR(cur).map(match).join("")}
         ${resting.length ? `<p class="tiny rest-line">💤 ${t("rest")}: ${resting.join(", ")}</p>` : ""}
         ${controls ? `<div style="margin:12px 0;">${controls}</div>` : ""}`}
+      ${labelsCardHtml(tt, tt.participantIds && tt.participantIds.length ? tt.participantIds : [...new Set(games.flatMap(g => g.teamA.concat(g.teamB)))])}
       ${finishCard}`;
   }
   // сохранение счёта матча (читаем оба поля карточки)
@@ -735,14 +841,21 @@ setLang(detectLang(BOOT.tgLang));
         ${inp("tfName", t("t_name"), f.name)}
         ${inp("tfDate", t("t_date"), f.date, "date")}
         <div class="grid2">${inp("tfTime", t("t_time"), s.time, "time")}${inp("tfTimeEnd", t("t_time_end"), s.time_end, "time")}</div>
-        ${inp("tfPlace", t("t_place"), s.place)}
+        ${(() => { const other = f.placeOther || (s.place && !CLUBS.includes(s.place));
+          return `<label class="field"><span class="lbl">${t("t_place")}</span><select id="tfPlaceSel"><option value="" ${!s.place && !other ? "selected" : ""}>—</option>${CLUBS.map(c => `<option value="${esc(c)}" ${!other && s.place === c ? "selected" : ""}>${esc(c)}</option>`).join("")}<option value="__other" ${other ? "selected" : ""}>${t("place_other")}</option></select></label>
+            ${other ? inp("tfPlace", t("place_other_name"), s.place) : ""}`; })()}
         <div class="field"><span class="lbl">${t("t_format")}</span><div class="wrap-tags">${fmts.map(x => `<span class="chip ${f.format===x?'active':''}" data-act="tf-format" data-val="${x}">${t(x)}</span>`).join("")}</div></div>
         <label class="row tf-toggle"><span>${t("t_pairs_mode")}<br><span class="tiny">${t("t_pairs_hint")}</span></span><input type="checkbox" id="tfPairs" data-act="tf-pairs" ${s.pairs ? "checked" : ""}></label>
         ${inp("tfCourtNums", t("t_court_nums"), (s.court_nums || []).join(", "), "text", 'inputmode="decimal" autocomplete="off" placeholder="' + t("t_court_nums_ph") + '"')}
         <p class="tiny" style="margin:-6px 0 12px;">${t("t_court_nums_hint")}</p>
         <div class="grid3">${inp("tfCourts", t("t_courts"), f.courts, "number", 'min="1" max="12"')}${inp("tfSlots", s.pairs ? t("t_pairs") : t("t_slots"), s.slots, "number", 'min="0" max="64"')}${inp("tfPrice", t("t_price"), s.price, "number", 'min="0"')}</div>
-        <div class="grid2">${inp("tfMin", t("t_level_min"), s.level_min, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}${inp("tfMax", t("t_level_max"), s.level_max, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}</div>
-        <p class="tiny" style="margin:-6px 0 12px;">${t("level_range")}: <b>${esc(rangeLabel(s))}</b></p>
+        ${(() => { const sel = lvLetters(s), exact = lvExact(s) || (s.level_min == null && s.level_max == null);
+          return `<div class="field"><span class="lbl">${t("t_levels")}</span><div class="wrap-tags lv-chips">
+            <span class="chip ${!sel.length ? "active" : ""}" data-act="tf-lv" data-val="all">${t("all_levels")}</span>
+            ${LV_G.map(([L]) => `<span class="chip lv-chip ${sel.includes(L) ? "active" : ""}" data-act="tf-lv" data-val="${L}">${L}</span>`).join("")}</div>
+            <p class="tiny" style="margin:8px 0 0;">${t("level_range")}: <b>${esc(rangeLabel(s))}</b>${s.level_min != null || s.level_max != null ? ` <span class="muted">(${s.level_min != null ? fmtLv(s.level_min) : "0"} – ${s.level_max != null ? fmtLv(s.level_max) : "∞"})</span>` : ""}</p></div>
+          <details class="lv-fine" ${exact ? "" : "open"}><summary class="tiny">${t("lv_fine")}</summary>
+            <div class="grid2" style="margin-top:8px;">${inp("tfMin", t("t_level_min"), s.level_min, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}${inp("tfMax", t("t_level_max"), s.level_max, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}</div></details>`; })()}
         ${inp("tfContact", t("t_contact"), s.contact, "url", 'placeholder="https://t.me/…"')}
         <label class="field"><span class="lbl">${t("t_note")}</span><textarea id="tfNote" rows="3">${esc(s.note || "")}</textarea></label>
         <label class="row" style="cursor:pointer;"><span>${t("t_reg_open")}</span><input type="checkbox" id="tfOpen" ${s.reg_open ? "checked" : ""} style="width:22px;height:22px;"></label>
@@ -760,7 +873,8 @@ setLang(detectLang(BOOT.tgLang));
     if (g("tfSeason")) f.s.season_league = g("tfSeason").value;
     if (g("tfCourtNums")) { f.s.court_nums = parseCourts(g("tfCourtNums").value); if (f.s.court_nums.length) f.courts = f.s.court_nums.length; }
     const num = v => v === "" ? null : +v;
-    Object.assign(f.s, { time: g("tfTime").value, time_end: g("tfTimeEnd").value, place: g("tfPlace").value.trim(), slots: num(g("tfSlots").value), price: num(g("tfPrice").value), level_min: num(g("tfMin").value), level_max: num(g("tfMax").value), contact: g("tfContact").value.trim(), note: g("tfNote").value.trim(), reg_open: g("tfOpen").checked, pairs: g("tfPairs").checked, approval: g("tfApproval").checked });
+    const ps = g("tfPlaceSel"); if (ps) { f.placeOther = ps.value === "__other"; f.s.place = f.placeOther ? (g("tfPlace") ? g("tfPlace").value.trim() : (CLUBS.includes(f.s.place) ? "" : f.s.place || "")) : ps.value; }
+    Object.assign(f.s, { time: g("tfTime").value, time_end: g("tfTimeEnd").value, slots: num(g("tfSlots").value), price: num(g("tfPrice").value), level_min: num(g("tfMin").value), level_max: num(g("tfMax").value), contact: g("tfContact").value.trim(), note: g("tfNote").value.trim(), reg_open: g("tfOpen").checked, pairs: g("tfPairs").checked, approval: g("tfApproval").checked });
     return f;
   }
   async function saveTf() {
@@ -1070,7 +1184,7 @@ setLang(detectLang(BOOT.tgLang));
   // ---------- рендер и события ----------
   function render() {
     const v = document.getElementById("view");
-    const me = myPlayer();
+    const me = myPlayer(); LBL = {};
     if (me && state._onb && state._onb.retest && state._onb.step != null) v.innerHTML = viewQuiz(state._onb);
     else if (!me && state.tab !== "admin") v.innerHTML = viewOnboarding();
     else if (state.tab === "tournaments") v.innerHTML = viewTournaments();
@@ -1150,6 +1264,11 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "s-league") on(() => { state.view.sLeague = el.dataset.val; state.view.sOpen = null; render(); });
       else if (a === "s-open") on(() => { state.view.sOpen = state.view.sOpen === id ? null : id; render(); });
       else if (a === "s-how") on(() => { state.view.sHow = !state.view.sHow; render(); });
+      else if (a === "lbl-toggle") on(() => { state.view.lblOpen = state.view.lblOpen === id ? null : id; render(); });
+      else if (a === "lbl-ok") on(() => { const inp = el.parentElement.querySelector("input.lbl-in"); if (inp) inp.blur(); }); // сохранит onchange
+      else if (a === "facts-toggle") on(() => { state.view.factsOpen = state.view.factsOpen === id ? null : id; render(); });
+      else if (a === "facts-copy") on(async () => { const el2 = document.getElementById("factsText"); const txt = el2 ? el2.innerText : ""; try { await navigator.clipboard.writeText(txt); toast(t("copied")); } catch (e) { toast(t("copy_fail")); } });
+      else if (a === "tf-lv") on(() => { const f = readTf(); setLvLetters(f.s, el.dataset.val); render(); });
       else if (a === "toggle-rounds") on(() => { state.view.roundsOpen = state.view.roundsOpen === id ? null : id; render(); });
       else if (a === "toggle-ach") on(() => { state.view.achOpen = state.view.achOpen === id ? null : id; render(); });
       else if (a === "mh-all") on(() => { state.view.mhAll = state.view.mhAll === id ? null : id; render(); });
@@ -1196,6 +1315,7 @@ setLang(detectLang(BOOT.tgLang));
     // дробные поля — обычный текст с цифровой клавиатурой: в Telegram на Android/iPhone поле type=number не принимает точку
     // (или запятую), если в системе другой десятичный разделитель. Запятую превращаем в точку, лишнее убираем.
     v.querySelectorAll("input.dec-in").forEach(inp => inp.addEventListener("input", () => decFix(inp), true));
+    v.querySelectorAll("input.lbl-in").forEach(inp => { inp.onchange = () => saveLabel(inp); inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); inp.blur(); } }; });
     v.querySelectorAll(".ok-wrap input").forEach(inp => { inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); const b = inp.parentElement.querySelector(".ok-btn"); if (b) b.click(); } }; });
     const pfPhoto = document.getElementById("pfPhoto"); if (pfPhoto) pfPhoto.onchange = async () => { const f = pfPhoto.files && pfPhoto.files[0]; if (!f) return; try { keepPf(); state._pf.avatar = await readAvatarFile(f); render(); } catch (e) { err(e); } };
     const q = document.getElementById("admQ"); if (q) q.oninput = () => { state.view.q = q.value; render(); const e2 = document.getElementById("admQ"); e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length); };
@@ -1214,7 +1334,7 @@ setLang(detectLang(BOOT.tgLang));
         const nx = all.slice(i + 1).find(x => x.value === "" && x.dataset.side === "A") || all.slice(i + 1).find(x => x.value === ""); if (nx) nx.focus(); else inp.blur(); };
     });
     ["runCourtNums", "runCourts", "runRounds", "runTarget"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { const r = readRun(); if ((id === "runCourts" || id === "runCourtNums") && !r.touched) { const tt = byId(state.tournaments, r.tid); r.rounds = runDefaultRounds(r, runPlayers(tt.id).length); } render(); }; });
-    ["tfName","tfDate","tfTime","tfTimeEnd","tfPlace","tfCourtNums","tfCourts","tfSlots","tfPrice","tfMin","tfMax","tfContact","tfNote"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { readTf(); if (id === "tfMin" || id === "tfMax" || id === "tfCourtNums") render(); }; });
+    ["tfName","tfDate","tfTime","tfTimeEnd","tfPlace","tfPlaceSel","tfCourtNums","tfCourts","tfSlots","tfPrice","tfMin","tfMax","tfContact","tfNote"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { readTf(); if (id === "tfMin" || id === "tfMax" || id === "tfCourtNums" || id === "tfPlaceSel") render(); }; });
   }
   document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; state.view.t = null; state.view.editT = null; state.view.run = null; state.view.fix = null; state.view.pid = null; state.view.editP = null; window.scrollTo(0, 0); render(); });
   const hb = homeBtnEl(); if (hb) { hb.onclick = addToHome; hb.title = t("home_add_long"); const hl = hb.querySelector(".home-lbl"); if (hl) hl.textContent = t("home_btn"); }

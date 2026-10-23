@@ -285,3 +285,22 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
 .s-row:not(.z) .pos-badge { opacity: .55; }
 .s-row:not(.z) .lb-elo { color: var(--ink-3); text-shadow: none; }
 .s-row.me:not(.z) .plink, .s-row.me:not(.z) .avatar { opacity: .9; }
+
+/* подпись игрока в турнире: «Имя (подпись)» */
+.nm-lbl { color: var(--ink-3); font-weight: 600; font-size: .92em; white-space: nowrap; }
+.pair small .nm-lbl, .run-p .nm-lbl { font-size: .9em; }
+/* складные карточки админа: подписи, факты для объявления */
+.fold-h { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; background: none; border: 0; padding: 0; cursor: pointer; color: var(--ink); font: 700 14px "Unbounded", "Manrope", sans-serif; text-align: left; }
+.fold-h .tiny { font-family: "Manrope", sans-serif; font-weight: 600; }
+.fold-h .chev { font-size: 22px; color: var(--court); transition: transform .15s; }
+.fold-h .chev.open { transform: rotate(90deg); }
+.lbl-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+.lbl-row .lbl-name { flex: 0 0 38%; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lbl-row input { width: 100%; }
+.af-text { margin-top: 10px; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.03); border: 1px solid var(--line); user-select: text; -webkit-user-select: text; }
+.af-text p { margin: 0 0 8px; line-height: 1.45; }
+.af-text p:last-child { margin-bottom: 0; }
+/* выбор уровней буквами */
+.lv-chips .lv-chip { min-width: 46px; justify-content: center; font-family: "Unbounded", "Manrope", sans-serif; font-weight: 700; }
+.lv-fine { margin: -2px 0 12px; }
+.lv-fine summary { cursor: pointer; color: var(--ink-3); }
