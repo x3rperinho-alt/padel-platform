@@ -309,3 +309,6 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
 .elo-how p:last-child { margin: 0; }
 .adm-ctl .adm-lbl { flex: 1 1 100%; }
 .adm-ctl .adm-lbl input { width: 100%; }
+.pf-admin { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--line, rgba(255,255,255,.15)); border-radius: 12px; }
+.pf-admin-row { display: flex; gap: 10px; align-items: flex-end; }
+.pf-admin-row input#pfElo { width: 96px; }

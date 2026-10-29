@@ -1061,11 +1061,11 @@ setLang(detectLang(BOOT.tgLang));
     const mine = my && my.id === pid, nav = !!state.view.pid;
     const upcoming = state.registrations.filter(r => r.playerId === pid && r.status !== "cancelled").map(r => ({ r, tt: byId(state.tournaments, r.tournamentId) })).filter(x => x.tt && isUpcoming(x.tt));
     const head = nav ? `<div class="section-head"><button class="btn ghost sm back" data-act="p-back">‹ ${t("back")}</button><h2 style="flex:1;text-align:right;">${t("profile")}</h2></div>` : `<div class="section-head"><h2>${t("profile")}</h2></div>`;
-    if (state.view.editP === pid && (mine || isAdmin())) return head + profileEditHtml(p);
+    if (state.view.editP === pid && (mine || canEdit())) return head + profileEditHtml(p);
     return `${head}${mine ? levelBannerHtml() : ""}
       <div class="card hero">
         <div class="hero-top">
-          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}${p.label ? ` <span class="nm-lbl">(${esc(p.label)})</span>` : ""}</div><div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${p.levelStatus === "ok" ? `${levelBadge(E.ratings[pid] / 1000)} ${fmtLv(Math.round(E.ratings[pid]) / 1000)}` : ""}</div>${mine || isAdmin() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}</button>` : ""}</div></div>
+          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}${p.label ? ` <span class="nm-lbl">(${esc(p.label)})</span>` : ""}</div><div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${p.levelStatus === "ok" ? `${levelBadge(E.ratings[pid] / 1000)} ${fmtLv(Math.round(E.ratings[pid]) / 1000)}` : ""}</div>${mine || canEdit() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}</button>` : ""}</div></div>
           ${p.levelStatus === "ok" ? `<div class="hero-elo"><span class="${E.unconfirmed[pid]?'unc':''}">${Math.round(E.ratings[pid])}</span><small>${E.unconfirmed[pid] ? t("unconfirmed") : t("confirmed")}</small></div>` : `<div class="hero-elo"><span class="pend">⏳</span><small>${p.levelStatus === "pending" ? t("pending_short") : t("need_quiz_short")}</small></div>`}
         </div>
         ${p.levelStatus === "ok" && E.unconfirmed[pid] ? `<p class="tiny" style="margin:8px 0 0;">${t("unconfirmed_hint", { n: CONFIRM_N - E.tcount[pid] })}</p>` : ""}
@@ -1083,8 +1083,21 @@ setLang(detectLang(BOOT.tgLang));
       ${matchHistoryHtml(pid, E)}
       ${mine ? accountCardHtml() : ""}`;
   }
+  // админ ставит текущее Эло игрока: до первого турнира — это стартовое Эло, потом — правка «после последнего турнира»
+  async function setEloNow(pid, v) {
+    const p = byId(state.players, pid); v = Math.round(+v); if (!p || !v || v < 100 || v > 9000) return false;
+    const E = computeElo(), cur = Math.round(E.ratings[pid]); if (v === cur) return false;
+    if (!E.lastT) await db.updatePlayer(pid, { eloStart: v });
+    else { const list = (p.eloAdj || []).filter(o => o.after !== E.lastT).concat([{ after: E.lastT, value: v, at: new Date().toISOString() }]); await db.updatePlayer(pid, { eloAdj: list }); }
+    await db.addLog(`Эло ${p.name}: ${cur} → ${v} (вручную)`).catch(() => {}); return true;
+  }
+  async function setLabel(pid, v) {
+    const p = byId(state.players, pid); v = String(v || "").replace(/\s+/g, " ").trim().slice(0, 30); if (!p || v === (p.label || "")) return false;
+    await db.updatePlayer(pid, { label: v }); await db.addLog(`Подпись ${p.name}: «${p.label || ""}» → «${v}»`).catch(() => {}); p.label = v; return true;
+  }
   function profileEditHtml(p) {
     const pf = state._pf || (state._pf = { name: p.name, avatar: undefined, bio: p.bio || "", c: Object.fromEntries(CONTACTS.map(([k]) => [k, (p.contacts || {})[k] || ""])) });
+    if (pf.elo == null) pf.elo = String(Math.round(computeElo().ratings[p.id])); if (pf.lbl == null) pf.lbl = p.label || "";
     const mine = myPlayer() && myPlayer().id === p.id;
     const c0 = p.contacts || {}, E0 = computeElo();
     const canAdj = mine && c0.level_source === "quiz" && Array.isArray(c0.quiz) && !(E0.seq[p.id] || []).length;
@@ -1106,6 +1119,10 @@ setLang(detectLang(BOOT.tgLang));
           <div class="pf-actions"><button class="btn sm" data-act="pf-photo">${av ? t("photo_change") : t("photo_add")}</button>${av ? `<button class="btn sm ghost" data-act="pf-photo-clear">${t("photo_remove")}</button>` : ""}</div></div>
       </div>
       ${adjBlock}
+      ${canEdit() ? `<div class="pf-admin"><div class="tiny" style="margin-bottom:6px;">🔒 ${t("admin_only")}</div><div class="pf-admin-row">
+        <label class="field"><span class="lbl">${t("cur_elo")}</span><input type="number" inputmode="numeric" step="1" id="pfElo" value="${esc(pf.elo)}"></label>
+        <label class="field" style="flex:1;"><span class="lbl">${t("player_lbl")}</span><input type="text" id="pfLbl" maxlength="30" value="${esc(pf.lbl)}" placeholder="${t("player_lbl_ph")}"></label></div>
+        <p class="tiny" style="margin:4px 0 0;">${t("elo_now_hint")}</p></div>` : ""}
       <label class="field" style="margin-top:12px;"><span class="lbl">${t("bio")}</span>${okWrap(`<textarea id="pfBio" rows="2" maxlength="200">${esc(pf.bio)}</textarea>`, "pf:" + p.id)}</label>
       ${mine ? `<h3 id="pfContacts" style="margin:6px 0 4px;scroll-margin-top:40px;">${t("contacts")}</h3><p class="tiny" style="margin:0 0 10px;">${t("contacts_hint")}</p>
       <div class="ct-form">${CONTACTS.map(([k, ic]) => `<label class="ct-field"><span class="ct-ic ct-${k}">${ic}</span>${okWrap(`<input type="${k === "phone" ? "tel" : "text"}" id="pfc_${k}" value="${esc(pf.c[k])}" placeholder="${t("c_" + k)}${k === "phone" ? " +380…" : ["playtomic","pado","raketo"].includes(k) ? " — " + t("nick_or_link") : " @nick"}" maxlength="${["playtomic","pado","raketo"].includes(k) ? 200 : 60}" enterkeyhint="done">`, "pf:" + p.id)}</label>`).join("")}</div>` : ""}
@@ -1119,13 +1136,14 @@ setLang(detectLang(BOOT.tgLang));
   }
   async function savePf(pid, keep) {
     const p = byId(state.players, pid); const pf = state._pf; const g = id => document.getElementById(id);
-    if (keep && pf && g("pfName")) { pf.name = g("pfName").value; pf.bio = g("pfBio").value; CONTACTS.forEach(([k]) => { const el = g("pfc_" + k); if (el) pf.c[k] = el.value; }); }
+    if (keep && pf && g("pfName")) { pf.name = g("pfName").value; pf.bio = g("pfBio").value; if (g("pfElo")) { pf.elo = g("pfElo").value; pf.lbl = g("pfLbl").value; } CONTACTS.forEach(([k]) => { const el = g("pfc_" + k); if (el) pf.c[k] = el.value; }); }
     const name = g("pfName").value.trim(), bio = g("pfBio").value.trim();
     const contacts = { ...(p.contacts || {}) }; CONTACTS.forEach(([k]) => { const el = g("pfc_" + k); if (el) { const v = cleanContact(k, el.value); if (v) contacts[k] = v; else delete contacts[k]; } });
     const avatar = pf.avatar === undefined ? (p.avatar || null) : pf.avatar;
     try {
       if (myPlayer() && myPlayer().id === pid) { await db.updateMyCard(name, avatar, contacts, bio); if (pf.level != null && Math.abs(pf.level - p.level) > 1e-9) await db.adjustMyLevel(+pf.level.toFixed(1)); }
-      else await db.updatePlayer(pid, { name });
+      else if (name && name !== p.name) await db.updatePlayer(pid, { name });
+      if (canEdit() && g("pfElo")) { await setLabel(pid, g("pfLbl").value); await setEloNow(pid, g("pfElo").value); }
       if (!keep) { state._pf = null; state.view.editP = null; } await reload(); toast(t("saved"));
     } catch (e) { err(e); }
   }
@@ -1335,13 +1353,8 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "adm-confirm") on(async () => { const p = byId(state.players, id); try { await db.updatePlayer(id, { confirmed: !p.confirmed }); await db.addLog((p.confirmed ? "Снял подтверждение: " : "Подтвердил Эло: ") + p.name); await reload(); } catch (e) { err(e); } });
       else if (a === "adm-active") on(async () => { const p = byId(state.players, id); try { await db.updatePlayer(id, { active: !p.active }); await reload(); } catch (e) { err(e); } });
       else if (a === "adm-level") el.onchange = async () => { const p = byId(state.players, id); const lv = el.value === "" ? null : +el.value; try { await db.updatePlayer(id, { level: lv, eloStart: levelElo(lv), levelStatus: lv == null ? p.levelStatus : "ok" }); await db.addLog(`Уровень ${p.name}: ${p.level} → ${lv}`); await reload(); } catch (e) { err(e); } };
-      else if (a === "adm-lbl") { el.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } }; el.onchange = async () => { const p = byId(state.players, id); const v = String(el.value || "").replace(/\s+/g, " ").trim().slice(0, 30); if (v === (p.label || "")) return;
-        try { await db.updatePlayer(id, { label: v }); await db.addLog(`Подпись ${p.name}: «${p.label || ""}» → «${v}»`).catch(() => {}); p.label = v; toast(t("saved")); if (!isField(document.activeElement)) render(); } catch (e) { err(e); } }; }
-      else if (a === "adm-elo-now") el.onchange = async () => { const p = byId(state.players, id); const v = Math.round(+el.value); if (!v || v < 0 || v > 9000) return;
-        const E = computeElo(), cur = Math.round(E.ratings[id]); if (v === cur) return;
-        try { if (!E.lastT) await db.updatePlayer(id, { eloStart: v }); // турниров ещё не было — это и есть стартовое Эло
-          else { const list = (p.eloAdj || []).filter(o => o.after !== E.lastT).concat([{ after: E.lastT, value: v, at: new Date().toISOString() }]); await db.updatePlayer(id, { eloAdj: list }); }
-          await db.addLog(`Эло ${p.name}: ${cur} → ${v} (вручную)`).catch(() => {}); await reload(); toast(t("saved")); } catch (e) { err(e); } };
+      else if (a === "adm-lbl" || a === "adm-elo-now") { el.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
+        el.onchange = async () => { try { const ch = a === "adm-lbl" ? await setLabel(id, el.value) : await setEloNow(id, el.value); if (!ch) return; toast(t("saved")); liveReload(); } catch (e) { err(e); } }; }
       else if (a === "adm-elo") el.onchange = async () => { const p = byId(state.players, id); const v = +el.value; if (!v) return; try { await db.updatePlayer(id, { eloStart: v }); await db.addLog(`Стартовое Эло ${p.name}: ${p.eloStart} → ${v}`); await reload(); } catch (e) { err(e); } };
       else if (a === "set-role") el.onchange = async () => { try { await db.setMemberRole(id, el.value); const m = state._members.find(x => x.userId === id); if (m) m.role = el.value; toast(t("saved")); } catch (e) { err(e); } };
     });
@@ -1354,7 +1367,7 @@ setLang(detectLang(BOOT.tgLang));
       if (pv && id === "obLevel") { pv.classList.toggle("dim", !ok); pv.innerHTML = `${levelBadge(ok ? lv : null, "big")}<div><div class="tiny">${d.source === "raketo" ? "" : t("as_raketo") + " · "}${t("letter")} · ${t("start_elo")}</div><div class="ob-elo">${ok ? (d.source === "raketo" ? "" : fmtLv(lv) + " · ") + letter(lv) + " · " + levelElo(lv) : "—"}</div></div>`; }
       const b = v.querySelector('[data-act="ob-save"]'); if (b) b.disabled = d.name.trim().length < 2 || !ok || (d.source !== "quiz" && !(d.nick || "").trim());
     }; });
-    const keepPf = () => { const n = document.getElementById("pfName"), b = document.getElementById("pfBio"); if (state._pf && n) { state._pf.name = n.value; state._pf.bio = b.value; CONTACTS.forEach(([k]) => { const el = document.getElementById("pfc_" + k); if (el) state._pf.c[k] = el.value; }); } };
+    const keepPf = () => { const n = document.getElementById("pfName"), b = document.getElementById("pfBio"), ee = document.getElementById("pfElo"), ll = document.getElementById("pfLbl"); if (state._pf && n) { state._pf.name = n.value; state._pf.bio = b.value; if (ee) { state._pf.elo = ee.value; state._pf.lbl = ll.value; } CONTACTS.forEach(([k]) => { const el = document.getElementById("pfc_" + k); if (el) state._pf.c[k] = el.value; }); } };
     // дробные поля — обычный текст с цифровой клавиатурой: в Telegram на Android/iPhone поле type=number не принимает точку
     // (или запятую), если в системе другой десятичный разделитель. Запятую превращаем в точку, лишнее убираем.
     v.querySelectorAll("input.dec-in").forEach(inp => inp.addEventListener("input", () => decFix(inp), true));
