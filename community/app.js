@@ -12,7 +12,19 @@ setLang(detectLang(BOOT.tgLang));
 
 (() => {
   // 1 уровень = 1000 Эло, поэтому делитель и K в 5 раз больше классических (400 и 32): поведение то же, что было
-  const CONFIRM_N = 3, K = 160, ELO_DIV = 2000;
+  const CONFIRM_N = 3;
+  // ---------- Эло: правила (одни для всех, см. «Как считается Эло» во вкладке «Рейтинг») ----------
+  // 1 уровень = 1000 Эло (как в Raketo: 2.434 → 2434).
+  // Ожидание пары: E = 1 / (1 + 10^((Эло соперников − Эло пары) / 1000)), Эло пары — среднее двух игроков,
+  //   берётся на НАЧАЛО турнира (внутри турнира рейтинг не «плывёт» от порядка матчей).
+  // Результат S: победа 1, ничья 0.5, поражение 0.
+  // Матч: Δ = 20 × (1 + до 0.5 за разницу счёта: +0.05 за каждое очко, максимум с разницы 10) × (S − E).
+  //   Равные пары, победа 11:10 → +10; победа 16:5 → +15; поражение — столько же со знаком минус.
+  // Турнир: итог игрока ограничен ±75 (если сумма больше — все матчи турнира пропорционально уменьшаются).
+  // Итого: чтобы сдвинуться на подуровень (≈300 Эло, например D → D+), нужно минимум 4 очень сильных турнира.
+  const ELO = { K: 20, DIV: 1000, MARGIN_MAX: 10, MARGIN_BONUS: 0.5, T_CAP: 75 };
+  const eloMargin = diff => 1 + Math.min(Math.abs(diff), ELO.MARGIN_MAX) / ELO.MARGIN_MAX * ELO.MARGIN_BONUS;
+  const eloExpect = (own, opp) => 1 / (1 + Math.pow(10, (opp - own) / ELO.DIV));
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const byId = (arr, id) => arr.find(x => x.id === id);
   const today = () => new Date().toISOString().slice(0, 10);
@@ -88,24 +100,40 @@ setLang(detectLang(BOOT.tgLang));
     return state.games.slice().sort((a, b) => (tOrder[a.tournamentId] || 0) - (tOrder[b.tournamentId] || 0) || a.round - b.round || (a.court || 0) - (b.court || 0));
   }
   function computeElo() {
-    const r = {}, tp = {}, st = {}, seq = {};
+    const r = {}, tp = {}, st = {}, seq = {}, adj = {};
     state.players.forEach(p => { r[p.id] = p.eloStart || 1500; tp[p.id] = new Set(); st[p.id] = { g: 0, w: 0, l: 0, d: 0 }; });
-    const kFor = pid => { const p = byId(state.players, pid); return p && (p.confirmed || tp[pid].size >= CONFIRM_N) ? K : 2 * K; };
-    const avg = ids => ids.reduce((a, id) => a + (r[id] ?? 1500), 0) / ids.length;
-    orderedGames().forEach(g => {
-      if (g.scoreA == null || g.scoreB == null) return; const total = g.scoreA + g.scoreB; if (total <= 0) return;
-      const rA = avg(g.teamA), rB = avg(g.teamB), eA = 1 / (1 + Math.pow(10, (rB - rA) / ELO_DIV)), sA = g.scoreA / total;
-      const dA = sA - eA, dB = (1 - sA) - (1 - eA);
-      const delta = {}; g.teamA.forEach(id => delta[id] = r[id] == null ? 0 : kFor(id) * dA); g.teamB.forEach(id => delta[id] = r[id] == null ? 0 : kFor(id) * dB);
-      Object.keys(delta).forEach(id => { if (r[id] != null) r[id] += delta[id]; });
-      g.teamA.concat(g.teamB).forEach(id => { if (!st[id]) return; st[id].g++; tp[id].add(g.tournamentId);
-        const inA = g.teamA.includes(id), own = inA ? g.scoreA : g.scoreB, opp = inA ? g.scoreB : g.scoreA, mine = inA ? g.teamA : g.teamB, them = inA ? g.teamB : g.teamA;
-        const win = own > opp, loss = own < opp; if (!win && !loss) st[id].d++; else if (win) st[id].w++; else st[id].l++;
-        (seq[id] = seq[id] || []).push({ g, own, opp, win, loss, partner: mine.find(x => x !== id), opps: them, ownR: inA ? rA : rB, oppR: inA ? rB : rA, d: delta[id] }); });
+    // ручные правки админа: «после турнира X Эло игрока = N»
+    const overrides = []; state.players.forEach(p => (p.eloAdj || []).forEach(o => o && o.value != null && overrides.push({ pid: p.id, after: o.after || null, value: +o.value, at: o.at })));
+    const applyOv = after => overrides.filter(o => o.after === after && !o.done).forEach(o => { o.done = true; if (r[o.pid] == null) return; (adj[o.pid] = adj[o.pid] || []).push({ after, from: r[o.pid], to: o.value, at: o.at }); r[o.pid] = o.value; });
+    applyOv(null);
+    const byT = {}; orderedGames().forEach(g => { if (g.scoreA == null || g.scoreB == null || g.scoreA + g.scoreB <= 0) return; (byT[g.tournamentId] = byT[g.tournamentId] || []).push(g); });
+    const tIds = state.tournaments.map(tt => tt.id).filter(id => byT[id]); Object.keys(byT).forEach(id => { if (!tIds.includes(id)) tIds.push(id); });
+    const tsum = {};
+    tIds.forEach(tid => {
+      const snap = { ...r }, avg = ids => ids.reduce((a, id) => a + (snap[id] ?? 1500), 0) / ids.length;
+      const items = {}, sum = {};
+      byT[tid].forEach(g => {
+        const rA = avg(g.teamA), rB = avg(g.teamB), eA = eloExpect(rA, rB), m = eloMargin(g.scoreA - g.scoreB);
+        const sA = g.scoreA > g.scoreB ? 1 : g.scoreA < g.scoreB ? 0 : 0.5, dA = ELO.K * m * (sA - eA);
+        g.teamA.concat(g.teamB).forEach(id => { if (!st[id]) return; st[id].g++; tp[id].add(tid);
+          const inA = g.teamA.includes(id), own = inA ? g.scoreA : g.scoreB, opp = inA ? g.scoreB : g.scoreA, mine = inA ? g.teamA : g.teamB, them = inA ? g.teamB : g.teamA;
+          const win = own > opp, loss = own < opp; if (!win && !loss) st[id].d++; else if (win) st[id].w++; else st[id].l++;
+          const raw = inA ? dA : -dA; sum[id] = (sum[id] || 0) + raw;
+          (items[id] = items[id] || []).push({ g, own, opp, win, loss, partner: mine.find(x => x !== id), opps: them, ownR: inA ? rA : rB, oppR: inA ? rB : rA, e: inA ? eA : 1 - eA, m, raw, d: raw }); });
+      });
+      Object.keys(items).forEach(id => {
+        const total = sum[id], capped = Math.max(-ELO.T_CAP, Math.min(ELO.T_CAP, total)), f = total ? capped / total : 1;
+        items[id].forEach(x => { x.d = x.raw * f; x.capped = f < 0.999; }); r[id] += capped;
+        (tsum[id] = tsum[id] || {})[tid] = { raw: total, d: capped, before: snap[id], after: r[id] };
+        seq[id] = (seq[id] || []).concat(items[id]);
+      });
+      applyOv(tid);
     });
+    overrides.filter(o => !o.done).forEach(o => { o.done = true; if (r[o.pid] == null) return; (adj[o.pid] = adj[o.pid] || []).push({ after: o.after, from: r[o.pid], to: o.value, at: o.at }); r[o.pid] = o.value; }); // турнир удалён — правка всё равно действует
     const unconfirmed = {}; state.players.forEach(p => unconfirmed[p.id] = !p.confirmed && tp[p.id].size < CONFIRM_N);
     const tcount = {}; Object.keys(tp).forEach(id => tcount[id] = tp[id].size);
-    return { ratings: r, stats: st, unconfirmed, tcount, seq };
+    const lastT = tIds[tIds.length - 1] || null;
+    return { ratings: r, stats: st, unconfirmed, tcount, seq, tsum, adj, lastT };
   }
   const board = () => { const E = computeElo(); return { E, list: state.players.filter(p => p.active && p.levelStatus === "ok").sort((a, b) => E.ratings[b.id] - E.ratings[a.id]) }; };
 
@@ -893,6 +921,8 @@ setLang(detectLang(BOOT.tgLang));
       <div class="chips-wrap" style="margin-bottom:12px;">${groups.map(([k, l]) => `<span class="chip sm ${grp===k?'active':''}" data-act="lv-group" data-val="${k}">${l}</span>`).join("")}</div>
       <div class="card">
         <p class="tiny" style="margin:0 0 8px;">${t("rating_hint", { n: CONFIRM_N })}</p>
+        <button type="button" class="fold-h" style="margin:2px 0 10px;font-size:13px;" data-act="elo-how"><span>ⓘ ${t("elo_how")}</span><span class="chev ${state.view.eloHow ? "open" : ""}">›</span></button>
+        ${state.view.eloHow ? `<div class="elo-how">${t("elo_how_body").split("\n").map(x => `<p>${esc(x)}</p>`).join("")}</div>` : ""}
         <table class="tbl"><tr><th></th><th>${t("players")}</th><th></th><th>Elo</th><th>${t("games")}</th><th>W-L</th></tr>
         ${rows.map((p, i) => { const s = E.stats[p.id]; return `<tr>
           <td><span class="pos-badge ${i===0?'gold':''}">${i+1}</span></td>
@@ -1015,7 +1045,7 @@ setLang(detectLang(BOOT.tgLang));
       <div class="mh-row ${x.win ? "win" : x.loss ? "loss" : "draw"}">
         <span class="mh-res">${x.win ? "W" : x.loss ? "L" : "D"}</span>
         <div class="mh-main"><div>${t("with_partner", { name: "" })}${x.partner ? pl(x.partner) : "—"}</div><div class="tiny">${t("vs")} ${x.opps.map(pl).join(" + ")}</div><div class="tiny dim">${esc(tn(x.g.tournamentId))} · ${t("round")} ${x.g.round}</div></div>
-        <div class="mh-score"><b>${x.own}:${x.opp}</b><span class="tiny ${x.d >= 0 ? "up" : "down"}">${x.d >= 0 ? "+" : ""}${Math.round(x.d)}</span></div>
+        <div class="mh-score"><b>${x.own}:${x.opp}</b><span class="tiny ${x.d >= 0 ? "up" : "down"}">${x.d >= 0 ? "+" : ""}${Math.round(x.d)}</span>${x.e != null ? `<span class="tiny dim" title="${t("elo_chance")}">${Math.round(x.e * 100)}%</span>` : ""}</div>
       </div>`).join("")}</div>
       ${all.length > 8 ? `<button class="btn sm ghost block" style="margin-top:8px;" data-act="mh-all" data-id="${pid}">${showAll ? t("show_less") : t("show_all", { n: all.length })}</button>` : ""}</div>`;
   }
@@ -1123,6 +1153,7 @@ setLang(detectLang(BOOT.tgLang));
           <div class="adm-ctl">
             <label>${t("level_value")}<input type="text" inputmode="decimal" autocomplete="off" class="dec-in" data-act="adm-level" data-id="${p.id}" value="${p.level ?? ""}"></label>
             <label>${t("start_elo")}<input type="number" step="10" data-act="adm-elo" data-id="${p.id}" value="${p.eloStart}"></label>
+            <label>${t("cur_elo")}<input type="number" step="1" data-act="adm-elo-now" data-id="${p.id}" value="${Math.round(E.ratings[p.id])}"></label>
             <button class="btn sm ${p.confirmed?'primary':''}" data-act="adm-confirm" data-id="${p.id}">${p.confirmed ? "✓" : t("confirm")}</button>
             <button class="btn sm ghost" data-act="adm-active" data-id="${p.id}">${p.active ? "⏸" : "▶"}</button>
             ${isAdmin() && p.userId ? `<button class="btn sm ghost danger" data-act="adm-reset" data-id="${p.id}" title="${t("reset_player")}">↺ ${t("reset_short")}</button>` : ""}
@@ -1264,6 +1295,7 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "s-league") on(() => { state.view.sLeague = el.dataset.val; state.view.sOpen = null; render(); });
       else if (a === "s-open") on(() => { state.view.sOpen = state.view.sOpen === id ? null : id; render(); });
       else if (a === "s-how") on(() => { state.view.sHow = !state.view.sHow; render(); });
+      else if (a === "elo-how") on(() => { state.view.eloHow = !state.view.eloHow; render(); });
       else if (a === "lbl-toggle") on(() => { state.view.lblOpen = state.view.lblOpen === id ? null : id; render(); });
       else if (a === "lbl-ok") on(() => { const inp = el.parentElement.querySelector("input.lbl-in"); if (inp) inp.blur(); }); // сохранит onchange
       else if (a === "facts-toggle") on(() => { state.view.factsOpen = state.view.factsOpen === id ? null : id; render(); });
@@ -1299,6 +1331,11 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "adm-confirm") on(async () => { const p = byId(state.players, id); try { await db.updatePlayer(id, { confirmed: !p.confirmed }); await db.addLog((p.confirmed ? "Снял подтверждение: " : "Подтвердил Эло: ") + p.name); await reload(); } catch (e) { err(e); } });
       else if (a === "adm-active") on(async () => { const p = byId(state.players, id); try { await db.updatePlayer(id, { active: !p.active }); await reload(); } catch (e) { err(e); } });
       else if (a === "adm-level") el.onchange = async () => { const p = byId(state.players, id); const lv = el.value === "" ? null : +el.value; try { await db.updatePlayer(id, { level: lv, eloStart: levelElo(lv), levelStatus: lv == null ? p.levelStatus : "ok" }); await db.addLog(`Уровень ${p.name}: ${p.level} → ${lv}`); await reload(); } catch (e) { err(e); } };
+      else if (a === "adm-elo-now") el.onchange = async () => { const p = byId(state.players, id); const v = Math.round(+el.value); if (!v || v < 0 || v > 9000) return;
+        const E = computeElo(), cur = Math.round(E.ratings[id]); if (v === cur) return;
+        try { if (!E.lastT) await db.updatePlayer(id, { eloStart: v }); // турниров ещё не было — это и есть стартовое Эло
+          else { const list = (p.eloAdj || []).filter(o => o.after !== E.lastT).concat([{ after: E.lastT, value: v, at: new Date().toISOString() }]); await db.updatePlayer(id, { eloAdj: list }); }
+          await db.addLog(`Эло ${p.name}: ${cur} → ${v} (вручную)`).catch(() => {}); await reload(); toast(t("saved")); } catch (e) { err(e); } };
       else if (a === "adm-elo") el.onchange = async () => { const p = byId(state.players, id); const v = +el.value; if (!v) return; try { await db.updatePlayer(id, { eloStart: v }); await db.addLog(`Стартовое Эло ${p.name}: ${p.eloStart} → ${v}`); await reload(); } catch (e) { err(e); } };
       else if (a === "set-role") el.onchange = async () => { try { await db.setMemberRole(id, el.value); const m = state._members.find(x => x.userId === id); if (m) m.role = el.value; toast(t("saved")); } catch (e) { err(e); } };
     });
