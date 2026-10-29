@@ -179,8 +179,11 @@ setLang(detectLang(BOOT.tgLang));
   const regsOf = tid => state.registrations.filter(r => r.tournamentId === tid && r.status !== "cancelled").sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
   const myReg = tid => { const me = myPlayer(); return me ? regsOf(tid).find(r => r.playerId === me.id) : null; };
   // подходит ли турнир по уровню текущему игроку (null — уровень ещё не подтверждён)
-  const fitsLevel = tt => { const me = myPlayer(); if (!me || me.level == null || me.levelStatus !== "ok") return null;
-    const a = tt.s.level_min, b = tt.s.level_max; return (a == null || me.level >= +a) && (b == null || me.level <= +b); };
+  // текущий уровень игрока = текущее Эло / 1000 (с учётом турниров и правок админа); кеш сбрасывается на каждом render()
+  let _EC = null; const Enow = () => _EC || (_EC = computeElo());
+  const lvNow = pOrId => { const p = typeof pOrId === "string" ? byId(state.players, pOrId) : pOrId; if (!p || (p.level == null && p.levelStatus !== "ok")) return p ? p.level : null; const r = Enow().ratings[p.id]; return r != null ? Math.round(r) / 1000 : p.level; };
+  const fitsLevel = tt => { const me = myPlayer(); if (!me || me.level == null || me.levelStatus !== "ok") return null; const lv = lvNow(me);
+    const a = tt.s.level_min, b = tt.s.level_max; return (a == null || lv >= +a) && (b == null || lv <= +b); };
   const isUpcoming = tt => tt.status !== "played" && (!tt.date || tt.date >= today());
   // ---------- запись парами и подтверждение заявок ----------
   const isPairs = tt => !!(tt && tt.s.pairs);
@@ -302,7 +305,7 @@ setLang(detectLang(BOOT.tgLang));
     const adminBtns = r => r.approval === "pending"
       ? `<button class="btn sm ok" data-act="reg-approve" data-tid="${tid}" data-pid="${r.playerId}" title="${t("approve")}" aria-label="${t("approve")}">✓</button><button class="btn sm ghost danger" data-act="reg-reject" data-tid="${tid}" data-pid="${r.playerId}" title="${t("reject")}" aria-label="${t("reject")}">✕</button>`
       : `<button class="btn sm ${r.paid?'primary':''}" data-act="reg-paid" data-tid="${tid}" data-pid="${r.playerId}">₴</button><button class="btn sm ghost" data-act="reg-move" data-tid="${tid}" data-pid="${r.playerId}" data-to="${r.status==='main'?'reserve':'main'}" title="${r.status==='main'?t('move_reserve'):t('move_main')}">${r.status==='main'?'↓':'↑'}</button><button class="btn sm ghost danger" data-act="reg-remove" data-tid="${tid}" data-pid="${r.playerId}">✕</button>`;
-    const sub = r => `${letter((byId(state.players, r.playerId)||{}).level)}${r.approval === "pending" ? ` · <span class="pend-tag">${t("pending_approval")}</span>` : ""}${isAdmin() && r.approval !== "pending" ? " · " + (r.paid ? "✓ " + t("paid") : t("not_paid")) : ""}`;
+    const sub = r => `${letter(lvNow(r.playerId))}${r.approval === "pending" ? ` · <span class="pend-tag">${t("pending_approval")}</span>` : ""}${isAdmin() && r.approval !== "pending" ? " · " + (r.paid ? "✓ " + t("paid") : t("not_paid")) : ""}`;
     const row = (r, i) => `<div class="link-row p-row ${r.approval === "pending" ? "is-pending" : ""}"><span class="p-row-main" data-act="open-profile" data-id="${r.playerId}">${avatarHtml(r.playerId, 34)}<span><span class="p-row-name">${pnl(r.playerId)}</span><br><span class="tiny">${sub(r)}</span></span></span>
       <span class="p-row-side">${isAdmin() ? adminBtns(r) : i != null ? `<span class="tiny">${i+1}</span>` : ""}</span></div>`;
     const approvalNote = tt.s.approval && canReg ? `<p class="tiny" style="margin:8px 0 0;">${t("approval_note")}</p>` : "";
@@ -313,14 +316,14 @@ setLang(detectLang(BOOT.tgLang));
     else if (mine) regBtn = `<div class="row">${regBadge(mine)}${!pairs && mine.status === "reserve" && mine.approval !== "pending" ? `<span class="tiny">${t("you_in_reserve_pos", { n: res.findIndex(r => r.playerId === me.id) + 1 })}</span>` : ""}${canReg ? `<button class="btn sm" data-act="unreg" data-id="${tid}">${mine.approval === "pending" ? t("withdraw_request") : t("unregister")}</button>` : ""}</div>`
       + (mine.approval === "pending" ? `<p class="tiny" style="margin:8px 0 0;">${t("pending_hint")}</p>` : "")
       + (pairs && mine.addedBy && mine.addedBy !== me.id ? `<p class="tiny" style="margin:8px 0 0;">${t("added_by_partner", { name: esc(pname(mine.addedBy)) })}</p>` : "");
-    else if (fitsLevel(tt) === false) regBtn = `<div class="nofit-note">${t(me.level < +(tt.s.level_min ?? -1) ? "level_too_low" : "level_too_high")} · ${letter(me.level)} ${fmtLv(me.level)}</div>`;
+    else if (fitsLevel(tt) === false) regBtn = `<div class="nofit-note">${t(lvNow(me) < +(tt.s.level_min ?? -1) ? "level_too_low" : "level_too_high")} · ${letter(lvNow(me))} ${fmtLv(lvNow(me))}</div>`;
     else if (!canReg) regBtn = `<p class="tiny">${t("registration_closed")}</p>`;
     else if (pairs) {
-      const inRange = p => (tt.s.level_min == null || (p.level != null && p.level >= +tt.s.level_min)) && (tt.s.level_max == null || (p.level != null && p.level <= +tt.s.level_max));
+      const inRange = p => { const lv = lvNow(p); return (tt.s.level_min == null || (lv != null && lv >= +tt.s.level_min)) && (tt.s.level_max == null || (lv != null && lv <= +tt.s.level_max)); };
       const cands = state.players.filter(p => p.active && p.id !== me.id && p.levelStatus === "ok" && !regs.some(r => r.playerId === p.id) && inRange(p)).sort((a, b) => a.name.localeCompare(b.name));
       const emptyPair = firstFreeTeam(tid, 2) != null, anyPlace = firstFreeTeam(tid, 1) != null;
       regBtn = rejNote + (state.view.partnerFor === tid
-        ? `<div class="partner-pick"><label class="field"><span class="lbl">${t("choose_partner")}</span><select id="partnerSel">${cands.map(p => `<option value="${p.id}">${esc(p.name)}${p.label ? " (" + esc(p.label) + ")" : ""} · ${letter(p.level)}</option>`).join("")}</select></label>
+        ? `<div class="partner-pick"><label class="field"><span class="lbl">${t("choose_partner")}</span><select id="partnerSel">${cands.map(p => `<option value="${p.id}">${esc(p.name)}${p.label ? " (" + esc(p.label) + ")" : ""} · ${letter(lvNow(p))}</option>`).join("")}</select></label>
             ${cands.length ? "" : `<p class="tiny" style="margin:-4px 0 10px;">${t("no_partners")}</p>`}
             <div class="row" style="gap:8px;justify-content:flex-end;"><button class="btn sm" data-act="partner-cancel">${t("cancel")}</button><button class="btn sm primary" data-act="reg-pair" data-id="${tid}" ${cands.length ? "" : "disabled"}>${emptyPair ? t("reg_as_pair") : t("reg_pair_reserve")}</button></div></div>`
         : `<button class="btn primary block" data-act="partner-open" data-id="${tid}">${t("reg_with_partner")}</button>
@@ -357,7 +360,7 @@ setLang(detectLang(BOOT.tgLang));
       ${res.length || isAdmin() ? `<div class="card"><h3>${t("reserve_list")} <span class="tiny">· ${res.length}</span></h3><div style="margin-top:6px;">${res.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>` : ""}
       ${canEdit() && tt.status !== "played" ? runCardHtml(tt) : ""}
       ${labelsCardHtml(tt, main.map(r => r.playerId))}
-      ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${state.players.filter(p => p.active && !regs.some(r => r.playerId === p.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(p => `<option value="${p.id}">${esc(p.name)}${p.label ? " (" + esc(p.label) + ")" : ""} · ${letter(p.level)}</option>`).join("")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
+      ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${state.players.filter(p => p.active && !regs.some(r => r.playerId === p.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(p => `<option value="${p.id}">${esc(p.name)}${p.label ? " (" + esc(p.label) + ")" : ""} · ${letter(lvNow(p))}</option>`).join("")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
         <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`;
   }
   // ---------- итоги турнира: таблица, статистика, раунды по кнопке ----------
@@ -553,7 +556,7 @@ setLang(detectLang(BOOT.tgLang));
   function runSetupHtml(tt) {
     const r = state._run, ids = runPlayers(tt.id), f = r.format, team = isTeamF(f), er = runCheck(r, ids), pend = pendingOf(tt.id).length;
     const fmts = ["americano", "mexicano", "swiss", "team_americano", ...(f === "roundrobin" ? ["roundrobin"] : []), "playoff"];
-    const lv = id => letter((byId(state.players, id) || {}).level);
+    const lv = id => letter(lvNow(id));
     const fullRR = team && f !== "playoff" ? (roundRobinSchedule(r.teams.list, r.courts) || []).length : null;
     const inp = (id, label, val, extra) => `<label class="field"><span class="lbl">${label}</span><input type="number" inputmode="numeric" id="${id}" value="${val ?? ""}" ${extra || ""}></label>`;
     return `
@@ -1087,8 +1090,8 @@ setLang(detectLang(BOOT.tgLang));
   async function setEloNow(pid, v) {
     const p = byId(state.players, pid); v = Math.round(+v); if (!p || !v || v < 100 || v > 9000) return false;
     const E = computeElo(), cur = Math.round(E.ratings[pid]); if (v === cur) return false;
-    if (!E.lastT) await db.updatePlayer(pid, { eloStart: v });
-    else { const list = (p.eloAdj || []).filter(o => o.after !== E.lastT).concat([{ after: E.lastT, value: v, at: new Date().toISOString() }]); await db.updatePlayer(pid, { eloAdj: list }); }
+    if (!E.lastT) await db.updatePlayer(pid, { eloStart: v, level: v / 1000 });
+    else { const list = (p.eloAdj || []).filter(o => o.after !== E.lastT).concat([{ after: E.lastT, value: v, at: new Date().toISOString() }]); await db.updatePlayer(pid, { eloAdj: list, level: v / 1000 }); }
     await db.addLog(`Эло ${p.name}: ${cur} → ${v} (вручную)`).catch(() => {}); return true;
   }
   async function setLabel(pid, v) {
@@ -1235,7 +1238,7 @@ setLang(detectLang(BOOT.tgLang));
   }
 
   // ---------- рендер и события ----------
-  function render() {
+  function render() { _EC = null;
     const v = document.getElementById("view");
     const me = myPlayer(); LBL = {};
     if (me && state._onb && state._onb.retest && state._onb.step != null) v.innerHTML = viewQuiz(state._onb);
