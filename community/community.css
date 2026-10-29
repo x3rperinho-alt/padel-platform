@@ -307,3 +307,5 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
 .elo-how { margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.03); border: 1px solid var(--line); }
 .elo-how p { margin: 0 0 8px; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); }
 .elo-how p:last-child { margin: 0; }
+.adm-ctl .adm-lbl { flex: 1 1 100%; }
+.adm-ctl .adm-lbl input { width: 100%; }

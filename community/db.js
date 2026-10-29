@@ -53,7 +53,7 @@ export function createDb(cfg) {
   async function joinOpen() { return rpc("join_open", {}); }
 
   // ---------- загрузка ----------
-  const toPlayer = p => ({ id: p.id, name: p.name, active: p.active, userId: p.user_id || null, avatar: p.avatar || null, level: p.level != null ? +p.level : null, eloStart: p.elo_start ?? 1500, confirmed: !!p.elo_confirmed, contacts: p.contacts || {}, bio: p.bio || "", levelStatus: p.level_status || "ok", levelClaim: p.level_claim != null ? +p.level_claim : null, eloAdj: Array.isArray(p.elo_adj) ? p.elo_adj : [] });
+  const toPlayer = p => ({ id: p.id, name: p.name, active: p.active, userId: p.user_id || null, avatar: p.avatar || null, level: p.level != null ? +p.level : null, eloStart: p.elo_start ?? 1500, confirmed: !!p.elo_confirmed, contacts: p.contacts || {}, bio: p.bio || "", levelStatus: p.level_status || "ok", levelClaim: p.level_claim != null ? +p.level_claim : null, eloAdj: Array.isArray(p.elo_adj) ? p.elo_adj : [], label: p.label || "" });
   const toTournament = t => ({ id: t.id, seq: t.seq || 0, name: t.name, date: t.date, status: t.status, format: t.format, courts: t.courts, participantIds: t.participant_ids || [], teams: t.teams || [],
     scoring: t.scoring || {}, rounds: t.rounds || null, money: t.money || {}, s: t.settings || {} });
   const toGame = g => ({ id: g.id, tournamentId: g.tournament_id, round: g.round, court: g.court, teamA: g.team_a, teamB: g.team_b, scoreA: g.score_a, scoreB: g.score_b, label: g.label || null });
@@ -105,7 +105,7 @@ export function createDb(cfg) {
   async function removeRegistration(tid, pid) { await ensureSession(); const { error } = await sb.from("registrations").delete().eq("league_id", L).eq("tournament_id", tid).eq("player_id", pid); if (error) throw error; }
   async function addRegistration(tid, pid, status, team) { await ensureSession(); const { error } = await sb.from("registrations").upsert({ league_id: L, tournament_id: tid, player_id: pid, status: status || "main", paid: false, team_no: team ?? null, approval: "ok", created_at: new Date().toISOString() }, { onConflict: "league_id,tournament_id,player_id" }); if (error) throw error; }
   async function updatePlayer(pid, patch) { await ensureSession();
-    const row = {}; if ("level" in patch) row.level = patch.level; if ("eloStart" in patch) row.elo_start = patch.eloStart; if ("confirmed" in patch) row.elo_confirmed = patch.confirmed; if ("eloAdj" in patch) row.elo_adj = patch.eloAdj; if ("active" in patch) row.active = patch.active; if ("name" in patch) row.name = patch.name; if ("levelStatus" in patch) row.level_status = patch.levelStatus;
+    const row = {}; if ("level" in patch) row.level = patch.level; if ("eloStart" in patch) row.elo_start = patch.eloStart; if ("confirmed" in patch) row.elo_confirmed = patch.confirmed; if ("eloAdj" in patch) row.elo_adj = patch.eloAdj; if ("label" in patch) row.label = patch.label || null; if ("active" in patch) row.active = patch.active; if ("name" in patch) row.name = patch.name; if ("levelStatus" in patch) row.level_status = patch.levelStatus;
     const { error } = await sb.from("players").update(row).eq("league_id", L).eq("id", pid); if (error) throw error;
   }
   async function addLog(action) { const s = await session(); await sb.from("logs").insert({ league_id: L, user_id: s ? s.user.id : null, action }); }

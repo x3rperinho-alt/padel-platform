@@ -144,9 +144,12 @@ setLang(detectLang(BOOT.tgLang));
   const pname = pid => { const p = byId(state.players, pid); return p ? p.name : "?"; };
   // подпись игрока в текущем турнире (ставит админ): «Имя (подпись)» — видят все; LBL заполняется при показе турнира
   let LBL = {};
-  const lblHtml = pid => LBL[pid] ? ` <span class="nm-lbl">(${esc(LBL[pid])})</span>` : "";
+  // постоянная подпись игрока (players.label, ставит админ) — показывается везде; подпись турнира важнее
+  const plab = pid => { const p = byId(state.players, pid); return (p && p.label) || ""; };
+  const lblOf = pid => LBL[pid] || plab(pid);
+  const lblHtml = pid => lblOf(pid) ? ` <span class="nm-lbl">(${esc(lblOf(pid))})</span>` : "";
   const pnl = pid => esc(pname(pid)) + lblHtml(pid);           // имя + подпись, без ссылки
-  const pnt = pid => pname(pid) + (LBL[pid] ? " (" + LBL[pid] + ")" : ""); // то же простым текстом
+  const pnt = pid => pname(pid) + (lblOf(pid) ? " (" + lblOf(pid) + ")" : ""); // то же простым текстом
   const pl = pid => `<span class="plink" data-act="open-profile" data-id="${pid}">${esc(pname(pid))}</span>${lblHtml(pid)}`;
   let toastTimer; function toast(m) { const el = document.getElementById("toast"); el.textContent = m; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2200); }
   const err = e => toast(t("error", { msg: (e && e.message) || e }));
@@ -317,7 +320,7 @@ setLang(detectLang(BOOT.tgLang));
       const cands = state.players.filter(p => p.active && p.id !== me.id && p.levelStatus === "ok" && !regs.some(r => r.playerId === p.id) && inRange(p)).sort((a, b) => a.name.localeCompare(b.name));
       const emptyPair = firstFreeTeam(tid, 2) != null, anyPlace = firstFreeTeam(tid, 1) != null;
       regBtn = rejNote + (state.view.partnerFor === tid
-        ? `<div class="partner-pick"><label class="field"><span class="lbl">${t("choose_partner")}</span><select id="partnerSel">${cands.map(p => `<option value="${p.id}">${esc(p.name)} · ${letter(p.level)}</option>`).join("")}</select></label>
+        ? `<div class="partner-pick"><label class="field"><span class="lbl">${t("choose_partner")}</span><select id="partnerSel">${cands.map(p => `<option value="${p.id}">${esc(p.name)}${p.label ? " (" + esc(p.label) + ")" : ""} · ${letter(p.level)}</option>`).join("")}</select></label>
             ${cands.length ? "" : `<p class="tiny" style="margin:-4px 0 10px;">${t("no_partners")}</p>`}
             <div class="row" style="gap:8px;justify-content:flex-end;"><button class="btn sm" data-act="partner-cancel">${t("cancel")}</button><button class="btn sm primary" data-act="reg-pair" data-id="${tid}" ${cands.length ? "" : "disabled"}>${emptyPair ? t("reg_as_pair") : t("reg_pair_reserve")}</button></div></div>`
         : `<button class="btn primary block" data-act="partner-open" data-id="${tid}">${t("reg_with_partner")}</button>
@@ -354,7 +357,7 @@ setLang(detectLang(BOOT.tgLang));
       ${res.length || isAdmin() ? `<div class="card"><h3>${t("reserve_list")} <span class="tiny">· ${res.length}</span></h3><div style="margin-top:6px;">${res.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>` : ""}
       ${canEdit() && tt.status !== "played" ? runCardHtml(tt) : ""}
       ${labelsCardHtml(tt, main.map(r => r.playerId))}
-      ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${state.players.filter(p => p.active && !regs.some(r => r.playerId === p.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(p => `<option value="${p.id}">${esc(p.name)} · ${letter(p.level)}</option>`).join("")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
+      ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${state.players.filter(p => p.active && !regs.some(r => r.playerId === p.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(p => `<option value="${p.id}">${esc(p.name)}${p.label ? " (" + esc(p.label) + ")" : ""} · ${letter(p.level)}</option>`).join("")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
         <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`;
   }
   // ---------- итоги турнира: таблица, статистика, раунды по кнопке ----------
@@ -808,7 +811,7 @@ setLang(detectLang(BOOT.tgLang));
         return `${k === F && rows.length > F ? `<tr class="s-cut"><td colspan="4"><span>${t("s_final_zone", { n: F })}</span></td></tr>` : ""}
         <tr class="s-row ${isMe ? "me" : ""} ${r.z ? "z" : ""}" data-act="s-open" data-id="${r.id}">
           <td><span class="pos-badge ${r.pos === 1 ? "gold" : ""}">${r.pos}</span></td>
-          <td class="lb-name"><span class="lb-p">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span></span></td>
+          <td class="lb-name"><span class="lb-p">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span>${lblHtml(r.id)}</span></td>
           <td>${r.n}</td><td class="lb-elo">${r.pts}<span class="s-chev ${open ? "open" : ""}">›</span></td></tr>
         ${open ? `<tr class="s-open-row"><td colspan="4">${detail(r)}<div class="s-det-foot"><span class="tiny">${t("s_total")}</span><b>${ptsWord(r.pts)}</b></div>
           <button class="btn sm ghost" style="margin-top:8px;" data-act="open-profile" data-id="${r.id}">${t("open_profile_btn")}</button></td></tr>` : ""}`; }).join("")}</table>`
@@ -926,7 +929,7 @@ setLang(detectLang(BOOT.tgLang));
         <table class="tbl"><tr><th></th><th>${t("players")}</th><th></th><th>Elo</th><th>${t("games")}</th><th>W-L</th></tr>
         ${rows.map((p, i) => { const s = E.stats[p.id]; return `<tr>
           <td><span class="pos-badge ${i===0?'gold':''}">${i+1}</span></td>
-          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 30)}<span class="plink">${esc(p.name)}</span></span></td>
+          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 30)}<span class="plink">${esc(p.name)}</span>${lblHtml(p.id)}</span></td>
           <td>${levelBadge(E.ratings[p.id] / 1000)}</td>
           <td class="lb-elo ${E.unconfirmed[p.id]?'unc':''}">${Math.round(E.ratings[p.id])}</td>
           <td>${s.g}</td><td>${s.g ? s.w + "-" + s.l : "—"}</td></tr>`; }).join("")}
@@ -1062,7 +1065,7 @@ setLang(detectLang(BOOT.tgLang));
     return `${head}${mine ? levelBannerHtml() : ""}
       <div class="card hero">
         <div class="hero-top">
-          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}</div><div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${p.levelStatus === "ok" ? `${levelBadge(E.ratings[pid] / 1000)} ${fmtLv(Math.round(E.ratings[pid]) / 1000)}` : ""}</div>${mine || isAdmin() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}</button>` : ""}</div></div>
+          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}${p.label ? ` <span class="nm-lbl">(${esc(p.label)})</span>` : ""}</div><div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${p.levelStatus === "ok" ? `${levelBadge(E.ratings[pid] / 1000)} ${fmtLv(Math.round(E.ratings[pid]) / 1000)}` : ""}</div>${mine || isAdmin() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}</button>` : ""}</div></div>
           ${p.levelStatus === "ok" ? `<div class="hero-elo"><span class="${E.unconfirmed[pid]?'unc':''}">${Math.round(E.ratings[pid])}</span><small>${E.unconfirmed[pid] ? t("unconfirmed") : t("confirmed")}</small></div>` : `<div class="hero-elo"><span class="pend">⏳</span><small>${p.levelStatus === "pending" ? t("pending_short") : t("need_quiz_short")}</small></div>`}
         </div>
         ${p.levelStatus === "ok" && E.unconfirmed[pid] ? `<p class="tiny" style="margin:8px 0 0;">${t("unconfirmed_hint", { n: CONFIRM_N - E.tcount[pid] })}</p>` : ""}
@@ -1149,8 +1152,9 @@ setLang(detectLang(BOOT.tgLang));
       const rows = state.players.filter(p => !q || p.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
       body = `<div class="card"><p class="tiny" style="margin:0 0 8px;">${t("ratings_admin_hint")}</p><input type="search" id="admQ" placeholder="${t("search")}" value="${esc(state.view.q || "")}">
         <div style="margin-top:8px;">${rows.map(p => `<div class="adm-row ${p.active?'':'off'}">
-          <div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 34)}<span><b>${esc(p.name)}</b><br><span class="tiny">${t("src_"+((p.contacts||{}).level_source||"self"))}${(p.contacts||{}).quiz_elo != null ? " " + p.contacts.quiz_elo : ""} · Elo ${Math.round(E.ratings[p.id])} · ${E.tcount[p.id]} ${t("tournaments_played")}</span></span></div>
+          <div class="adm-main" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 34)}<span><b>${esc(p.name)}</b>${p.label ? ` <span class="nm-lbl">(${esc(p.label)})</span>` : ""}<br><span class="tiny">${t("src_"+((p.contacts||{}).level_source||"self"))}${(p.contacts||{}).quiz_elo != null ? " " + p.contacts.quiz_elo : ""} · Elo ${Math.round(E.ratings[p.id])} · ${E.tcount[p.id]} ${t("tournaments_played")}</span></span></div>
           <div class="adm-ctl">
+            <label class="adm-lbl">${t("player_lbl")}<input type="text" maxlength="30" autocomplete="off" enterkeyhint="done" data-act="adm-lbl" data-id="${p.id}" value="${esc(p.label || "")}" placeholder="${t("player_lbl_ph")}"></label>
             <label>${t("level_value")}<input type="text" inputmode="decimal" autocomplete="off" class="dec-in" data-act="adm-level" data-id="${p.id}" value="${p.level ?? ""}"></label>
             <label>${t("start_elo")}<input type="number" step="10" data-act="adm-elo" data-id="${p.id}" value="${p.eloStart}"></label>
             <label>${t("cur_elo")}<input type="number" step="1" data-act="adm-elo-now" data-id="${p.id}" value="${Math.round(E.ratings[p.id])}"></label>
@@ -1331,6 +1335,8 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "adm-confirm") on(async () => { const p = byId(state.players, id); try { await db.updatePlayer(id, { confirmed: !p.confirmed }); await db.addLog((p.confirmed ? "Снял подтверждение: " : "Подтвердил Эло: ") + p.name); await reload(); } catch (e) { err(e); } });
       else if (a === "adm-active") on(async () => { const p = byId(state.players, id); try { await db.updatePlayer(id, { active: !p.active }); await reload(); } catch (e) { err(e); } });
       else if (a === "adm-level") el.onchange = async () => { const p = byId(state.players, id); const lv = el.value === "" ? null : +el.value; try { await db.updatePlayer(id, { level: lv, eloStart: levelElo(lv), levelStatus: lv == null ? p.levelStatus : "ok" }); await db.addLog(`Уровень ${p.name}: ${p.level} → ${lv}`); await reload(); } catch (e) { err(e); } };
+      else if (a === "adm-lbl") { el.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } }; el.onchange = async () => { const p = byId(state.players, id); const v = String(el.value || "").replace(/\s+/g, " ").trim().slice(0, 30); if (v === (p.label || "")) return;
+        try { await db.updatePlayer(id, { label: v }); await db.addLog(`Подпись ${p.name}: «${p.label || ""}» → «${v}»`).catch(() => {}); p.label = v; toast(t("saved")); if (!isField(document.activeElement)) render(); } catch (e) { err(e); } }; }
       else if (a === "adm-elo-now") el.onchange = async () => { const p = byId(state.players, id); const v = Math.round(+el.value); if (!v || v < 0 || v > 9000) return;
         const E = computeElo(), cur = Math.round(E.ratings[id]); if (v === cur) return;
         try { if (!E.lastT) await db.updatePlayer(id, { eloStart: v }); // турниров ещё не было — это и есть стартовое Эло
