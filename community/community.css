@@ -312,3 +312,14 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
 .pf-admin { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--line, rgba(255,255,255,.15)); border-radius: 12px; }
 .pf-admin-row { display: flex; gap: 10px; align-items: flex-end; }
 .pf-admin-row input#pfElo { width: 96px; }
+/* партнёр (LuPadel) */
+.pt-card { border-color: rgba(97,210,183,.28); background: linear-gradient(135deg, rgba(97,210,183,.08), rgba(175,244,76,.04)), var(--card, #161616); }
+.pt-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pt-kick { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink-2, #bbb); font-weight: 700; }
+.pt-logo { height: 26px; width: auto; display: block; }
+.pt-links { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.pt-links .btn { flex: 1; }
+.pt-tag { margin-top: 6px; font-size: 12px; font-weight: 600; color: #8fe3cd; }
+.pt-powered { all: unset; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.08); width: 100%; cursor: pointer; }
+.pt-powered span { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ink-3, #888); }
+.pt-powered img { height: 20px; width: auto; }

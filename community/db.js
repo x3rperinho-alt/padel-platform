@@ -61,9 +61,10 @@ export function createDb(cfg) {
   async function loadAll() {
     await ensureSession();
     const q = t => sb.from(t).select("*").eq("league_id", L);
-    const [players, tournaments, games, regs] = await Promise.all([q("players"), q("tournaments_public"), q("games"), q("registrations")]);
+    const [players, tournaments, games, regs, lg] = await Promise.all([q("players"), q("tournaments_public"), q("games"), q("registrations"), sb.from("leagues").select("settings").eq("id", L).maybeSingle()]);
     for (const r of [players, tournaments, games, regs]) if (r.error) throw r.error;
     return {
+      league: (lg && !lg.error && lg.data && lg.data.settings) || {},
       players: players.data.map(toPlayer),
       tournaments: tournaments.data.map(toTournament).sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.seq - b.seq),
       games: games.data.map(toGame),
@@ -108,6 +109,12 @@ export function createDb(cfg) {
     const row = {}; if ("level" in patch) row.level = patch.level; if ("eloStart" in patch) row.elo_start = patch.eloStart; if ("confirmed" in patch) row.elo_confirmed = patch.confirmed; if ("eloAdj" in patch) row.elo_adj = patch.eloAdj; if ("label" in patch) row.label = patch.label || null; if ("active" in patch) row.active = patch.active; if ("name" in patch) row.name = patch.name; if ("levelStatus" in patch) row.level_status = patch.levelStatus;
     const { error } = await sb.from("players").update(row).eq("league_id", L).eq("id", pid); if (error) throw error;
   }
+  // настройки лиги (партнёр и т.п.): читаем свежие и дописываем, чтобы не затереть остальное (языки, open_join…)
+  async function saveLeagueSettings(patch) { await ensureSession();
+    const cur = await sb.from("leagues").select("settings").eq("id", L).maybeSingle(); if (cur.error) throw cur.error;
+    const settings = { ...((cur.data && cur.data.settings) || {}), ...patch };
+    const { data, error } = await sb.from("leagues").update({ settings }).eq("id", L).select("id"); if (error) throw error;
+    if (!data || !data.length) throw new Error("no rights to change league settings"); return settings; }
   async function addLog(action) { const s = await session(); await sb.from("logs").insert({ league_id: L, user_id: s ? s.user.id : null, action }); }
   async function listMembers() {
     const { data, error } = await sb.from("league_members").select("user_id, role, player_id").eq("league_id", L); if (error) throw error;
@@ -130,5 +137,5 @@ export function createDb(cfg) {
 
   return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinOpen, loadAll,
     createMyPlayer, updateMyCard, adjustMyLevel, reviewLevel, submitQuiz, register, unregister, reviewRegistration, resetPlayer, adminMembers, promoteReserve, setDisplayName,
-    saveTournament, deleteTournament, saveGames, saveScore, deleteGames, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, listMembers, setMemberRole, profileNames, subscribe };
+    saveTournament, deleteTournament, saveGames, saveScore, deleteGames, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, saveLeagueSettings, listMembers, setMemberRole, profileNames, subscribe };
 }

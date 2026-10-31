@@ -29,7 +29,7 @@ setLang(detectLang(BOOT.tgLang));
   const byId = (arr, id) => arr.find(x => x.id === id);
   const today = () => new Date().toISOString().slice(0, 10);
   const uid = () => "t_" + Math.random().toString(36).slice(2, 10);
-  const state = { players: [], tournaments: [], games: [], registrations: [], tab: "tournaments", view: {} };
+  const state = { players: [], tournaments: [], games: [], registrations: [], league: {}, tab: "tournaments", view: {} };
   Object.assign(state, BOOT.data);
   const U = BOOT.user;
   const isAdmin = () => U && (U.role === "owner" || U.role === "admin");
@@ -142,6 +142,16 @@ setLang(detectLang(BOOT.tgLang));
   const SIL = `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="24" r="12"/><path d="M8 60c2-14 12-22 24-22s22 8 24 22z"/></svg>`;
   const avatarHtml = (pid, sz) => { const p = byId(state.players, pid); sz = sz || 44; return p && p.avatar ? `<span class="avatar" style="width:${sz}px;height:${sz}px;"><img src="${p.avatar}" alt=""></span>` : `<span class="avatar ph" style="width:${sz}px;height:${sz}px;">${SIL}</span>`; };
   const pname = pid => { const p = byId(state.players, pid); return p ? p.name : "?"; };
+  // ---------- партнёр (LuPadel): ссылки и переключатели живут в leagues.settings.partner, правит админ ----------
+  const PARTNER_DEF = { name: "LuPadel", shop: "https://lupadel.olx.ua/uk/home/", consult: "", season: true };
+  const partner = () => ({ ...PARTNER_DEF, ...(((state.league || {}).partner) || {}) });
+  const httpsOk = u => /^https:\/\/[^\s"'<>]+$/.test(u || "");
+  function partnerHtml(kind) {
+    const P = partner(), btn = (u, l) => httpsOk(u) ? `<button class="btn sm" data-act="open-link" data-url="${esc(u)}">${l} ↗</button>` : "";
+    const links = btn(P.shop, t("p_shop")) + btn(P.consult, t("p_consult"));
+    return `<div class="card pt-card ${kind}"><div class="pt-top"><span class="pt-kick">${t(kind === "season" ? "p_season" : "p_prizes")}</span><img class="pt-logo" src="lupadel.svg" alt="${esc(P.name)}"></div>
+      ${kind === "prizes" ? `<p class="tiny" style="margin:8px 0 0;">${t("p_prizes_sub")}</p>` : ""}${links ? `<div class="pt-links">${links}</div>` : ""}</div>`;
+  }
   // подпись игрока в текущем турнире (ставит админ): «Имя (подпись)» — видят все; LBL заполняется при показе турнира
   let LBL = {};
   // постоянная подпись игрока (players.label, ставит админ) — показывается везде; подпись турнира важнее
@@ -274,6 +284,7 @@ setLang(detectLang(BOOT.tgLang));
       <div class="ct-top"><span class="lvb ${letterClass(rangeLabel(tt.s)[0]==="≤"?rangeLabel(tt.s).slice(2):rangeLabel(tt.s))}">${esc(rangeLabel(tt.s))}</span><span class="t-status ${st[0]}"><i></i>${st[1]}</span></div>
       <div class="t-tile-name">${esc(tt.name)}</div>
       <div class="tiny">${dateFmt(tt.date, true)}${tt.s.time ? " · " + timeRange(tt.s) : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""}${pairs ? " · " + t(tt.format) : ""}</div>
+      ${tt.s.partner_prizes ? `<div class="pt-tag">🎁 ${t("p_prizes")}</div>` : ""}
       ${pend ? `<div class="ct-pend">⏳ ${t("pending_n", { n: pend })}</div>` : ""}
       <div class="ct-bottom">
         <span class="ct-slots">${tt.status === "played" ? `<b>${new Set(state.games.filter(g => g.tournamentId === tt.id).flatMap(g => g.teamA.concat(g.teamB))).size}</b> ${t("players").toLowerCase()}` : pairs ? `<b>${main}</b>/${cap || "∞"} ${t("slots")} · ${slots || "∞"} ${t("pairs_n")}${res ? ` · ${t("reserve")} ${res}` : ""}` : slots ? `<b>${main}</b>/${slots} ${t("slots")}${res ? ` · ${t("reserve")} ${res}` : ""}` : `${main} ${t("players").toLowerCase()}`}</span>
@@ -354,6 +365,7 @@ setLang(detectLang(BOOT.tgLang));
         <div style="margin-top:14px;">${regBtn}</div>
         ${tt.s.contact ? `<button class="btn block" style="margin-top:8px;" data-act="open-link" data-url="${esc(tt.s.contact)}">${t("write_organizer")} ↗</button>` : ""}
       </div>
+      ${tt.s.partner_prizes ? partnerHtml("prizes") : ""}
       ${pairs
         ? `<div class="card"><h3>${t("pairs_title")} <span class="tiny">· ${fullPairs}/${slots || teamNos(tt).length - 1}</span></h3><div class="pair-grid">${teamNos(tt).map(pairCard).join("")}</div></div>`
         : `<div class="card"><h3>${t("main_list")} <span class="tiny">· ${main.length}${slots ? "/" + slots : ""}</span></h3><div style="margin-top:6px;">${main.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>`}
@@ -829,6 +841,7 @@ setLang(detectLang(BOOT.tgLang));
           <div><b class="un">${cur.ts.length}</b><span class="tiny">${t("s_played", { lg })}</span></div>
           <div><b class="un">${t("s_top", { n: F })}</b><span class="tiny">${t("s_to_final")}</span></div>
         </div>
+        ${partner().season ? `<${httpsOk(partner().shop) ? `button data-act="open-link" data-url="${esc(partner().shop)}"` : "div"} class="pt-powered"><span>powered by</span><img src="lupadel.svg" alt="${esc(partner().name)}"></${httpsOk(partner().shop) ? "button" : "div"}>` : ""}
       </div>
       ${lgChips}
       ${myCard}
@@ -894,6 +907,7 @@ setLang(detectLang(BOOT.tgLang));
         <label class="field"><span class="lbl">${t("t_note")}</span><textarea id="tfNote" rows="3">${esc(s.note || "")}</textarea></label>
         <label class="row" style="cursor:pointer;"><span>${t("t_reg_open")}</span><input type="checkbox" id="tfOpen" ${s.reg_open ? "checked" : ""} style="width:22px;height:22px;"></label>
         <label class="field"><span class="lbl">${t("t_season")}</span><select id="tfSeason">${[["auto", t("t_season_auto", { lg: tLeague({ s: { ...s, season_league: "auto" } }) || "—" })], ["D", t("s_league", { lg: "D" })], ["C", t("s_league", { lg: "C" })], ["none", t("t_season_none")]].map(([v, l]) => `<option value="${v}" ${(s.season_league || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label class="row tf-toggle"><span>🎁 ${t("p_prizes")}<br><span class="tiny">${t("p_prizes_hint")}</span></span><input type="checkbox" id="tfPartner" ${s.partner_prizes ? "checked" : ""}></label>
         <label class="row tf-toggle"><span>${t("t_approval")}<br><span class="tiny">${t("t_approval_hint")}</span></span><input type="checkbox" id="tfApproval" ${s.approval ? "checked" : ""}></label>
         <div class="pf-actions" style="margin-top:14px;justify-content:space-between;">
           ${f.isNew ? "<span></span>" : `<button class="btn sm ghost danger" data-act="tf-delete">${t("delete")}</button>`}
@@ -905,6 +919,7 @@ setLang(detectLang(BOOT.tgLang));
     const f = state._tf; const g = id => document.getElementById(id); if (!f || !g("tfName")) return f;
     f.name = g("tfName").value.trim(); f.date = g("tfDate").value; f.courts = +g("tfCourts").value || 1;
     if (g("tfSeason")) f.s.season_league = g("tfSeason").value;
+    if (g("tfPartner")) f.s.partner_prizes = g("tfPartner").checked;
     if (g("tfCourtNums")) { f.s.court_nums = parseCourts(g("tfCourtNums").value); if (f.s.court_nums.length) f.courts = f.s.court_nums.length; }
     const num = v => v === "" ? null : +v;
     const ps = g("tfPlaceSel"); if (ps) { f.placeOther = ps.value === "__other"; f.s.place = f.placeOther ? (g("tfPlace") ? g("tfPlace").value.trim() : (CLUBS.includes(f.s.place) ? "" : f.s.place || "")) : ps.value; }
@@ -1166,7 +1181,7 @@ setLang(detectLang(BOOT.tgLang));
     const queue = state.players.filter(p => p.levelStatus !== "ok");
     const pendingN = queue.filter(p => p.levelStatus === "pending").length;
     const sub = state.view.adm || (pendingN ? "review" : "ratings");
-    const tabs = [["review", t("review_tab"), pendingN], ["ratings", t("ratings_admin")], ...(isAdmin() ? [["visits", t("visits_tab")], ["nom", "🔒 " + t("nom_tab")]] : []), ["roles", t("roles")]];
+    const tabs = [["review", t("review_tab"), pendingN], ["ratings", t("ratings_admin")], ...(isAdmin() ? [["visits", t("visits_tab")], ["nom", "🔒 " + t("nom_tab")], ["partner", "🤝 " + t("p_tab")]] : []), ["roles", t("roles")]];
     let body = "";
     if (sub === "ratings") {
       const q = (state.view.q || "").toLowerCase(); const E = computeElo();
@@ -1186,6 +1201,12 @@ setLang(detectLang(BOOT.tgLang));
     } else if (sub === "roles") body = membersCardHtml();
     else if (sub === "visits") body = visitsHtml();
     else if (sub === "nom" && isAdmin()) body = nominationsHtml();
+    else if (sub === "partner" && isAdmin()) { const P = partner();
+      body = `<div class="card"><div class="pt-top"><b>${esc(P.name)}</b><img class="pt-logo" src="lupadel.svg" alt=""></div><p class="tiny" style="margin:8px 0 12px;">${t("p_admin_hint")}</p>
+        <label class="field"><span class="lbl">${t("p_shop")}</span><input type="url" id="ptShop" value="${esc(P.shop || "")}" placeholder="https://…"></label>
+        <label class="field"><span class="lbl">${t("p_consult")}</span><input type="url" id="ptConsult" value="${esc(P.consult || "")}" placeholder="https://t.me/…"></label>
+        <label class="row tf-toggle"><span>${t("p_season_toggle")}</span><input type="checkbox" id="ptSeason" ${P.season ? "checked" : ""}></label>
+        <div class="pf-actions" style="justify-content:flex-end;margin-top:12px;"><button class="btn sm primary" data-act="pt-save">${t("save")}</button></div></div>`; }
     else if (sub === "review") body = !queue.length ? `<div class="card"><div class="empty"><div class="ic">✓</div>${t("review_empty")}</div></div>`
       : `<p class="tiny" style="margin:0 0 10px;">${t("review_hint")}</p>` + queue.sort((a, b) => (a.levelStatus === "pending" ? 0 : 1) - (b.levelStatus === "pending" ? 0 : 1)).map(p => {
         const c = p.contacts || {}, src = c.level_source || "", nick = c[src];
@@ -1346,6 +1367,9 @@ setLang(detectLang(BOOT.tgLang));
         try { await db.resetPlayer(id); await reload(); toast(t("reset_done", { name: p.name })); } catch (e) { err(e); } });
       else if (a === "pf-photo") on(() => { const f = document.getElementById("pfPhoto"); if (f) f.click(); });
       else if (a === "pf-photo-clear") on(() => { keepPf(); state._pf.avatar = null; render(); });
+      else if (a === "pt-save") on(async () => { const g = id => document.getElementById(id), shop = g("ptShop").value.trim(), consult = g("ptConsult").value.trim();
+        if ((shop && !httpsOk(shop)) || (consult && !httpsOk(consult))) { toast(t("p_bad_link")); return; }
+        try { const st = await db.saveLeagueSettings({ partner: { ...partner(), shop, consult, season: g("ptSeason").checked } }); state.league = st; await db.addLog("Партнёр: ссылки обновлены").catch(() => {}); toast(t("saved")); render(); } catch (e) { err(e); } });
       else if (a === "open-link") on(() => { const u = el.dataset.url; const tg = window.Telegram && window.Telegram.WebApp;
         if (tg && tg.initData && /^https:\/\/t\.me\//.test(u) && tg.openTelegramLink) tg.openTelegramLink(u); else if (tg && tg.initData && tg.openLink) tg.openLink(u); else window.open(u, "_blank", "noopener"); });
       else if (a === "copy-nick") on(async () => { const v = el.dataset.val; try { await navigator.clipboard.writeText(v); toast(t("nick_copied", { app: t("src_" + el.dataset.app) })); } catch (e) { toast(v); } });
