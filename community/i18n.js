@@ -1,7 +1,7 @@
 // Три языка интерфейса. Ключ → строка. Подстановки {n}, {name} и т.п.
 const D = {
   uk: {
-    season: "Сезон", s_name: "Сезон {n} · Осінь", s_days_left: "днів до кінця", s_days_to_start: "днів до старту", s_played: "турнірів ліги {lg}", s_top: "Топ-{n}", s_to_final: "виходять у фінал", s_league: "Ліга {lg}",
+    season: "Сезон", s_co_title: "Сезон {n}", s_co_sub: "Осінь · 048 × {p}", s_name: "Сезон {n} · Осінь", s_days_left: "днів до кінця", s_days_to_start: "днів до старту", s_played: "турнірів ліги {lg}", s_top: "Топ-{n}", s_to_final: "виходять у фінал", s_league: "Ліга {lg}",
     s_my_place: "Ти на {n} місці", s_tourn_n: "{n} турн.", s_in_zone: "Ти в зоні фіналу", s_to_zone: "До зони фіналу — {n} оч.", s_not_yet: "Зіграй турнір ліги {lg} — і з'явишся в таблиці сезону.",
     s_t_short: "Турн.", s_pts: "Очки", s_final_zone: "↑ зона фіналу · топ-{n}", s_place: "{p} місце з {of}", s_place_pairs: "{p} місце з {of} пар", s_total: "Разом за сезон", open_profile_btn: "Профіль гравця",
     s_empty_lg: "У лізі {lg} ще немає зіграних турнірів сезону.", s_soon: "Сезон стартує {d} — перший турнір уже скоро!",
@@ -82,7 +82,7 @@ const D = {
     lv_in_raketo: "Рейтинг Raketo (наприклад 2.434)", lv_in_playtomic: "Рівень Playtomic (наприклад 3.25)", lv_in_pado: "Рейтинг Pado — Elo (наприклад 1450) або рівень Industry", as_raketo: "у шкалі Raketo", rv_raw: "ввів",
   },
   ru: {
-    season: "Сезон", s_name: "Сезон {n} · Осень", s_days_left: "дней до конца", s_days_to_start: "дней до старта", s_played: "турниров лиги {lg}", s_top: "Топ-{n}", s_to_final: "выходят в финал", s_league: "Лига {lg}",
+    season: "Сезон", s_co_title: "Сезон {n}", s_co_sub: "Осень · 048 × {p}", s_name: "Сезон {n} · Осень", s_days_left: "дней до конца", s_days_to_start: "дней до старта", s_played: "турниров лиги {lg}", s_top: "Топ-{n}", s_to_final: "выходят в финал", s_league: "Лига {lg}",
     s_my_place: "Ты на {n} месте", s_tourn_n: "{n} турн.", s_in_zone: "Ты в зоне финала", s_to_zone: "До зоны финала — {n} оч.", s_not_yet: "Сыграй турнир лиги {lg} — и появишься в таблице сезона.",
     s_t_short: "Турн.", s_pts: "Очки", s_final_zone: "↑ зона финала · топ-{n}", s_place: "{p} место из {of}", s_place_pairs: "{p} место из {of} пар", s_total: "Всего за сезон", open_profile_btn: "Профиль игрока",
     s_empty_lg: "В лиге {lg} ещё нет сыгранных турниров сезона.", s_soon: "Сезон стартует {d} — первый турнир уже скоро!",
@@ -163,7 +163,7 @@ const D = {
     lv_in_raketo: "Рейтинг Raketo (например 2.434)", lv_in_playtomic: "Уровень Playtomic (например 3.25)", lv_in_pado: "Рейтинг Pado — Elo (например 1450) или уровень Industry", as_raketo: "в шкале Raketo", rv_raw: "ввёл",
   },
   en: {
-    season: "Season", s_name: "Season {n} · Autumn", s_days_left: "days left", s_days_to_start: "days to start", s_played: "league {lg} tournaments", s_top: "Top {n}", s_to_final: "go to the final", s_league: "League {lg}",
+    season: "Season", s_co_title: "Season {n}", s_co_sub: "Autumn · 048 × {p}", s_name: "Season {n} · Autumn", s_days_left: "days left", s_days_to_start: "days to start", s_played: "league {lg} tournaments", s_top: "Top {n}", s_to_final: "go to the final", s_league: "League {lg}",
     s_my_place: "You're #{n}", s_tourn_n: "{n} tourn.", s_in_zone: "You're in the final zone", s_to_zone: "{n} pts to the final zone", s_not_yet: "Play a league {lg} tournament to appear in the season table.",
     s_t_short: "Tourn.", s_pts: "Pts", s_final_zone: "↑ final zone · top {n}", s_place: "place {p} of {of}", s_place_pairs: "place {p} of {of} pairs", s_total: "Season total", open_profile_btn: "Player profile",
     s_empty_lg: "No season tournaments played in league {lg} yet.", s_soon: "Season starts {d} — first tournament soon!",

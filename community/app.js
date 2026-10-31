@@ -833,15 +833,18 @@ setLang(detectLang(BOOT.tgLang));
       : `<div class="empty" style="padding:22px 6px;"><div class="ic">🏆</div>${started ? t("s_empty_lg", { lg }) : t("s_soon", { d: dateFmt(S.start) })}</div>`;
     const how = state.view.sHow;
     return `<div class="section-head"><h2>${t("season")}</h2></div>
-      <div class="card s-hero">
+      ${partner().season ? `<div class="card s-hero co">
+        <div class="co-lock"><img class="co-048" src="logo.svg" alt="048 Padel"><span class="co-x">×</span>${httpsOk(partner().shop) ? `<button class="co-lp-btn" data-act="open-link" data-url="${esc(partner().shop)}"><img class="co-lp" src="lupadel.svg" alt="${esc(partner().name)}"></button>` : `<img class="co-lp" src="lupadel.svg" alt="${esc(partner().name)}">`}</div>
+        <div class="co-line"></div>
+        <div class="co-title un">${t("s_co_title", { n: S.n })}</div>
+        <div class="co-sub">${t("s_co_sub", { p: esc(partner().name) })}</div><div class="co-dates un">${dateFmt(S.start)} — ${dateFmt(S.end)}</div>` : `<div class="card s-hero">
         <div class="kick-s">${t("s_name", { n: S.n })}</div>
-        <div class="un" style="font-weight:800;font-size:22px;margin-top:6px;">${dateFmt(S.start)} — ${dateFmt(S.end)}</div>
+        <div class="un" style="font-weight:800;font-size:22px;margin-top:6px;">${dateFmt(S.start)} — ${dateFmt(S.end)}</div>`}
         <div class="s-stats">
           <div><b class="un">${started ? daysLeft : Math.max(0, Math.ceil((new Date(S.start + "T00:00:00") - new Date()) / 864e5))}</b><span class="tiny">${t(started ? "s_days_left" : "s_days_to_start")}</span></div>
           <div><b class="un">${cur.ts.length}</b><span class="tiny">${t("s_played", { lg })}</span></div>
           <div><b class="un">${t("s_top", { n: F })}</b><span class="tiny">${t("s_to_final")}</span></div>
         </div>
-        ${partner().season ? `<${httpsOk(partner().shop) ? `button data-act="open-link" data-url="${esc(partner().shop)}"` : "div"} class="pt-powered"><span>powered by</span><img src="lupadel.svg" alt="${esc(partner().name)}"></${httpsOk(partner().shop) ? "button" : "div"}>` : ""}
       </div>
       ${lgChips}
       ${myCard}
