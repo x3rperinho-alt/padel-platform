@@ -46,6 +46,9 @@ const DATA = BOOT.data;
   function byId(arr, id) { return arr.find(x => x.id === id); }
   function playerName(id) { const p = byId(state.players, id); return p ? p.name : id; }
   function playersActive() { return state.players.filter(p => p.active); }
+  // неактивный игрок (убран из лиги): его старые игры остаются в Эло, рейтинге (внизу), зале славы и турнирах,
+  // но он не попадает в ачивки, «лучший/худший партнёр», Пары, Встречи и Финансы
+  function isActive(id) { const p = byId(state.players, id); return !!(p && p.active); }
 
   function toast(msg) {
     const t = document.getElementById("toast");
@@ -250,8 +253,8 @@ const DATA = BOOT.data;
       });
     });
     let bestPartner=null, bestPartnerNet=-Infinity, worstOpp=null, worstOppNet=Infinity, worstPartner=null, worstPartnerNet=Infinity;
-    Object.entries(partners).forEach(([id,s]) => { const net=(s.pf-s.pa)/s.g; if (net>bestPartnerNet){bestPartnerNet=net; bestPartner=id;} if (net<worstPartnerNet){worstPartnerNet=net; worstPartner=id;} });
-    Object.entries(opponents).forEach(([id,s]) => { const net=(s.pf-s.pa)/s.g; if (net<worstOppNet){worstOppNet=net; worstOpp=id;} });
+    Object.entries(partners).filter(([id]) => isActive(id)).forEach(([id,s]) => { const net=(s.pf-s.pa)/s.g; if (net>bestPartnerNet){bestPartnerNet=net; bestPartner=id;} if (net<worstPartnerNet){worstPartnerNet=net; worstPartner=id;} });
+    Object.entries(opponents).filter(([id]) => isActive(id)).forEach(([id,s]) => { const net=(s.pf-s.pa)/s.g; if (net<worstOppNet){worstOppNet=net; worstOpp=id;} });
     const d = gp - w - l; // ничьи
     return { gp, w, l, d, pf, pa, diff: pf-pa, winPct: gp? Math.round(w/(w+l||1)*100):0, bestPartner, bestPartnerNet, worstPartner, worstPartnerNet, worstOpp, worstOppNet, partners, opponents };
   }
@@ -582,7 +585,7 @@ const DATA = BOOT.data;
     const N = playerName;
     const seqs = playerSeqs();
     const { ratings } = computeElo();
-    const played = state.players.filter(p => (seqs[p.id]||[]).length);
+    const played = state.players.filter(p => p.active && (seqs[p.id]||[]).length);
     const st = {}; played.forEach(p => st[p.id] = streakInfo(seqs[p.id]));
     const holder = name => { const t = A.titles.concat(A.anti).find(x => x.name===name); return t && t.holders.length ? t.holders : null; };
     const king = holder("Король"); if (king) q.push(`👑 ${king[0].label} на троне с ${king[0].sub}. Кто-нибудь вообще собирается это менять?`);
@@ -2120,7 +2123,8 @@ const DATA = BOOT.data;
   }
   function computeAchievements() {
     const seqs = playerSeqs();
-    const played = state.players.filter(p => (seqs[p.id]||[]).length>0).map(p => p.id);
+    const allP = state.players.filter(p => (seqs[p.id]||[]).length>0).map(p => p.id); // все, кто играл — для рекордов зала славы
+    const played = allP.filter(isActive);                                                // ачивки и титулы — только активные
     const N = id => playerName(id);
     const titles = [], anti = [], personal = {}, milestones = {}, records = [];
     played.forEach(id => { personal[id]=[]; milestones[id]=[]; });
@@ -2141,14 +2145,15 @@ const DATA = BOOT.data;
     title(titles, "👑", "Король", "1-е место в Эло", holders(top(eloList,"v",1), x=>x.v+" Эло"));
 
     // --- серии
-    const st = {}; played.forEach(id => st[id] = streakInfo(seqs[id]));
+    const st = {}; allP.forEach(id => st[id] = streakInfo(seqs[id]));
     title(titles, "🔥", "Серия", "самая длинная серия побед за всё время", holders(top(played.map(id=>({id, v: st[id].bestW, n:1})),"v",1), x => x.v+" подряд"));
     title(anti, "🧊", "Заморозка", "самая длинная текущая серия поражений", holders(top(played.map(id=>({id, v: st[id].curL, n:1})),"v",1).filter(x=>x.v>=2), x => x.v+" подряд"));
 
     const avg = played.map(id => { const s=seqs[id]; const n=s.length; return { id, n, pf: s.reduce((a,r)=>a+r.own,0)/n, pa: s.reduce((a,r)=>a+r.opp,0)/n }; });
 
     // --- пары (3+ игр)
-    const pairs = computeAllPairs().filter(p => p.g>=3).map(p => ({ id: p.ids.join("|"), label: N(p.ids[0])+" + "+N(p.ids[1]), v: +((p.pf-p.pa)/p.g).toFixed(1), n: p.g, w: p.w, l: p.l, ids: p.ids }));
+    const pairsAll = computeAllPairs().filter(p => p.g>=3).map(p => ({ id: p.ids.join("|"), label: N(p.ids[0])+" + "+N(p.ids[1]), v: +((p.pf-p.pa)/p.g).toFixed(1), n: p.g, w: p.w, l: p.l, ids: p.ids }));
+    const pairs = pairsAll.filter(p => p.ids.every(isActive));
     title(titles, "🤝", "Идеальная пара", "лучший net/игру среди пар с 3+ играми", holders(top(pairs,"v",1), x => (x.v>=0?"+":"")+x.v+" за игру · "+x.w+"-"+x.l));
     title(anti, "🧯", "Токсичная пара", "худший net/игру среди пар с 3+ играми", holders(top(pairs,"v",-1), x => (x.v>=0?"+":"")+x.v+" за игру · "+x.w+"-"+x.l));
 
@@ -2159,22 +2164,23 @@ const DATA = BOOT.data;
     if (last) {
       const tb = tables[last.id];
       const rk = rankedForPrizes(last), lastPl = Math.max(...rk.map(r => r.place));
-      title(titles, "🏆", "Чемпион", "победитель последнего турнира", holders(rk.filter(r => r.place===1).map(r => ({ id: r.id, v: tb.pts[r.id] })), x => x.v+" очков · "+last.name));
-      title(anti, "🥄", "Деревянная ложка", "последнее место в последнем турнире", holders(rk.filter(r => r.place===lastPl && lastPl>1).map(r => ({ id: r.id, v: tb.pts[r.id] })), x => x.v+" очков · "+last.name));
+      title(titles, "🏆", "Чемпион", "победитель последнего турнира", holders(rk.filter(r => r.place===1 && isActive(r.id)).map(r => ({ id: r.id, v: tb.pts[r.id] })), x => x.v+" очков · "+last.name));
+      title(anti, "🥄", "Деревянная ложка", "последнее место в последнем турнире", holders(rk.filter(r => r.place===lastPl && lastPl>1 && isActive(r.id)).map(r => ({ id: r.id, v: tb.pts[r.id] })), x => x.v+" очков · "+last.name));
     }
     const ebt = eloByTournament();
     if (ts.length>=2) {
       const prev = ts[ts.length-2];
-      const gains = tables[last.id].order.map(id => ({ id, v: Math.round((ebt[last.id][id]||1500) - (ebt[prev.id][id]||1500)), n:1 }));
+      const gains = tables[last.id].order.filter(isActive).map(id => ({ id, v: Math.round((ebt[last.id][id]||1500) - (ebt[prev.id][id]||1500)), n:1 }));
       title(titles, "🚀", "Ракета", "наибольший рост Эло за последний турнир", holders(top(gains,"v",1), x => (x.v>=0?"+":"")+x.v+" Эло"));
     }
 
     // --- разгром
     const decided = orderedGames().filter(g => g.scoreA!=null && g.scoreB!=null && g.decided!==false);
-    if (decided.length) {
+    const decidedAct = decided.filter(g => (g.scoreA>g.scoreB ? g.teamA : g.teamB).every(isActive)); // титул — только активным победителям
+    if (decidedAct.length) {
       const dom = g => Math.abs(g.scoreA-g.scoreB)/(g.scoreA+g.scoreB);
-      const maxM = Math.max(...decided.map(dom));
-      const bigs = decided.filter(g => dom(g)===maxM);
+      const maxM = Math.max(...decidedAct.map(dom));
+      const bigs = decidedAct.filter(g => dom(g)===maxM);
       title(titles, "🩸", "Мясник", "крупнейший разгром лиги (по доле выигранных очков)", bigs.map(g => { const w = g.scoreA>g.scoreB ? g.teamA : g.teamB; const l = g.scoreA>g.scoreB ? g.teamB : g.teamA; return { label: N(w[0])+" + "+N(w[1]), sub: Math.max(g.scoreA,g.scoreB)+":"+Math.min(g.scoreA,g.scoreB)+" против "+N(l[0])+" + "+N(l[1])+" · "+gameLabel(g) }; }));
     }
 
@@ -2203,7 +2209,7 @@ const DATA = BOOT.data;
       s.forEach(r => { if (r.g.tournamentId!==lastT) { run=0; lastT=r.g.tournamentId; } if (r.loss) run++; else if (r.win) { if (run>=3) cb = r.g; run=0; } });
       if (cb) addP(id, "🔄", "Камбэк", "победа после 3+ поражений подряд · "+gameLabel(cb));
       // непобедимый в паре
-      const unb = computeAllPairs().filter(p => p.ids.includes(id) && p.g>=3 && p.l===0);
+      const unb = computeAllPairs().filter(p => p.ids.includes(id) && p.ids.every(isActive) && p.g>=3 && p.l===0);
       if (unb.length) addP(id, "💪", "Непобедимый в паре", unb.map(p => "с "+N(p.ids.find(x=>x!==id))+" "+p.w+"-0").join(", "));
       // качели
       let alt=1, bestAlt=1;
@@ -2225,10 +2231,10 @@ const DATA = BOOT.data;
       const minM = Math.min(...decided.map(g => Math.abs(g.scoreA-g.scoreB)));
       rec("🫀", "Самые упорные игры", decided.filter(g=>Math.abs(g.scoreA-g.scoreB)===minM).slice(0,6).map(g => ({ label: N(g.teamA[0])+" + "+N(g.teamA[1])+"  "+g.scoreA+":"+g.scoreB+"  "+N(g.teamB[0])+" + "+N(g.teamB[1]), sub: gameLabel(g) })));
     }
-    rec("🔥", "Самая длинная серия побед", holders(top(played.map(id=>({id, v: st[id].bestW, n:1})),"v",1), x => x.v+" подряд"+(st[x.id].bestWEnd? " · до "+gameLabel(st[x.id].bestWEnd):"")));
-    rec("🧊", "Самая длинная серия поражений", holders(top(played.map(id=>({id, v: st[id].bestL, n:1})),"v",1), x => x.v+" подряд"+(st[x.id].bestLEnd? " · до "+gameLabel(st[x.id].bestLEnd):"")));
-    rec("🤝", "Лучшая пара", holders(top(pairs,"v",1), x => (x.v>=0?"+":"")+x.v+" за игру · "+x.w+"-"+x.l+" · "+x.n+" игр"));
-    rec("🧯", "Худшая пара", holders(top(pairs,"v",-1), x => (x.v>=0?"+":"")+x.v+" за игру · "+x.w+"-"+x.l+" · "+x.n+" игр"));
+    rec("🔥", "Самая длинная серия побед", holders(top(allP.map(id=>({id, v: st[id].bestW, n:1})),"v",1), x => x.v+" подряд"+(st[x.id].bestWEnd? " · до "+gameLabel(st[x.id].bestWEnd):"")));
+    rec("🧊", "Самая длинная серия поражений", holders(top(allP.map(id=>({id, v: st[id].bestL, n:1})),"v",1), x => x.v+" подряд"+(st[x.id].bestLEnd? " · до "+gameLabel(st[x.id].bestLEnd):"")));
+    rec("🤝", "Лучшая пара", holders(top(pairsAll,"v",1), x => (x.v>=0?"+":"")+x.v+" за игру · "+x.w+"-"+x.l+" · "+x.n+" игр"));
+    rec("🧯", "Худшая пара", holders(top(pairsAll,"v",-1), x => (x.v>=0?"+":"")+x.v+" за игру · "+x.w+"-"+x.l+" · "+x.n+" игр"));
     const bestTour = []; ts.forEach(t => tables[t.id].order.forEach(id => bestTour.push({id, v: tables[t.id].pts[id], t})));
     rec("💯", "Самый результативный турнир", holders(top(bestTour,"v",1), x => x.v+" очков · "+x.t.name));
     if (ts.length>=2) {
@@ -2237,7 +2243,7 @@ const DATA = BOOT.data;
       rec("🚀", "Самый большой скачок Эло за турнир", holders(top(gains,"v",1), x => "+"+x.v+" · "+x.t.name));
       rec("📉", "Самое большое падение Эло за турнир", holders(top(gains,"v",-1), x => x.v+" · "+x.t.name));
     }
-    const totals = played.map(id => ({ id, w: seqs[id].filter(r=>r.win).length, pf: seqs[id].reduce((a,r)=>a+r.own,0) }));
+    const totals = allP.map(id => ({ id, w: seqs[id].filter(r=>r.win).length, pf: seqs[id].reduce((a,r)=>a+r.own,0) }));
     rec("🏆", "Больше всех побед", holders(top(totals.map(x=>({id:x.id, v:x.w, n:1})),"v",1), x => x.v+" побед"));
     rec("🎯", "Больше всех очков", holders(top(totals.map(x=>({id:x.id, v:x.pf, n:1})),"v",1), x => x.v+" очков"));
     rec("👑", "Чемпионы турниров", ts.map(t => { const c = champions(t); return { label: c.map(N).join(" + "), sub: t.name+" · "+(tables[t.id].pts[c[0]]||0)+" очков" }; }));
@@ -2444,7 +2450,7 @@ const DATA = BOOT.data;
       + `<div class="section-head" style="margin-top:6px;"><h2 style="font-size:17px;">По турнирам</h2></div>${perT}`;
   }
   function statMoney() {
-    const rows = state.players.map(p => ({ p, f: playerFinance(p.id) })).filter(r => r.f.tournaments>0)
+    const rows = state.players.filter(p => p.active).map(p => ({ p, f: playerFinance(p.id) })).filter(r => r.f.tournaments>0)
       .sort((a,b) => b.f.total - a.f.total);
     const any = rows.some(r => r.f.courts || r.f.fees || r.f.won);
     if (!any) return `<div class="empty"><div class="ic">&#128176;</div>${canWrite ? "Финансы ещё не заполнены — откройте турнир и укажите оплату за корты и призовой фонд" : "Финансы ещё не заполнены"}</div>`;
@@ -2516,11 +2522,11 @@ const DATA = BOOT.data;
     document.body.removeChild(ta);
   }
   function statH2H() {
-    const ids = state.players.map(p => p.id);
+    const act = state.players.filter(p => p.active), ids = act.map(p => p.id);
     if (!state.view.h2h[0] || !ids.includes(state.view.h2h[0])) state.view.h2h[0] = ids[0] || null;
     if (!state.view.h2h[1] || !ids.includes(state.view.h2h[1]) || state.view.h2h[1] === state.view.h2h[0]) state.view.h2h[1] = ids.find(id => id !== state.view.h2h[0]) || null;
     const [a,b] = state.view.h2h;
-    const options = pid0 => state.players.map(p=>`<option value="${p.id}" ${p.id===pid0?'selected':''}>${esc(p.name)}</option>`).join("");
+    const options = pid0 => act.map(p=>`<option value="${p.id}" ${p.id===pid0?'selected':''}>${esc(p.name)}</option>`).join("");
     let body = "";
     if (a && b && a!==b) {
       const { asOpp, asPartners } = headToHead(a,b);
@@ -2592,7 +2598,7 @@ const DATA = BOOT.data;
   }
 
   function statPairs() {
-    const pairs = computeAllPairs();
+    const pairs = computeAllPairs().filter(p => p.ids.every(isActive));
     if (!pairs.length) return `<div class="empty">нет данных</div>`;
     const sort = state.view.pairSort || (state.view.pairSort = { key: "net", dir: -1 });
     const val = (s, key) => key==="g" ? s.g : key==="wl" ? (s.w - s.l) * 1000 + s.w : key==="net" ? (s.pf-s.pa)/s.g

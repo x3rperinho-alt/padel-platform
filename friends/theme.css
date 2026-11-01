@@ -539,6 +539,10 @@ button.fr-pair.on { border-color: var(--court); background: var(--orange-soft); 
 .fr-status { text-align: center; font-weight: 700; color: var(--ink-2); margin: -2px 0 6px; }
 .fr-status.done { color: var(--court); }
 
+/* карточки с широкой таблицей прокручиваются вбок: декоративная кромка (::after) и блик (::before) ездили бы вместе с таблицей — у них обычная рамка */
+.card:has(table.tbl)::before, .card:has(table.tbl)::after { display: none; }
+.card:has(table.tbl) { border: 1px solid var(--glass-bd); }
+
 /* ===== светлая тема ===== */
 /* сгенерировано из тёмных правил + ручные правки ниже */
 html[data-theme="light"] body { background: var(--bg); color: var(--ink); background-image: radial-gradient(900px 380px at 50% -200px, rgba(255,122,26,.18), transparent 60%),
@@ -657,3 +661,4 @@ html[data-theme="light"] .ct-date.active { background: var(--accent-grad); borde
 html[data-theme="light"] .avatar.ph { background: linear-gradient(150deg, #EADFD3, #D9CBBE); border-color: rgba(90,60,30,.12); }
 html[data-theme="light"] .avatar.ph svg { fill: rgba(95,72,52,.55); }
 html[data-theme="light"] { --win-ink: #16A34A; }
+html[data-theme="light"] .card:has(table.tbl) { border-color: rgba(255,255,255,.9); }
