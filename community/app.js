@@ -146,9 +146,9 @@ setLang(detectLang(BOOT.tgLang));
   const PARTNER_DEF = { name: "LuPadel", shop: "https://lupadel.olx.ua/uk/home/", consult: "", season: true };
   const partner = () => ({ ...PARTNER_DEF, ...(((state.league || {}).partner) || {}) });
   const httpsOk = u => /^https:\/\/[^\s"'<>]+$/.test(u || "");
-  function partnerHtml(kind) {
-    const P = partner(), btn = (u, l) => httpsOk(u) ? `<button class="btn sm" data-act="open-link" data-url="${esc(u)}">${l} ↗</button>` : "";
-    const links = btn(P.shop, t("p_shop")) + btn(P.consult, t("p_consult"));
+  function partnerHtml(kind, tid) {
+    const P = partner(), btn = (u, l, k) => httpsOk(u) ? `<button class="btn sm" data-act="open-link" data-url="${esc(u)}" data-pt="${k}" data-ptw="${kind}" data-ptt="${esc(tid || "")}">${l} ↗</button>` : "";
+    const links = btn(P.shop, t("p_shop"), "shop") + btn(P.consult, t("p_consult"), "consult");
     return `<div class="card pt-card ${kind}"><div class="pt-top"><span class="pt-kick">${t(kind === "season" ? "p_season" : "p_prizes")}</span><img class="pt-logo" src="lupadel.svg" alt="${esc(P.name)}"></div>
       ${kind === "prizes" ? `<p class="tiny" style="margin:8px 0 0;">${t("p_prizes_sub")}</p>` : ""}${links ? `<div class="pt-links">${links}</div>` : ""}</div>`;
   }
@@ -365,7 +365,8 @@ setLang(detectLang(BOOT.tgLang));
         <div style="margin-top:14px;">${regBtn}</div>
         ${tt.s.contact ? `<button class="btn block" style="margin-top:8px;" data-act="open-link" data-url="${esc(tt.s.contact)}">${t("write_organizer")} ↗</button>` : ""}
       </div>
-      ${tt.s.partner_prizes ? partnerHtml("prizes") : ""}
+      ${tt.s.partner_prizes ? partnerHtml("prizes", tt.id) : ""}
+      ${raffleHtml(tt)}
       ${pairs
         ? `<div class="card"><h3>${t("pairs_title")} <span class="tiny">· ${fullPairs}/${slots || teamNos(tt).length - 1}</span></h3><div class="pair-grid">${teamNos(tt).map(pairCard).join("")}</div></div>`
         : `<div class="card"><h3>${t("main_list")} <span class="tiny">· ${main.length}${slots ? "/" + slots : ""}</span></h3><div style="margin-top:6px;">${main.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>`}
@@ -422,6 +423,8 @@ setLang(detectLang(BOOT.tgLang));
         </table></div>
       ${facts.length ? `<div class="card"><h3>${t("t_stats")}</h3><div class="facts">${facts.map(([k, who, sub]) => `<div class="fact"><div class="tiny">${k}</div><div class="fact-who">${who}</div><div class="fact-sub">${sub}</div></div>`).join("")}</div></div>` : ""}
       ${isAdmin() && finished ? announceCardHtml(tt, tGames) : ""}
+      ${tt.s.partner_prizes ? partnerHtml("prizes", tt.id) : ""}
+      ${raffleHtml(tt)}
       ${labelsCardHtml(tt, rows.map(r => r.id))}
       ${finished ? `<button class="rounds-toggle ${roundsOpen ? "open" : ""}" data-act="toggle-rounds" data-id="${tid}">${roundsOpen ? t("hide_rounds") : t("view_rounds", { n: rKeys.length })}<span class="chev">›</span></button>` : ""}
       ${roundsOpen ? rKeys.map(r => `<h3 style="margin:16px 0 8px;">${t("round").charAt(0).toUpperCase() + t("round").slice(1)} ${r}</h3>${byRound[r].sort((a, b) => (a.court || 0) - (b.court || 0)).map(match).join("")}`).join("") : ""}`;
@@ -490,6 +493,58 @@ setLang(detectLang(BOOT.tgLang));
         <button class="btn sm block" style="margin-top:10px;" data-act="facts-copy">⧉ ${t("copy_text")}</button>` : ""}</div>`;
   }
   // ---------- подписи игроков в турнире (только админ ставит, видят все) ----------
+  // ---------- статистика нажатий на ссылки партнёра (для ежемесячного отчёта) ----------
+  let ptStats = null, ptLoading = false;
+  function partnerStatsHtml() {
+    if (!ptStats) { if (!ptLoading) { ptLoading = true; const since = new Date(); since.setMonth(since.getMonth() - 6);
+        db.partnerClicks(since.toISOString()).then(d => { ptStats = d; }).catch(e => { ptStats = []; console.error(e); }).finally(() => { ptLoading = false; if (state.view.adm === "partner") render(); }); }
+      return `<div class="card"><h3>${t("p_stats")}</h3><p class="tiny">…</p></div>`; }
+    const now = new Date(), mStart = new Date(now.getFullYear(), now.getMonth(), 1), pStart = new Date(now.getFullYear(), now.getMonth() - 1, 1), d30 = new Date(now - 30 * 864e5);
+    const per = (from, to) => { const xs = ptStats.filter(x => { const d = new Date(x.at); return d >= from && (!to || d < to); });
+      return { all: xs.length, shop: xs.filter(x => x.kind === "shop").length, consult: xs.filter(x => x.kind === "consult").length, users: new Set(xs.map(x => x.user_id)).size }; };
+    const mName = d => d.toLocaleDateString(getLang() === "en" ? "en-GB" : getLang() === "ru" ? "ru-RU" : "uk-UA", { month: "long" });
+    const rows = [[mName(now), per(mStart)], [mName(pStart), per(pStart, mStart)], [t("p_30d"), per(d30)], [t("p_6m"), per(new Date(0))]];
+    return `<div class="card"><div class="row"><h3 style="margin:0;">${t("p_stats")}</h3><button class="icon-btn" data-act="pt-refresh" title="↻">↻</button></div>
+      <table class="tbl" style="margin-top:10px;"><tr><th></th><th>${t("p_clicks")}</th><th>${t("p_shop")}</th><th>${t("p_consult")}</th><th>${t("p_people")}</th></tr>
+      ${rows.map(([l, r]) => `<tr><td><b>${esc(l)}</b></td><td class="lb-elo">${r.all}</td><td>${r.shop}</td><td>${r.consult}</td><td>${r.users}</td></tr>`).join("")}</table>
+      <p class="tiny" style="margin:8px 0 0;">${t("p_stats_hint")}</p></div>`;
+  }
+  // ---------- розыгрыш среди участников турнира: честный случайный выбор, результат сохраняется в турнире и виден всем ----------
+  function raffleIds(tt) {
+    const played = [...new Set(tGamesOf(tt.id).filter(scoredG).flatMap(g => g.teamA.concat(g.teamB)))]; if (played.length) return played;
+    const main = regsOf(tt.id).filter(r => r.status === "main" && r.approval !== "pending").map(r => r.playerId);
+    return main.length ? main : (tt.participantIds || []).slice();
+  }
+  const rndInt = n => { const a = new Uint32Array(1); (window.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : (a[0] = Math.floor(Math.random() * 4294967296)); return a[0] % n; };
+  function raffleHtml(tt) {
+    const list = tt.s.raffles || [];
+    const rows = list.map((r, i) => `<div class="rf-row"><span class="rf-ic">🎁</span><div style="flex:1;min-width:0;"><b>${pnl(r.winner)}</b><div class="tiny">${r.prize ? esc(r.prize) + " · " : ""}${t("rf_of", { n: r.n })}</div></div>${isAdmin() ? `<button class="icon-btn" data-act="rf-del" data-id="${tt.id}" data-val="${i}" title="${t("delete")}">✕</button>` : ""}</div>`).join("");
+    if (!canEdit()) return list.length ? `<div class="card rf-card"><h3>🎲 ${t("rf_title")}</h3>${rows}</div>` : "";
+    const won = new Set(list.map(r => r.winner)), pool = raffleIds(tt).filter(id => !won.has(id));
+    const open = state.view.rfOpen === tt.id || list.length;
+    return `<div class="card rf-card"><button class="rounds-toggle ${open ? "open" : ""}" data-act="rf-toggle" data-id="${tt.id}" style="margin:0;">🎲 ${t("rf_title")}${list.length ? ` <span class="tiny">· ${list.length}</span>` : ""}<span class="chev">›</span></button>
+      ${open ? `${rows}<div class="rf-stage" id="rfStage"></div>
+      <div class="row" style="gap:8px;margin-top:10px;"><input type="text" id="rfPrize" maxlength="60" autocomplete="off" placeholder="${t("rf_prize_ph")}" style="flex:1;min-width:0;"><button class="btn primary" data-act="rf-run" data-id="${tt.id}" ${pool.length ? "" : "disabled"}>${t("rf_run")}</button></div>
+      <p class="tiny" style="margin:8px 0 0;">${t("rf_hint", { n: pool.length })}</p>` : ""}</div>`;
+  }
+  let rfBusy = false;
+  async function runRaffle(tid, btn) {
+    const tt = byId(state.tournaments, tid); if (!tt || rfBusy) return;
+    const list = tt.s.raffles || [], won = new Set(list.map(r => r.winner)), pool = raffleIds(tt).filter(id => !won.has(id)); if (!pool.length) return;
+    const prize = String((document.getElementById("rfPrize") || {}).value || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    const winner = pool[rndInt(pool.length)], stage = document.getElementById("rfStage");
+    rfBusy = true; savingN++; if (btn) btn.disabled = true;
+    try {
+      if (stage) { stage.classList.add("on"); const t0 = Date.now(), dur = 2600; let k = 0;
+        await new Promise(res => { const step = () => { const el = Date.now() - t0; if (el >= dur) return res();
+          stage.innerHTML = `<span>${esc(pnt(pool[(k++ + rndInt(pool.length)) % pool.length]))}</span>`; setTimeout(step, 50 + el / dur * 220); }; step(); });
+        stage.innerHTML = `<span class="win">🎉 ${esc(pnt(winner))}</span>`; }
+      const raffles = list.concat([{ winner, prize, n: pool.length, at: new Date().toISOString() }]);
+      await db.saveTournament(tRow(tt, { s: { ...tt.s, raffles } })); tt.s = { ...tt.s, raffles };
+      await db.addLog(`Розыгрыш «${tt.name}»${prize ? " (" + prize + ")" : ""}: ${pname(winner)} из ${pool.length}`).catch(() => {});
+      await new Promise(r => setTimeout(r, 1800));
+    } catch (e) { err(e); } finally { rfBusy = false; savingN--; render(); }
+  }
   function labelsCardHtml(tt, ids) {
     if (!isAdmin() || !ids.length) return "";
     const open = state.view.lblOpen === tt.id, n = ids.filter(id => LBL[id]).length;
@@ -690,6 +745,7 @@ setLang(detectLang(BOOT.tgLang));
         ${byR(cur).map(match).join("")}
         ${resting.length ? `<p class="tiny rest-line">💤 ${t("rest")}: ${resting.join(", ")}</p>` : ""}
         ${controls ? `<div style="margin:12px 0;">${controls}</div>` : ""}`}
+      ${raffleHtml(tt)}
       ${labelsCardHtml(tt, tt.participantIds && tt.participantIds.length ? tt.participantIds : [...new Set(games.flatMap(g => g.teamA.concat(g.teamB)))])}
       ${finishCard}`;
   }
@@ -840,7 +896,7 @@ setLang(detectLang(BOOT.tgLang));
     const how = state.view.sHow;
     return `<div class="section-head"><h2>${t("season")}</h2></div>
       ${partner().season ? `<div class="card s-hero co">
-        <div class="co-lock"><img class="co-048" src="logo.svg" alt="048 Padel"><span class="co-x">×</span>${httpsOk(partner().shop) ? `<button class="co-lp-btn" data-act="open-link" data-url="${esc(partner().shop)}"><img class="co-lp" src="lupadel.svg" alt="${esc(partner().name)}"></button>` : `<img class="co-lp" src="lupadel.svg" alt="${esc(partner().name)}">`}</div>
+        <div class="co-lock"><img class="co-048" src="logo.svg" alt="048 Padel"><span class="co-x">×</span>${httpsOk(partner().shop) ? `<button class="co-lp-btn" data-act="open-link" data-url="${esc(partner().shop)}" data-pt="shop" data-ptw="season"><img class="co-lp" src="lupadel.svg" alt="${esc(partner().name)}"></button>` : `<img class="co-lp" src="lupadel.svg" alt="${esc(partner().name)}">`}</div>
         <div class="co-line"></div>
         <div class="co-title un">${t("s_co_title", { n: S.n })}</div>
         <div class="co-sub">${t("s_co_sub", { p: esc(partner().name) })}</div><div class="co-dates un">${dateFmt(S.start)} — ${dateFmt(S.end)}</div>` : `<div class="card s-hero">
@@ -1217,7 +1273,8 @@ setLang(detectLang(BOOT.tgLang));
         <label class="field"><span class="lbl">${t("p_shop")}</span><input type="url" id="ptShop" value="${esc(P.shop || "")}" placeholder="https://…"></label>
         <label class="field"><span class="lbl">${t("p_consult")}</span><input type="url" id="ptConsult" value="${esc(P.consult || "")}" placeholder="https://t.me/…"></label>
         <label class="row tf-toggle"><span>${t("p_season_toggle")}</span><input type="checkbox" id="ptSeason" ${P.season ? "checked" : ""}></label>
-        <div class="pf-actions" style="justify-content:flex-end;margin-top:12px;"><button class="btn sm primary" data-act="pt-save">${t("save")}</button></div></div>`; }
+        <div class="pf-actions" style="justify-content:flex-end;margin-top:12px;"><button class="btn sm primary" data-act="pt-save">${t("save")}</button></div></div>
+        ${partnerStatsHtml()}`; }
     else if (sub === "review") body = !queue.length ? `<div class="card"><div class="empty"><div class="ic">✓</div>${t("review_empty")}</div></div>`
       : `<p class="tiny" style="margin:0 0 10px;">${t("review_hint")}</p>` + queue.sort((a, b) => (a.levelStatus === "pending" ? 0 : 1) - (b.levelStatus === "pending" ? 0 : 1)).map(p => {
         const c = p.contacts || {}, src = c.level_source || "", nick = c[src];
@@ -1381,7 +1438,12 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "pt-save") on(async () => { const g = id => document.getElementById(id), shop = g("ptShop").value.trim(), consult = g("ptConsult").value.trim();
         if ((shop && !httpsOk(shop)) || (consult && !httpsOk(consult))) { toast(t("p_bad_link")); return; }
         try { const st = await db.saveLeagueSettings({ partner: { ...partner(), shop, consult, season: g("ptSeason").checked } }); state.league = st; await db.addLog("Партнёр: ссылки обновлены").catch(() => {}); toast(t("saved")); render(); } catch (e) { err(e); } });
-      else if (a === "open-link") on(() => { const u = el.dataset.url; const tg = window.Telegram && window.Telegram.WebApp;
+      else if (a === "pt-refresh") on(() => { ptStats = null; render(); });
+      else if (a === "rf-toggle") on(() => { state.view.rfOpen = state.view.rfOpen === id ? null : id; render(); });
+      else if (a === "rf-run") on(() => runRaffle(id, el));
+      else if (a === "rf-del") on(async () => { const tt = byId(state.tournaments, id); if (!tt || !confirm(t("rf_del_q"))) return; const raffles = (tt.s.raffles || []).filter((_, i) => i !== +el.dataset.val);
+        try { await db.saveTournament(tRow(tt, { s: { ...tt.s, raffles } })); tt.s = { ...tt.s, raffles }; render(); } catch (e) { err(e); } });
+      else if (a === "open-link") on(() => { const u = el.dataset.url; if (el.dataset.pt) db.trackClick(el.dataset.pt, el.dataset.ptw, el.dataset.ptt).catch(() => {}); const tg = window.Telegram && window.Telegram.WebApp;
         if (tg && tg.initData && /^https:\/\/t\.me\//.test(u) && tg.openTelegramLink) tg.openTelegramLink(u); else if (tg && tg.initData && tg.openLink) tg.openLink(u); else window.open(u, "_blank", "noopener"); });
       else if (a === "copy-nick") on(async () => { const v = el.dataset.val; try { await navigator.clipboard.writeText(v); toast(t("nick_copied", { app: t("src_" + el.dataset.app) })); } catch (e) { toast(v); } });
       else if (a === "logout") on(async () => { await db.signOut(); location.reload(); });

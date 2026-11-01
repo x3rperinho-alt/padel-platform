@@ -341,3 +341,12 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
 .s-hero.co .s-stats { text-align: center; }
 .co-dates { margin-top: 10px; font-weight: 700; font-size: 16px; color: #fff; }
 .co-sub { background: linear-gradient(90deg, #FF9A4A, #61D2B7); -webkit-background-clip: text; background-clip: text; color: transparent !important; }
+/* розыгрыш */
+.rf-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid rgba(255,255,255,.07); }
+.rf-row:first-of-type { margin-top: 8px; }
+.rf-ic { font-size: 22px; }
+.rf-stage { display: none; margin-top: 12px; height: 74px; border-radius: 16px; align-items: center; justify-content: center; text-align: center; padding: 0 12px;
+  background: linear-gradient(120deg, rgba(255,122,26,.18), rgba(97,210,183,.14)); border: 1px solid rgba(255,255,255,.12); font: 800 22px "Unbounded", sans-serif; }
+.rf-stage.on { display: flex; }
+.rf-stage .win { color: #fff; text-shadow: 0 0 18px rgba(255,122,26,.7); animation: rfpop .5s ease; }
+@keyframes rfpop { from { transform: scale(.7); opacity: .3; } to { transform: scale(1); opacity: 1; } }

@@ -115,6 +115,12 @@ export function createDb(cfg) {
     const settings = { ...((cur.data && cur.data.settings) || {}), ...patch };
     const { data, error } = await sb.from("leagues").update({ settings }).eq("id", L).select("id"); if (error) throw error;
     if (!data || !data.length) throw new Error("no rights to change league settings"); return settings; }
+  // нажатия на ссылки партнёра: пишем тихо, ошибки не мешают пользователю
+  async function trackClick(kind, place, tid) { const s = await session(); if (!s) return;
+    await sb.from("partner_clicks").insert({ league_id: L, kind, place: place || null, tournament_id: tid || null }); }
+  async function partnerClicks(sinceIso) { await ensureSession();
+    const { data, error } = await sb.from("partner_clicks").select("kind,place,tournament_id,user_id,at").eq("league_id", L).gte("at", sinceIso).order("at", { ascending: false }).limit(5000);
+    if (error) throw error; return data || []; }
   async function addLog(action) { const s = await session(); await sb.from("logs").insert({ league_id: L, user_id: s ? s.user.id : null, action }); }
   async function listMembers() {
     const { data, error } = await sb.from("league_members").select("user_id, role, player_id").eq("league_id", L); if (error) throw error;
@@ -137,5 +143,5 @@ export function createDb(cfg) {
 
   return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinOpen, loadAll,
     createMyPlayer, updateMyCard, adjustMyLevel, reviewLevel, submitQuiz, register, unregister, reviewRegistration, resetPlayer, adminMembers, promoteReserve, setDisplayName,
-    saveTournament, deleteTournament, saveGames, saveScore, deleteGames, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, saveLeagueSettings, listMembers, setMemberRole, profileNames, subscribe };
+    saveTournament, deleteTournament, saveGames, saveScore, deleteGames, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, saveLeagueSettings, trackClick, partnerClicks, listMembers, setMemberRole, profileNames, subscribe };
 }
