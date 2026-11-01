@@ -502,9 +502,10 @@ button.hist-toggle { width: 100%; display: flex; align-items: center; justify-co
 .hist-row:last-of-type { border-bottom: none; }
 .hist-score { flex: none; width: 58px; padding: 6px 0; border-radius: 12px; text-align: center; display: flex; flex-direction: column; background: var(--glass); border: 1px solid var(--glass-bd); }
 .hist-score b { font: 700 15px/1.2 "Unbounded", "Manrope", sans-serif; }
-.hist-score small { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--ink-3); }
-.hist-row.w .hist-score { background: var(--tile-bg); border-color: var(--tile-bd); }
-.hist-row.w .hist-score small { color: var(--court); }
+.hist-score small { font: 800 12px/1.2 "Unbounded", "Manrope", sans-serif; color: var(--ink-3); }
+.hist-row.w .hist-score { background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.35); }
+.hist-row.w .hist-score small { color: var(--win-ink, #4ADE80); }
+.hist-row.l .hist-score { background: rgba(255,92,92,.10); border-color: rgba(255,92,92,.32); }
 .hist-row.l .hist-score small { color: var(--danger); }
 .hist-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .hist-teams { display: flex; flex-direction: column; font-size: 14px; }
@@ -512,6 +513,31 @@ button.hist-toggle { width: 100%; display: flex; align-items: center; justify-co
 .hist-elo b { font-size: 14px; font-variant-numeric: tabular-nums; }
 .hist-elo b.up { color: var(--court); } .hist-elo b.down { color: var(--danger); }
 .hist-elo small { font-size: 11px; color: var(--ink-3); }
+
+/* товарищеский матч */
+button.kind-card { width: 100%; display: flex; align-items: center; gap: 14px; text-align: left; font-family: inherit; color: var(--ink); cursor: pointer; padding: 16px; margin: 0; }
+.kind-ic { flex: none; width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; font-size: 26px; background: var(--accent-grad); box-shadow: 0 8px 20px -8px var(--orange-glow); }
+.kind-card > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.kind-card b { font-family: "Unbounded", "Manrope", sans-serif; font-size: 16px; font-weight: 600; }
+.kind-card small { font-size: 12.5px; color: var(--ink-3); line-height: 1.35; }
+.fr-tag { display: inline-block; font-family: "Manrope", sans-serif; font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: var(--orange-soft); color: var(--court); vertical-align: 2px; margin-right: 2px; }
+.fr-score { font: 700 16px/1 "Unbounded", "Manrope", sans-serif; padding: 7px 11px; border-radius: 12px; background: var(--tile-bg); border: 1px solid var(--tile-bd); }
+.fr-score.live { color: var(--court); }
+button.fr-pair { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--glass-bd); background: var(--glass); color: var(--ink); font-family: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+button.fr-pair.on { border-color: var(--court); background: var(--orange-soft); box-shadow: 0 6px 16px -10px var(--orange-glow); }
+.fr-board { display: flex; align-items: center; gap: 8px; padding: 16px 12px; }
+.fr-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px; border-radius: 14px; border: 1px solid transparent; }
+.fr-side:last-child { align-items: flex-end; }
+.fr-side:last-child .fr-pl { flex-direction: row-reverse; }
+.fr-side.win { background: var(--tile-bg); border-color: var(--tile-bd); }
+.fr-pl { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 600; font-size: 14px; }
+.fr-pl span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fr-mid { flex: none; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.fr-big { font: 800 34px/1 "Unbounded", "Manrope", sans-serif; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.fr-big span { margin: 0 3px; opacity: .6; }
+.fr-sets { font-size: 11.5px; color: var(--ink-2); font-weight: 600; margin-top: 4px; }
+.fr-status { text-align: center; font-weight: 700; color: var(--ink-2); margin: -2px 0 6px; }
+.fr-status.done { color: var(--court); }
 
 /* ===== светлая тема ===== */
 /* сгенерировано из тёмных правил + ручные правки ниже */
@@ -628,3 +654,6 @@ html[data-theme="light"] .ct-date.active b, html[data-theme="light"] .ct-date.ac
 html[data-theme="light"] .t-status.done, html[data-theme="light"] .all-done { color: #16A34A; }
 html[data-theme="light"] .avatar { border-color: rgba(40,30,20,.12); }
 html[data-theme="light"] .ct-date.active { background: var(--accent-grad); border-color: transparent; box-shadow: 0 10px 22px -8px var(--orange-glow), inset 0 1px 0 rgba(255,255,255,.4); }
+html[data-theme="light"] .avatar.ph { background: linear-gradient(150deg, #EADFD3, #D9CBBE); border-color: rgba(90,60,30,.12); }
+html[data-theme="light"] .avatar.ph svg { fill: rgba(95,72,52,.55); }
+html[data-theme="light"] { --win-ink: #16A34A; }

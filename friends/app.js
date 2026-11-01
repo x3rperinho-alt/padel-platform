@@ -554,8 +554,11 @@ const DATA = BOOT.data;
   // ================= TOURNAMENTS =================
   function viewTournaments() {
     if (state.view.tournament) return viewTournamentDetail(state.view.tournament);
+    if (state.view.create === "choose") return viewCreateChooser();
+    if (state.view.create === "friendly") return viewFriendlyCreate();
     if (state.view.create) return viewTournamentCreate();
-    const rows = leagueTournaments().slice().reverse().map(t => {
+    const rows = allEvents().slice().reverse().map(t => {
+      if (isFriendly(t)) return friendlyTileHtml(t);
       const gs = linkedParent(t) ? stageGames(t) : state.games.filter(g=>g.tournamentId===t.id);
       const gcount = gs.filter(g=>g.scoreA!=null).length;
       const total = gs.length;
@@ -565,9 +568,9 @@ const DATA = BOOT.data;
         <div class="t-tile-main"><div class="t-tile-name">${esc(t.name)}</div><div class="tiny">${fmtDate(t.date)} · ${tLabel(t)}</div></div>
         <div class="t-tile-side"><span class="t-status ${st}"><i></i>${stLabel}</span><span class="arrow">&#8250;</span></div>
       </div>`;
-    }).join("") || `<div class="card"><div class="empty"><div class="ic">&#127934;</div>турниров ещё нет</div></div>`;
+    }).join("") || `<div class="card"><div class="empty"><div class="ic">&#127934;</div>турниров и матчей ещё нет</div></div>`;
     return `
-      <div class="section-head"><h2>Турниры</h2>${canWrite? `<button class="btn primary sm" data-act="new-tournament">+ Новый</button>` : ""}</div>
+      <div class="section-head"><h2>Турниры</h2>${canWrite? `<button class="btn primary sm" data-act="new-tournament">+ Создать</button>` : ""}</div>
       <div class="stack">${rows}</div>`;
   }
 
@@ -849,11 +852,163 @@ const DATA = BOOT.data;
   }
   function formatInfo(f) { return FORMATS.find(x => x.key === f) || null; }
   function formatLabel(f) { const fi = formatInfo(f); return fi ? fi.label : f; }
-  function tLabel(t) { return linkedParent(t) ? formatLabel("two") : formatLabel(t.format); }
+  function tLabel(t) { return isFriendly(t) ? "Товарищеский матч" : linkedParent(t) ? formatLabel("two") : formatLabel(t.format); }
   function tFormatKey(t) { return linkedParent(t) ? "two" : t.format; }
   function formatInfoHtml(f) {
     const fi = formatInfo(f); if (!fi || !fi.desc) return "";
     return `<div class="card" style="background:var(--surface-2);margin:10px 0 0;padding:10px 12px;"><div class="row" style="align-items:flex-start;"><div><strong>${esc(fi.label)}</strong><p class="tiny" style="margin:4px 0 0;color:var(--ink-2);font-size:13.5px;line-height:1.4;white-space:pre-line;">${esc(fi.desc)}</p></div><button class="edit-pen" data-act="format-info" data-val="" title="скрыть" style="font-size:16px;">✕</button></div></div>`;
+  }
+
+  // ================= ТОВАРИЩЕСКИЙ МАТЧ =================
+  // Хранится как турнир с format "friendly": 2 пары, 1 матч (очки) или сеты (геймы, добавляются по ходу игры).
+  // В Эло, историю матчей и статистику игр идёт как обычно; в титулы, места и рейтинг турниров — нет.
+  function isFriendly(t) { return !!t && t.format === "friendly"; }
+  function friendlyResult(t) {
+    const games = state.games.filter(g => g.tournamentId === t.id).sort((a,b) => a.round - b.round);
+    const sets = t.scoringMode === "tennis", n = sets ? ((t.settings||{}).sets || 1) : 1, need = n >= 3 && n % 2 ? Math.floor(n/2) + 1 : n;
+    let a = 0, b = 0; const played = games.filter(g => g.scoreA != null && g.scoreB != null);
+    played.forEach(g => { if (sets) { if (g.scoreA > g.scoreB) a++; else if (g.scoreB > g.scoreA) b++; } else { a += g.scoreA; b += g.scoreB; } });
+    const done = played.length > 0 && (sets ? (a >= need || b >= need || played.length >= n) : played.length === games.length);
+    return { games, sets, n, need, a, b, done, winner: done ? (a > b ? 0 : b > a ? 1 : null) : null };
+  }
+  function ensureFriendlyProgress(tid) {
+    const t = byId(state.tournaments, tid); if (!isFriendly(t) || t.scoringMode !== "tennis") return false;
+    const r = friendlyResult(t), last = r.games[r.games.length - 1];
+    const decided = r.a >= r.need || r.b >= r.need;
+    let changed = false;
+    if (decided) { // матч решён — несыгранные сеты не нужны
+      const extra = r.games.filter(g => g.scoreA == null && g.scoreB == null && g.round > 1);
+      if (extra.length) { state.games = state.games.filter(g => !extra.includes(g)); changed = true; }
+    } else if (last && last.scoreA != null && last.scoreB != null && r.games.length < r.n && r.games.every(g => g.scoreA != null && g.scoreB != null)) {
+      const k = r.games.length + 1, tm = t.teams || [];
+      state.games.push({ id: t.id + "-r" + k + "-c1", tournamentId: t.id, round: k, court: 1, teamA: tm[0].players.slice(), teamB: tm[1].players.slice(), scoreA: null, scoreB: null, decided: false, label: "Сет " + k });
+      changed = true;
+    }
+    if (changed) addLog("Товарищеский «" + t.name + "»: " + (decided ? "матч решён, лишние сеты убраны" : "добавлен сет " + (r.games.length + 1)));
+    return changed;
+  }
+  function friendlyTileHtml(t) {
+    const r = friendlyResult(t), tm = t.teams || [];
+    const st = r.done ? "done" : r.games.some(g => g.scoreA != null) ? "live" : "planned";
+    const names = i => (tm[i] ? tm[i].players.map(p => esc(playerName(p))).join(" + ") : "");
+    return `<div class="tile t-tile fr-tile" data-act="open-tournament" data-id="${t.id}">
+      <div class="t-tile-main"><div class="t-tile-name"><span class="fr-tag">🤝 матч</span> ${esc(t.name)}</div>
+        <div class="tiny">${fmtDate(t.date)} · ${names(0)} <b>vs</b> ${names(1)}</div></div>
+      <div class="t-tile-side">${st !== "planned" ? `<span class="fr-score ${st}">${r.a}:${r.b}</span>` : `<span class="t-status planned"><i></i>запланирован</span>`}<span class="arrow">&#8250;</span></div>
+    </div>`;
+  }
+  function viewCreateChooser() {
+    return `
+      <div class="section-head"><h2>Создать</h2><button class="btn ghost" data-act="cancel-create">Отмена</button></div>
+      <div class="stack">
+        <button class="card kind-card" data-act="create-kind" data-val="tournament"><span class="kind-ic">🏆</span><span><b>Турнир</b><small>Американо, SwissCourt, плей-офф и другие форматы — таблица, места, титулы</small></span><span class="hist-chev">›</span></button>
+        <button class="card kind-card" data-act="create-kind" data-val="friendly"><span class="kind-ic">🤝</span><span><b>Товарищеский матч</b><small>Одна игра пара на пару: до X очков, всего X очков или по сетам</small></span><span class="hist-chev">›</span></button>
+      </div>`;
+  }
+  function fDraft() {
+    return state._fDraft || (state._fDraft = { name: "Товарищеский матч", date: new Date().toISOString().slice(0,10), players: [], pairing: null, mode: "sets", target: 21, sets: 3, setGames: 6, court: "", prizeEnabled: false, fee: "" });
+  }
+  function fRead() {
+    const d = fDraft(), g = id => document.getElementById(id);
+    if (g("fName")) d.name = g("fName").value; if (g("fDate")) d.date = g("fDate").value;
+    if (g("fTarget")) d.target = g("fTarget").value; if (g("fCourt")) d.court = g("fCourt").value; if (g("fFee")) d.fee = g("fFee").value;
+  }
+  function fPairings(ids) { return ids.length === 4 ? [[[ids[0], ids[1]], [ids[2], ids[3]]], [[ids[0], ids[2]], [ids[1], ids[3]]], [[ids[0], ids[3]], [ids[1], ids[2]]]] : []; }
+  function fBalanced(ids) {
+    const { ratings } = computeElo(), R = id => ratings[id] || ELO_START, opts = fPairings(ids);
+    let best = 0, bd = Infinity; opts.forEach((o, i) => { const d = Math.abs(R(o[0][0]) + R(o[0][1]) - R(o[1][0]) - R(o[1][1])); if (d < bd) { bd = d; best = i; } });
+    return best;
+  }
+  function viewFriendlyCreate() {
+    const d = fDraft(), active = playersActive();
+    const { ratings } = computeElo(), R = id => Math.round(ratings[id] || ELO_START);
+    if (d.players.length === 4 && d.pairing == null) d.pairing = fBalanced(d.players);
+    const opts = fPairings(d.players), bal = d.players.length === 4 ? fBalanced(d.players) : -1;
+    const pairLbl = o => `${o.map(p => p.map(x => esc(playerName(x))).join(" + ")).join(" <b>vs</b> ")}`;
+    const ok = d.name.trim() && d.date && d.players.length === 4 && d.pairing != null && (d.mode === "sets" || +d.target > 0);
+    return `
+      <div class="section-head"><h2>Товарищеский матч</h2><button class="btn ghost" data-act="cancel-create">Отмена</button></div>
+      <div class="card stack">
+        <label class="field" style="margin-bottom:0;"><span class="lbl">Название</span><input type="text" id="fName" value="${esc(d.name)}"></label>
+        <label class="field" style="margin-bottom:0;"><span class="lbl">Дата</span><input type="date" id="fDate" value="${esc(d.date)}"></label>
+      </div>
+      <div class="card">
+        <h3>Участники <span class="tiny">(${d.players.length} из 4)</span></h3>
+        <div class="wrap-tags" style="margin-top:10px;">${active.map(p => `<span class="chip ${d.players.includes(p.id) ? "active" : ""}" data-act="f-player" data-id="${p.id}">${esc(p.name)}</span>`).join("")}</div>
+        ${d.players.length === 4 ? `<span class="lbl" style="display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin:14px 0 8px;">Пары</span>
+        <div class="stack" style="gap:8px;">${opts.map((o, i) => `<button class="fr-pair ${d.pairing === i ? "on" : ""}" data-act="f-pair" data-val="${i}"><span>${pairLbl(o)}</span><span class="tiny">${R(o[0][0]) + R(o[0][1])} : ${R(o[1][0]) + R(o[1][1])}${i === bal ? " · ⚖️ ровнее всего" : ""}</span></button>`).join("")}</div>`
+        : `<p class="tiny" style="margin:10px 0 0;">Выбери 4 игроков — 2 на 2.</p>`}
+      </div>
+      <div class="card">
+        <h3>Формат</h3>
+        <div class="seg" style="margin-top:10px;">
+          <button class="${d.mode === "race" ? "active" : ""}" data-act="f-mode" data-val="race">До X очков</button>
+          <button class="${d.mode === "fixed" ? "active" : ""}" data-act="f-mode" data-val="fixed">Всего X очков</button>
+          <button class="${d.mode === "sets" ? "active" : ""}" data-act="f-mode" data-val="sets">Классика: сеты</button>
+        </div>
+        ${d.mode === "sets" ? `
+          <span class="lbl" style="display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin:14px 0 6px;">Сетов</span>
+          <div class="seg">${[[1,"1 сет"],[2,"2 сета"],[3,"до 2 побед"],[5,"до 3 побед"]].map(([v,l]) => `<button class="${d.sets === v ? "active" : ""}" data-act="f-sets" data-val="${v}">${l}</button>`).join("")}</div>
+          <span class="lbl" style="display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin:12px 0 6px;">Геймов в сете</span>
+          <div class="seg">${[4,6].map(v => `<button class="${d.setGames === v ? "active" : ""}" data-act="f-games" data-val="${v}">до ${v}</button>`).join("")}</div>
+          <p class="tiny" style="margin:8px 0 0;">Как в теннисе: сет до ${d.setGames} геймов с разницей в 2, при ${d.setGames}:${d.setGames} — тай-брейк (${d.setGames + 1}:${d.setGames}). ${d.sets >= 3 ? `Матч до ${Math.floor(d.sets/2) + 1} выигранных сетов — следующий сет появится сам, лишние не понадобятся.` : d.sets === 2 ? "Играется ровно 2 сета, 1:1 — ничья." : ""}</p>`
+        : `<label class="field" style="margin:12px 0 0;"><span class="lbl">${d.mode === "race" ? "Играем до (очков)" : "Всего очков в матче"}</span><input type="number" id="fTarget" min="1" max="99" value="${esc(d.target)}"></label>
+          <p class="tiny" style="margin:8px 0 0;">${d.mode === "race" ? "Побеждает пара, первой набравшая X очков." : "Разыгрывается ровно X очков — счёт второй пары подставится сам."}</p>`}
+      </div>
+      <div class="card">
+        <h3>Финансы <span class="tiny">(можно заполнить позже)</span></h3>
+        <div class="stack" style="margin-top:10px;">
+          <label class="field" style="margin-bottom:0;"><span class="lbl">Корты — с человека, ${CUR}</span><input type="number" min="0" id="fCourt" value="${esc(d.court)}" placeholder="напр. 300"></label>
+          <div class="seg"><button class="${!d.prizeEnabled ? "active" : ""}" data-act="f-prize" data-val="0">Без фонда</button><button class="${d.prizeEnabled ? "active" : ""}" data-act="f-prize" data-val="1">С призовым фондом</button></div>
+          ${d.prizeEnabled ? `<label class="field" style="margin-bottom:0;"><span class="lbl">Взнос с человека, ${CUR}</span><input type="number" min="0" id="fFee" value="${esc(d.fee)}" placeholder="напр. 100"></label>
+          <p class="tiny" style="margin:0;">Фонд = взнос × 4 игрока. Его забирает пара-победитель (пополам), при ничьей взнос возвращается всем.</p>` : ""}
+        </div>
+      </div>
+      <button class="btn primary block" data-act="f-create" ${ok ? "" : "disabled"}>Создать матч</button>`;
+  }
+  function createFriendly() {
+    fRead(); const d = fDraft();
+    if (!d.name.trim() || !d.date || d.players.length !== 4 || d.pairing == null) { toast("Заполни название, дату и 4 игроков"); return; }
+    if (d.mode !== "sets" && !(+d.target > 0)) { toast("Укажи X"); return; }
+    const o = fPairings(d.players)[d.pairing];
+    const id = uid("t"), seq = Math.max(0, ...state.tournaments.map(t => t.seq || 0)) + 1, sets = d.mode === "sets";
+    const fee = d.fee === "" ? null : Math.max(0, +d.fee);
+    const t = { id, seq, name: d.name.trim(), date: d.date, status: "scheduled", format: "friendly", courts: 1, participantIds: d.players.slice(),
+      teams: [{ id: "team0", players: o[0] }, { id: "team1", players: o[1] }],
+      scoringType: sets ? "games" : "points", scoringMode: sets ? "tennis" : d.mode, scoringTarget: sets ? d.setGames : +d.target, scoringMinutes: null,
+      settings: sets ? { kind: "friendly", sets: d.sets } : { kind: "friendly" },
+      money: { court: d.court === "" ? null : Math.max(0, +d.court), prize: { enabled: !!d.prizeEnabled, fee, places: 1, amounts: [(fee || 0) * 4] } } };
+    state.tournaments.push(t);
+    state.games.push({ id: id + "-r1-c1", tournamentId: id, round: 1, court: 1, teamA: o[0].slice(), teamB: o[1].slice(), scoreA: null, scoreB: null, decided: false, label: sets ? "Сет 1" : "Матч" });
+    addLog("Создал товарищеский матч «" + t.name + "» (" + scoringLabel(t) + ")");
+    commit(1500); state._fDraft = null; state.view.create = false; state.view.tournament = id; toast("Матч создан"); render();
+  }
+  function viewFriendlyDetail(t) {
+    const r = friendlyResult(t), tm = t.teams || [];
+    const side = i => `<div class="fr-side ${r.winner === i ? "win" : ""}">${(tm[i] ? tm[i].players : []).map(p => `<div class="fr-pl">${avatarHtml(p, 34)}<span>${esc(playerName(p))}</span></div>`).join("")}</div>`;
+    const status = r.done ? (r.winner == null ? "Ничья" : "Победа: " + tm[r.winner].players.map(p => esc(playerName(p))).join(" + ")) : r.games.some(g => g.scoreA != null) ? "Идёт игра" : "Ещё не начался";
+    const setLine = r.sets ? r.games.filter(g => g.scoreA != null && g.scoreB != null).map(g => `${g.scoreA}:${g.scoreB}`).join(" · ") : "";
+    const tid = t.id;
+    return `
+      <div class="section-head" style="margin-bottom:4px;"><button class="btn ghost sm" data-act="close-tournament" style="padding-left:0;">‹ Турниры</button></div>
+      <h2 style="font-size:24px;line-height:1.15;margin:0 0 4px;">${esc(t.name)}</h2>
+      <p class="tiny">${fmtDate(t.date)} · 🤝 товарищеский · ${scoringLabel(t)}</p>
+      <div class="card fr-board">
+        ${side(0)}
+        <div class="fr-mid"><div class="fr-big">${r.a}<span>:</span>${r.b}</div><div class="tiny">${r.sets ? "по сетам" : "очки"}</div>${setLine ? `<div class="fr-sets">${setLine}</div>` : ""}</div>
+        ${side(1)}
+      </div>
+      <p class="fr-status ${r.done ? "done" : ""}">${status}</p>
+      <h3 style="margin:16px 0 8px;">${r.sets ? "Сеты" : "Счёт"}</h3>
+      ${r.games.map(g => matchHtml(g, t)).join("")}
+      ${r.sets && !r.done ? `<p class="tiny" style="margin:4px 2px 0;">Внеси счёт сета — следующий появится сам${r.n >= 3 ? `, пока одна из пар не выиграет ${r.need}` : ""}.</p>` : ""}
+      ${financeCardHtml(t)}
+      ${canWrite ? (state.view.confirmDelete === tid ? `
+        <div class="card" style="border-color:var(--danger);margin-top:18px;">
+          <h3 style="color:var(--danger);">Удалить «${esc(t.name)}»?</h3>
+          <p class="tiny">Матч исчезнет из статистики и Эло. Отменить будет нельзя.</p>
+          <div class="row" style="margin-top:10px;gap:8px;"><button class="btn block" data-act="delete-cancel">Отмена</button><button class="btn block danger" data-act="delete-confirm" data-id="${tid}" style="border-color:var(--danger);">Да, удалить</button></div>
+        </div>` : `<div style="margin-top:18px;text-align:center;"><button class="btn ghost sm danger" data-act="delete-ask" data-id="${tid}">Удалить матч…</button></div>`) : ""}`;
   }
 
   function viewTournamentCreate() {
@@ -1078,6 +1233,7 @@ const DATA = BOOT.data;
     let t = byId(state.tournaments, tid);
     if (!t) { state.view.tournament=null; return viewTournaments(); }
     if (linkedChild(t)) { t = linkedChild(t); tid = t.id; state.view.tournament = tid; }
+    if (isFriendly(t)) return viewFriendlyDetail(t);
     const games = state.games.filter(g=>g.tournamentId===tid).sort((a,b)=> a.round-b.round || a.court-b.court);
     const byRound = {};
     games.forEach(g => { (byRound[g.round] = byRound[g.round]||[]).push(g); });
@@ -1195,11 +1351,17 @@ const DATA = BOOT.data;
     const tb = tournamentTable(t.id);
     return tb.order.length ? tb.order : (t.participantIds || []);
   }
-  function isPairFormat(t) { return (t.format==="roundrobin" || t.format==="playoff") && (t.teams||[]).length>=2; }
+  function isPairFormat(t) { return (t.format==="roundrobin" || t.format==="playoff" || t.format==="friendly") && (t.teams||[]).length>=2; }
   function pairStandings(t) {
     // командные форматы: место у пары, оба партнёра делят его
     const games = state.games.filter(g => g.tournamentId===t.id);
     let rows = teamTable(t, games).filter(r => r.gp > 0);
+    if (isFriendly(t)) {
+      // товарищеский: сначала выигранные сеты/матчи, потом очки (геймы); ничья — одно место на двоих
+      rows.sort((a,b) => (b.w-a.w) || (b.pts-a.pts));
+      rows.forEach((r,i) => { r.place = i && rows[i-1].w===r.w && rows[i-1].pts===r.pts ? rows[i-1].place : i+1; });
+      return rows;
+    }
     if (t.format==="playoff") {
       const fin = games.find(g => g.round===2 && g.label==="Финал"), third = games.find(g => g.round===2 && g.label!=="Финал");
       const done = g => g && g.scoreA!=null && g.scoreB!=null && g.scoreA!==g.scoreB;
@@ -1519,6 +1681,7 @@ const DATA = BOOT.data;
     if (!t.scoringType && t.scoringSystem === "points-race" && t.target) return "до " + t.target + " очков";
     if (!t.scoringType) return "";
     if (t.scoringType==="time") return "по времени · " + (t.scoringMinutes||"?") + " мин";
+    if (isFriendly(t) && t.scoringMode==="tennis") { const n = (t.settings||{}).sets || 1; return (n >= 3 && n % 2 ? "до " + (Math.floor(n/2)+1) + " побед в сетах" : plural(n, "сет", "сета", "сетов")) + " · сет до " + (t.scoringTarget||6) + " геймов"; }
     if (t.scoringMode==="tennis") return "теннисный сет";
     const unit = t.scoringType==="points"?"очков":"геймов";
     return (t.scoringMode==="race"? "до ":"всего ") + (t.scoringTarget||"?") + " " + unit;
@@ -1723,10 +1886,10 @@ const DATA = BOOT.data;
       const partner = my.filter(x => x !== pid), e = el[g.id], d = e ? (mineA ? e.dA : e.dB) : 0, after = e && e.after[pid];
       const t = T(g.tournamentId);
       return `<div class="hist-row ${res}">
-        <div class="hist-score"><b>${ms}:${os}</b><small>${res === "w" ? "победа" : res === "l" ? "поражение" : "ничья"}</small></div>
+        <div class="hist-score" title="${res === "w" ? "победа" : res === "l" ? "поражение" : "ничья"}"><b>${ms}:${os}</b><small>${res === "w" ? "W" : res === "l" ? "L" : "D"}</small></div>
         <div class="hist-main">
           <div class="hist-teams"><span>${partner.length ? "с <b>" + partner.map(x => esc(playerName(x))).join(" + ") + "</b>" : "<b>один</b>"}</span><span class="tiny">против ${op.map(x => esc(playerName(x))).join(" + ")}</span></div>
-          <div class="tiny">${t ? esc(t.name.replace(/ · этап 1$/, "")) + " · " + fmtDate(t.date) : ""}${g.round ? " · раунд " + g.round : ""}</div>
+          <div class="tiny">${t ? esc(t.name.replace(/ · этап 1$/, "")) + " · " + fmtDate(t.date) : ""}${g.label ? " · " + esc(g.label) : g.round ? " · раунд " + g.round : ""}</div>
         </div>
         <div class="hist-elo"><b class="${d >= 0 ? "up" : "down"}">${fmtDelta(d)}</b>${after != null ? `<small>${Math.round(after)}</small>` : ""}</div>
       </div>`;
@@ -1774,8 +1937,12 @@ const DATA = BOOT.data;
     const ts = leagueTournaments().filter(t => tournamentTable(t.id).order.includes(pid));
     const places = ts.map(t => { const x = rankedForPrizes(t).find(x => x.id === pid); return { t, place: x ? x.place : 0, n: x ? x.n : 0 }; });
     if (!places.length) return "";
-    return `<div class="card"><h3>Турниры</h3><div class="stack" style="margin-top:8px;">${places.slice().reverse().map(p => `<div class="row" style="cursor:pointer;" data-act="open-tournament-tab" data-id="${p.t.id}"><span>${esc(p.t.name)}<br><span class="tiny">${fmtDate(p.t.date)} · ${tLabel(p.t)}</span></span><strong>${p.place===1?"🥇":p.place===2?"🥈":p.place===3?"🥉":""} ${p.place}<span class="tiny">/${p.n}</span></strong></div>`).join("")}</div></div>`;
+    const open = state.view.ptOpen === pid;
+    const head = `<button class="card hist-toggle ${open ? "open" : ""}" data-act="pt-toggle" data-id="${pid}"><span><b>Турниры</b><span class="tiny">${plural(places.length, "турнир", "турнира", "турниров")}</span></span><span class="hist-chev">›</span></button>`;
+    if (!open) return head;
+    return head + `<div class="card"><div class="stack">${places.slice().reverse().map(p => `<div class="row" style="cursor:pointer;" data-act="open-tournament-tab" data-id="${p.t.id}"><div><div>${esc(p.t.name)}</div><div class="tiny">${fmtDate(p.t.date)} · ${tLabel(p.t)}</div></div><div style="white-space:nowrap;">${p.place===1?"🥇 ":p.place===2?"🥈 ":p.place===3?"🥉 ":""}<strong>${p.place}</strong><span class="tiny">/${p.n}</span></div></div>`).join("")}</div></div>`;
   }
+
   function profileEditHtml(pid) {
     const p = byId(state.players, pid);
     const pf = state._pf || (state._pf = { name: p.name, avatar: undefined });
@@ -1934,7 +2101,9 @@ const DATA = BOOT.data;
     return out;
   }
   // «Логические» турниры: двухэтапный (Американо → SwissCourt) считается одним турниром, итог — по этапу 2 (общая таблица).
-  function leagueTournaments() { return state.tournaments.filter(t => !linkedChild(t)); }
+  // турниры (без товарищеских матчей — они не дают титулов и мест); allEvents — всё вместе для списка и финансов
+  function leagueTournaments() { return state.tournaments.filter(t => !linkedChild(t) && !isFriendly(t)); }
+  function allEvents() { return state.tournaments.filter(t => !linkedChild(t)); }
   function tournamentTable(tid) {
     const t = byId(state.tournaments, tid);
     const src = t && linkedParent(t) ? stageGames(t) : state.games.filter(g => g.tournamentId===tid);
@@ -2289,7 +2458,7 @@ const DATA = BOOT.data;
         <tr><td><strong>Всего</strong></td><td><strong>${fmtMoney(tot.courts)}</strong></td><td><strong>${fmtMoney(tot.fees)}</strong></td><td><strong>${fmtMoney(tot.won)}</strong></td><td></td><td></td></tr>
       </table>
     </div>
-    <div class="card"><h3>По турнирам</h3><div class="stack" style="margin-top:8px;">${leagueTournaments().map(t => {
+    <div class="card"><h3>По турнирам</h3><div class="stack" style="margin-top:8px;">${allEvents().map(t => {
       const m = moneyOf(t), n = tournamentParticipants(t).length, pp = prizePayouts(t);
       return `<div class="row" style="align-items:flex-start;"><div><strong>${esc(t.name)}</strong><div class="tiny">${m.court ? "корты "+fmtMoney(m.court)+" × "+n : "корты не указаны"} · ${m.prize.enabled && m.prize.fee ? "фонд "+fmtMoney(pp.pool) : "без фонда"}</div>
         ${pp.payouts.map(p => `<div class="tiny">${p.place===p.to ? p.place : p.place+"–"+p.to} место: ${p.ids.map(id=>esc(playerName(id))).join(", ")} — ${fmtMoney(p.each)}</div>`).join("")}</div></div>`;
@@ -2529,10 +2698,19 @@ const DATA = BOOT.data;
       else if (act==="edit-booking") el.onclick = () => startEditBooking(el.dataset.id);
       else if (act==="cancel-edit-booking") el.onclick = () => { resetBookingForm(); render(); };
       else if (act==="add-booking") el.onclick = addBooking;
+      else if (act==="pt-toggle") el.onclick = () => { state.view.ptOpen = state.view.ptOpen === el.dataset.id ? null : el.dataset.id; render(); };
       else if (act==="hist-toggle") el.onclick = () => { state.view.histOpen = state.view.histOpen === el.dataset.id ? null : el.dataset.id; state.view.histN = 10; render(); };
       else if (act==="hist-more") el.onclick = () => { state.view.histN = (state.view.histN || 10) + 10; render(); };
       else if (act==="bk-mode") el.onclick = () => { const m = el.dataset.val; const cur = state.view.bkMode || "ours"; if (cur === m) return; state.view.bkMode = m; if (m !== "ours" && !courts().state.opened) courts().open(); else render(); };
-      else if (act==="new-tournament") el.onclick = () => { state.view.create=true; state._createDraft=null; render(); };
+      else if (act==="new-tournament") el.onclick = () => { state.view.create="choose"; state._createDraft=null; state._fDraft=null; render(); };
+      else if (act==="create-kind") el.onclick = () => { state.view.create = el.dataset.val === "friendly" ? "friendly" : true; render(); window.scrollTo(0,0); };
+      else if (act==="f-player") el.onclick = () => { fRead(); const d = fDraft(), id = el.dataset.id; if (d.players.includes(id)) d.players = d.players.filter(x => x !== id); else if (d.players.length < 4) d.players.push(id); else { toast("Максимум 4 игрока"); return; } d.pairing = null; render(); };
+      else if (act==="f-pair") el.onclick = () => { fRead(); fDraft().pairing = +el.dataset.val; render(); };
+      else if (act==="f-mode") el.onclick = () => { fRead(); const d = fDraft(); d.mode = el.dataset.val; if (d.mode==="race" && !d.target) d.target = 21; if (d.mode==="fixed" && !d.target) d.target = 24; render(); };
+      else if (act==="f-sets") el.onclick = () => { fRead(); fDraft().sets = +el.dataset.val; render(); };
+      else if (act==="f-games") el.onclick = () => { fRead(); fDraft().setGames = +el.dataset.val; render(); };
+      else if (act==="f-prize") el.onclick = () => { fRead(); fDraft().prizeEnabled = el.dataset.val === "1"; render(); };
+      else if (act==="f-create") el.onclick = createFriendly;
       else if (act==="cancel-create") el.onclick = () => { state.view.create=false; render(); };
       else if (act==="toggle-rounds") el.onclick = () => { state.view.roundsOpen = state.view.roundsOpen === el.dataset.id ? null : el.dataset.id; render(); };
       else if (act==="open-tournament") el.onclick = () => { state.view.tournament = el.dataset.id; state.view.liveRound = null; state.view.lastScoredGid = null; render(); };
@@ -2926,6 +3104,7 @@ const DATA = BOOT.data;
     const after = (g.scoreA==null?"—":g.scoreA) + ":" + (g.scoreB==null?"—":g.scoreB);
     if (before !== after) addLog("Счёт " + gameLabel(g) + " " + playerName(g.teamA[0]) + "+" + playerName(g.teamA[1]) + " vs " + playerName(g.teamB[0]) + "+" + playerName(g.teamB[1]) + ": " + before + " → " + after);
     if (ensurePlayoffProgress(g.tournamentId)) { render(); commit(3000); return; }
+    if (ensureFriendlyProgress(g.tournamentId)) { render(); commit(3000); return; }
     // re-render only the two pair labels (winner highlight) so typing the other score is not interrupted
     const m = document.querySelector('[data-gid="' + gid + '"]')?.closest(".match");
     if (m) {
@@ -2935,7 +3114,7 @@ const DATA = BOOT.data;
       if (pairs[1]) pairs[1].classList.toggle("winner", a!=null && b!=null && b>a);
     }
     commit(6000);
-    if (!wasFull && full()) { toast("Раунд " + g.round + " заполнен ✓"); bgRender(); } // покажет кнопку следующего раунда, когда закроется клавиатура
+    if (!wasFull && full()) { const ft = byId(state.tournaments, g.tournamentId); toast(isFriendly(ft) ? (g.label && g.label !== "Матч" ? g.label + " записан ✓" : "Счёт записан ✓") : "Раунд " + g.round + " заполнен ✓"); bgRender(); } // покажет кнопку следующего раунда, когда закроется клавиатура
   }
 
   // ---------------- boot ----------------
