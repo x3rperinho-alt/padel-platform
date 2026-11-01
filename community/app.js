@@ -769,7 +769,13 @@ setLang(detectLang(BOOT.tgLang));
   function tournamentPlaces(tt) {
     const sg = tGamesOf(tt.id).filter(scoredG); if (!sg.length) return null;
     let rows, unitPairs = false;
-    const teams = teamsOf(tt);
+    let teams = teamsOf(tt);
+    // парный формат без сохранённого списка пар (как #001): пары берём из матчей, если каждый играл всё время с одним партнёром
+    if (isTeamF(tt.format) && !teams.length) {
+      const pk = {}; sg.forEach(g => [g.teamA, g.teamB].forEach(tm => { if (tm.length === 2) { const k = tm.slice().sort().join("|"); pk[k] = tm.slice().sort(); } }));
+      const list = Object.values(pk), seen = {}; list.forEach(tm => tm.forEach(id => seen[id] = (seen[id] || 0) + 1));
+      if (list.length && Object.values(seen).every(n => n === 1)) teams = list;
+    }
     if (isTeamF(tt.format) && teams.length) {
       unitPairs = true;
       rows = (tt.format === "playoff" ? playoffPlaces(teams, sg).map(r => ({ ids: r.players, key: [r.place || 99, -r.out, -r.pts].join() }))
@@ -994,7 +1000,9 @@ setLang(detectLang(BOOT.tgLang));
         g.teamB.forEach(id => { pts[id] = (pts[id] || 0) + g.scoreB; diff[id] = (diff[id] || 0) + g.scoreB - g.scoreA; }); });
       const order = Object.keys(pts).sort((a, b) => pts[b] - pts[a] || diff[b] - diff[a]);
       const mine = byT[tt.id];
-      return { tt, place: order.indexOf(pid) + 1, n: order.length, pts: pts[pid] || 0, w: mine.filter(x => x.win).length, l: mine.filter(x => x.loss).length, d: mine.reduce((a, x) => a + x.d, 0) };
+      // место берём из общей таблицы турнира (как в сезоне): учитывает пары и делёж места при равенстве — оба партнёра победившей пары = 1
+      const P = tournamentPlaces(tt), me = P && P[pid];
+      return { tt, place: me ? me.place : order.indexOf(pid) + 1, n: me ? me.of : order.length, pts: pts[pid] || 0, w: mine.filter(x => x.win).length, l: mine.filter(x => x.loss).length, d: mine.reduce((a, x) => a + x.d, 0) };
     });
   }
 
