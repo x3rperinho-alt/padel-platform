@@ -1,6 +1,7 @@
 import { createDb } from "./db.js";
 import { CONFIG } from "./config.js";
 import { bootstrap } from "./auth.js";
+import { createCourts } from "./courts.js";
 
 const db = createDb(CONFIG);
 const BOOT = await bootstrap(db);          // { user: {id, role, name}, data: {...} } — вход + загрузка лиги
@@ -42,20 +43,6 @@ const DATA = BOOT.data;
     state.log.push(entry); pendingLogs.push(entry);
     if (state.log.length > 300) state.log = state.log.slice(-300);
   }
-  // ---------------- theme ----------------
-  function applyTheme() {
-    let th = null; try { th = localStorage.getItem("padel.theme"); } catch(e) {}
-    if (th === "light" || th === "dark") document.documentElement.setAttribute("data-theme", th);
-    else document.documentElement.removeAttribute("data-theme");
-    const b = document.getElementById("themeBtn"); if (b) b.textContent = th==="dark" ? "🌙" : th==="light" ? "☀️" : "◐";
-  }
-  function cycleTheme() {
-    let th = null; try { th = localStorage.getItem("padel.theme"); } catch(e) {}
-    const next = th==null ? "dark" : th==="dark" ? "light" : null;
-    try { if (next) localStorage.setItem("padel.theme", next); else localStorage.removeItem("padel.theme"); } catch(e) {}
-    applyTheme(); toast(next==="dark" ? "Тёмная тема" : next==="light" ? "Светлая тема" : "Тема как в системе");
-  }
-
   function byId(arr, id) { return arr.find(x => x.id === id); }
   function playerName(id) { const p = byId(state.players, id); return p ? p.name : id; }
   function playersActive() { return state.players.filter(p => p.active); }
@@ -398,11 +385,43 @@ const DATA = BOOT.data;
     updateNavAvatar();
     const v = document.getElementById("view");
     if (state.tab==="players") v.innerHTML = viewPlayers();
-    else if (state.tab==="bookings") v.innerHTML = viewBookings();
+    else if (state.tab==="bookings") {
+      const mode = state.view.bkMode === "free" || state.view.bkMode === "watch" ? state.view.bkMode : "ours";
+      const seg = `<div class="seg bk-seg"><button class="${mode==="ours"?"active":""}" data-act="bk-mode" data-val="ours">Наши брони</button><button class="${mode==="free"?"active":""}" data-act="bk-mode" data-val="free">Свободные корты</button><button class="${mode==="watch"?"active":""}" data-act="bk-mode" data-val="watch">🔔 Уведомления</button></div>`;
+      v.innerHTML = seg + (mode === "free" ? courts().viewFree() : mode === "watch" ? courts().viewWatch() : viewBookings());
+      if (mode !== "ours" && !courts().state.opened) setTimeout(() => courts().open(), 0);
+    }
     else if (state.tab==="tournaments") v.innerHTML = viewTournaments();
     else if (state.tab==="stats") v.innerHTML = viewStats();
     else if (state.tab==="profile") v.innerHTML = viewProfileTab();
     attachHandlers();
+    if (state.tab==="bookings" && (state.view.bkMode==="free" || state.view.bkMode==="watch")) courts().bind(v);
+    else document.body.classList.remove("ct-noscroll");
+  }
+  // ---------- тема: тёмная по умолчанию, светлая по кнопке в шапке ----------
+  function setTheme(t) {
+    if (t === "light") document.documentElement.dataset.theme = "light"; else delete document.documentElement.dataset.theme;
+    const b = document.getElementById("themeBtn"); if (b) { b.textContent = t === "light" ? "☾" : "☀"; b.title = t === "light" ? "тёмная тема" : "светлая тема"; }
+    const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = t === "light" ? "#F2EBE3" : "#0A0A0B";
+    const tg = window.Telegram && window.Telegram.WebApp;
+    try { if (tg && tg.initData) { tg.setHeaderColor && tg.setHeaderColor(t === "light" ? "#F2EBE3" : "#0A0A0B"); tg.setBackgroundColor && tg.setBackgroundColor(t === "light" ? "#F2EBE3" : "#0A0A0B"); } } catch (e) {}
+  }
+  (function initTheme() {
+    let t = "light"; try { t = localStorage.getItem("padel.theme") === "dark" ? "dark" : "light"; } catch (e) {}  // по умолчанию светлая
+    const meta = document.querySelector("header.top .meta");
+    if (meta && !document.getElementById("themeBtn")) {
+      const b = document.createElement("button"); b.id = "themeBtn"; b.className = "icon-btn"; b.type = "button";
+      b.onclick = () => { const n = document.documentElement.dataset.theme === "light" ? "dark" : "light"; try { localStorage.setItem("padel.theme", n); } catch (e) {} setTheme(n); render(); };
+      const lo = document.getElementById("logoutBtn"); meta.insertBefore(b, lo || null);
+    }
+    setTheme(t);
+  })();
+  let _courts = null;
+  function courts() {
+    if (!_courts) _courts = createCourts({ db, esc, toast, groupChat: true,
+      rerender: () => { if (state.tab==="bookings" && (state.view.bkMode==="free" || state.view.bkMode==="watch")) { const y = window.scrollY; render(); window.scrollTo(0, y); } },
+      go: (m) => { state.view.bkMode = m; render(); window.scrollTo(0, 0); } });
+    return _courts;
   }
 
   // ================= PLAYERS =================
@@ -1553,16 +1572,15 @@ const DATA = BOOT.data;
     // «Журнал» — только владельцу (редактору): там имена профилей Claude тех, кто вносил правки
     if (state.view.stat === "log" && !canWrite) state.view.stat = "leaderboard";
     const sub = state.view.stat;
-    if (sub === "badges" || sub === "profile") state.view.stat = "leaderboard";
+    if (sub === "badges" || sub === "profile" || sub === "heatmap") state.view.stat = "leaderboard";
     // В лиге друзей финансы видят все (в коммьюнити — только админы, там свой интерфейс); журнал — только редакторам
-    const tabs = [["leaderboard","Рейтинг"],["hall","Зал славы"],["h2h","Встречи"],["pairs","Пары"],["heatmap","Тепловая карта"],["dyn","По турнирам"],["money","Финансы"]].concat(canWrite ? [["log","Журнал"]] : []);
+    const tabs = [["leaderboard","Рейтинг"],["hall","Зал славы"],["h2h","Встречи"],["pairs","Пары"],["dyn","По турнирам"],["money","Финансы"]].concat(canWrite ? [["log","Журнал"]] : []);
     const cur = state.view.stat;
-    const segHtml = `<div class="chips-wrap" style="margin-bottom:12px;">${tabs.map(([k,l])=>`<span class="chip sm ${cur===k?'active':''}" data-act="stat-tab" data-val="${k}">${l}</span>`).join("")}</div>`;
+    const segHtml = `<div class="chips-scroll stat-tabs">${tabs.map(([k,l])=>`<span class="chip sm ${cur===k?'active':''}" data-act="stat-tab" data-val="${k}">${l}</span>`).join("")}</div>`;
     let body = "";
     if (sub==="leaderboard") body = statLeaderboard();
     else if (sub==="h2h") body = statH2H();
     else if (sub==="pairs") body = statPairs();
-    else if (sub==="heatmap") body = statHeatmap();
     else if (sub==="form") body = statForm();
     else if (sub==="hall") body = statHall();
     else if (sub==="money") body = statMoney();
@@ -1674,8 +1692,47 @@ const DATA = BOOT.data;
       ${state.view.profileEdit && canEditProfile(pid) ? profileEditHtml(pid) : profileHeroHtml(pid)}
       ${profileBadgesHtml(pid)}
       ${profileTournamentsHtml(pid)}
+      ${profileMatchesHtml(pid)}
       ${profileBodyHtml(pid)}
       ${isMine ? accountCardHtml() : ""}`;
+  }
+  // изменение Эло каждого матча (тот же расчёт, что в computeElo)
+  function gameEloDeltas() {
+    const ratings = {}; state.players.forEach(p => ratings[p.id] = ELO_START); const out = {};
+    orderedGames().forEach(g => {
+      if (g.scoreA == null || g.scoreB == null) return;
+      const total = g.scoreA + g.scoreB; if (total <= 0) return;
+      const eA = 1/(1+Math.pow(10, (avgRating(g.teamB, ratings)-avgRating(g.teamA, ratings))/400));
+      const dA = K*(g.scoreA/total - eA), dB = K*(g.scoreB/total - (1-eA));
+      g.teamA.forEach(p => { if (ratings[p] != null) ratings[p] += dA; });
+      g.teamB.forEach(p => { if (ratings[p] != null) ratings[p] += dB; });
+      out[g.id] = { dA, dB, after: Object.fromEntries(g.teamA.concat(g.teamB).map(p => [p, ratings[p]])) };
+    });
+    return out;
+  }
+  function profileMatchesHtml(pid) {
+    const games = orderedGames().filter(g => g.scoreA != null && g.scoreB != null && (g.teamA.includes(pid) || g.teamB.includes(pid))).reverse();
+    if (!games.length) return "";
+    const open = state.view.histOpen === pid, n = state.view.histN || 10;
+    const head = `<button class="card hist-toggle ${open ? "open" : ""}" data-act="hist-toggle" data-id="${pid}"><span><b>История матчей</b><span class="tiny">${plural(games.length, "матч", "матча", "матчей")}</span></span><span class="hist-chev">›</span></button>`;
+    if (!open) return head;
+    const el = gameEloDeltas(), T = id => byId(state.tournaments, id);
+    const rows = games.slice(0, n).map(g => {
+      const mineA = g.teamA.includes(pid), my = mineA ? g.teamA : g.teamB, op = mineA ? g.teamB : g.teamA;
+      const ms = mineA ? g.scoreA : g.scoreB, os = mineA ? g.scoreB : g.scoreA, res = ms > os ? "w" : ms < os ? "l" : "d";
+      const partner = my.filter(x => x !== pid), e = el[g.id], d = e ? (mineA ? e.dA : e.dB) : 0, after = e && e.after[pid];
+      const t = T(g.tournamentId);
+      return `<div class="hist-row ${res}">
+        <div class="hist-score"><b>${ms}:${os}</b><small>${res === "w" ? "победа" : res === "l" ? "поражение" : "ничья"}</small></div>
+        <div class="hist-main">
+          <div class="hist-teams"><span>${partner.length ? "с <b>" + partner.map(x => esc(playerName(x))).join(" + ") + "</b>" : "<b>один</b>"}</span><span class="tiny">против ${op.map(x => esc(playerName(x))).join(" + ")}</span></div>
+          <div class="tiny">${t ? esc(t.name.replace(/ · этап 1$/, "")) + " · " + fmtDate(t.date) : ""}${g.round ? " · раунд " + g.round : ""}</div>
+        </div>
+        <div class="hist-elo"><b class="${d >= 0 ? "up" : "down"}">${fmtDelta(d)}</b>${after != null ? `<small>${Math.round(after)}</small>` : ""}</div>
+      </div>`;
+    }).join("");
+    return head.replace("</button>", "</button>") + `<div class="card hist-list">${rows}
+      ${games.length > n ? `<button class="btn block" data-act="hist-more" style="margin-top:10px;">Показать ещё ${Math.min(10, games.length - n)}</button>` : ""}</div>`;
   }
   function accountCardHtml() {
     const u = BOOT.user || {};
@@ -2158,7 +2215,12 @@ const DATA = BOOT.data;
     const add = (icon, name, label, sub) => facts.push({ icon, name, lines: [{ label, sub }] });
     add("📚", "История лиги", `${plural(ts.length, "турнир", "турнира", "турниров")}, ${plural(played.length, "игра", "игры", "игр")}, ${totalPts.toLocaleString("ru-RU")} очков`, ts.length ? `с ${fmtDate(ts[0].date)}` : "");
     const ord = orderedGames().filter(g => g.scoreA!=null && g.scoreB!=null);
-    if (ord.length) { const f = ord[0]; const w = f.scoreA>f.scoreB ? f.teamA : f.teamB; add("🥇", "Первая игра лиги", `${N(f.teamA[0])} + ${N(f.teamA[1])}  ${f.scoreA}:${f.scoreB}  ${N(f.teamB[0])} + ${N(f.teamB[1])}`, f.scoreA!==f.scoreB ? "первая победа — " + N(w[0]) + " + " + N(w[1]) : "и сразу ничья"); }
+    if (ord.length) {
+      // первый раунд первого турнира шёл на нескольких кортах одновременно — показываем все его матчи
+      const f0 = ord[0], first = ord.filter(g => g.tournamentId === f0.tournamentId && g.round === f0.round);
+      facts.push({ icon: "🥇", name: first.length > 1 ? "Первые игры лиги" : "Первая игра лиги", lines: first.map(f => { const w = f.scoreA>f.scoreB ? f.teamA : f.teamB;
+        return { label: `${N(f.teamA[0])} + ${N(f.teamA[1])}  ${f.scoreA}:${f.scoreB}  ${N(f.teamB[0])} + ${N(f.teamB[1])}`, sub: (first.length > 1 ? `корт ${f.court || 1} · ` : "") + (f.scoreA!==f.scoreB ? "победа — " + N(w[0]) + " + " + N(w[1]) : "ничья") }; }) });
+    }
     // чемпионы: кто чаще всех выигрывал турниры
     const champs = {}; ts.forEach(t => champions(t).forEach(id => champs[id] = (champs[id]||0)+1));
     const cs = Object.entries(champs).sort((a,b)=>b[1]-a[1]);
@@ -2241,7 +2303,7 @@ const DATA = BOOT.data;
     const played = state.players.filter(p => places[p.id]);
     const sel = state.view.dynSel.length ? state.view.dynSel : played.filter(p=>p.active).slice(0,4).map(p=>p.id);
     const chips = played.map(p => `<span class="chip ${sel.includes(p.id)?'active':''}" data-act="toggle-dyn" data-id="${p.id}" style="font-size:12.5px;padding:5px 10px;">${esc(p.name)}</span>`).join("");
-    const colors = ["#FF7A1A","#F4F1EC","#FF5C5C","#8E8A84","#FFB05C","#3BB2A0","#C96BFF","#5CA8FF"];
+    const colors = ["#FF7A1A","var(--ink)","#FF5C5C","#8E8A84","#FFB05C","#3BB2A0","#C96BFF","#5CA8FF"];
     const maxN = Math.max(...ts.map(t => (rankedForPrizes(t)[0]||{n:1}).n));
     const W=340, H=180, padL=26, padR=14, padT=12, padB=24;
     const x = ti => padL + (W-padL-padR) * (ts.length===1 ? 0.5 : ti/(ts.length-1));
@@ -2418,7 +2480,7 @@ const DATA = BOOT.data;
     const { history } = computeElo();
     const sel = state.view.formSel.length? state.view.formSel : state.players.filter(p=>p.active).slice(0,3).map(p=>p.id);
     const chips = state.players.map(p => `<span class="chip ${sel.includes(p.id)?'active':''}" data-act="toggle-form" data-id="${p.id}" style="font-size:12.5px;padding:5px 10px;">${esc(p.name)}</span>`).join("");
-    const colors = ["#FF7A1A","#F4F1EC","#FF5C5C","#8E8A84","#FFB05C","#3BB2A0","#C96BFF","#5CA8FF"];
+    const colors = ["#FF7A1A","var(--ink)","#FF5C5C","#8E8A84","#FFB05C","#3BB2A0","#C96BFF","#5CA8FF"];
     const maxI = Math.max(1, ...sel.map(id => (history[id]||[]).length-1));
     const allR = sel.flatMap(id => (history[id]||[]).map(h=>h.r));
     const minR = Math.min(1300, ...allR), maxR = Math.max(1700, ...allR);
@@ -2467,6 +2529,9 @@ const DATA = BOOT.data;
       else if (act==="edit-booking") el.onclick = () => startEditBooking(el.dataset.id);
       else if (act==="cancel-edit-booking") el.onclick = () => { resetBookingForm(); render(); };
       else if (act==="add-booking") el.onclick = addBooking;
+      else if (act==="hist-toggle") el.onclick = () => { state.view.histOpen = state.view.histOpen === el.dataset.id ? null : el.dataset.id; state.view.histN = 10; render(); };
+      else if (act==="hist-more") el.onclick = () => { state.view.histN = (state.view.histN || 10) + 10; render(); };
+      else if (act==="bk-mode") el.onclick = () => { const m = el.dataset.val; const cur = state.view.bkMode || "ours"; if (cur === m) return; state.view.bkMode = m; if (m !== "ours" && !courts().state.opened) courts().open(); else render(); };
       else if (act==="new-tournament") el.onclick = () => { state.view.create=true; state._createDraft=null; render(); };
       else if (act==="cancel-create") el.onclick = () => { state.view.create=false; render(); };
       else if (act==="toggle-rounds") el.onclick = () => { state.view.roundsOpen = state.view.roundsOpen === el.dataset.id ? null : el.dataset.id; render(); };
@@ -2609,7 +2674,6 @@ const DATA = BOOT.data;
     const rn = document.getElementById("renameInput");
     if (rn) rn.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); renamePlayer(state.view.renamePlayer); } else if (e.key === "Escape") { state.view.renamePlayer = null; render(); } };
     const saveBtn = document.getElementById("saveNow"); if (saveBtn) saveBtn.onclick = saveNow;
-    const themeBtn = document.getElementById("themeBtn"); if (themeBtn) themeBtn.onclick = cycleTheme;
     updateSyncLabel();
   }
   function toggleInArr(arr, id) { const i=arr.indexOf(id); if (i>=0) arr.splice(i,1); else arr.push(id); }
@@ -2875,7 +2939,6 @@ const DATA = BOOT.data;
   }
 
   // ---------------- boot ----------------
-  applyTheme();
   restoreView();
   render();
   initArtifact();
