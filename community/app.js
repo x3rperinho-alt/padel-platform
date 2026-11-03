@@ -4,6 +4,7 @@ import { createDb } from "./db.js";
 import { bootstrap } from "./auth.js";
 import { americanoSchedule, defaultAmericanoRounds, mexicanoRound, swissRound, balanceTeams, roundRobinSchedule, playerTable, teamTable, playoffFirst, playoffNext, playoffPlaces, isBracket } from "./engine.js";
 import { t, setLang, getLang, detectLang, LANGS, dateFmt, quiz, quizLevel, quizElo } from "./i18n.js";
+import { createGames, timeRangeHtml, shiftEnd } from "./games.js";
 
 setLang(detectLang(null));
 const db = createDb(CONFIG);
@@ -27,7 +28,8 @@ setLang(detectLang(BOOT.tgLang));
   const eloExpect = (own, opp) => 1 / (1 + Math.pow(10, (opp - own) / ELO.DIV));
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const byId = (arr, id) => arr.find(x => x.id === id);
-  const today = () => new Date().toISOString().slice(0, 10);
+  // сегодняшняя дата по местному времени (toISOString дал бы UTC — в Киеве с 00:00 до 02–03:00 это ещё «вчера»)
+  const today = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
   const uid = () => "t_" + Math.random().toString(36).slice(2, 10);
   const state = { players: [], tournaments: [], games: [], registrations: [], league: {}, tab: "tournaments", view: {} };
   Object.assign(state, BOOT.data);
@@ -35,6 +37,9 @@ setLang(detectLang(BOOT.tgLang));
   const isAdmin = () => U && (U.role === "owner" || U.role === "admin");
   const canEdit = () => isAdmin() || (U && U.role === "editor");
   const myPlayer = () => state.players.find(p => p.userId === U.id) || null;
+  // дружеский турнир из вкладки «Игры» ведёт тот, кто его создал (плюс админы)
+  const canEditT = tt => canEdit() || (!!tt && !!tt.s && tt.s.kind === "ftour" && tt.status !== "played" && !!myPlayer() && tt.s.created_by === myPlayer().id); // после завершения — только админ (как в базе)
+  const isGameT = tt => !!(tt && tt.s && ["match", "friendly", "ftour"].includes(tt.s.kind));
 
   // ---------- «на главный экран»: в Telegram — родная функция (откроет мини-приложение с входом), в браузере Android — установка PWA ----------
   const tgApp = window.Telegram && window.Telegram.WebApp;
@@ -106,18 +111,27 @@ setLang(detectLang(BOOT.tgLang));
     const overrides = []; state.players.forEach(p => (p.eloAdj || []).forEach(o => o && o.value != null && overrides.push({ pid: p.id, after: o.after || null, value: +o.value, at: o.at })));
     const applyOv = after => overrides.filter(o => o.after === after && !o.done).forEach(o => { o.done = true; if (r[o.pid] == null) return; (adj[o.pid] = adj[o.pid] || []).push({ after, from: r[o.pid], to: o.value, at: o.at }); r[o.pid] = o.value; });
     applyOv(null);
-    const byT = {}; orderedGames().forEach(g => { if (g.scoreA == null || g.scoreB == null || g.scoreA + g.scoreB <= 0) return; (byT[g.tournamentId] = byT[g.tournamentId] || []).push(g); });
+    // игры вкладки «Игры»: дружеский матч, отменённая игра и оспоренный счёт (пока админ не решил) в Эло не идут
+    const tInfo = {}; state.tournaments.forEach(tt => tInfo[tt.id] = tt);
+    const noElo = tt => !!tt && !!tt.s && (tt.s.kind === "friendly" || tt.status === "cancelled" || (!!tt.s.dispute && !tt.s.dispute.done));
+    // у матча 2×2 победитель — по сетам (в самой игре хранится сумма геймов, от неё — бонус за разницу)
+    const setsRes = tt => { const ss = tt && tt.s && tt.s.kind === "match" && tt.s.sets; if (!ss || !ss.length) return null; let a = 0, b = 0; ss.forEach(([x, y]) => { if (x > y) a++; else if (y > x) b++; }); return a > b ? 1 : a < b ? 0 : null; };
+    const byT = {}; orderedGames().forEach(g => { if (g.scoreA == null || g.scoreB == null || g.scoreA + g.scoreB <= 0) return; if (noElo(tInfo[g.tournamentId])) return; (byT[g.tournamentId] = byT[g.tournamentId] || []).push(g); });
     const tIds = state.tournaments.map(tt => tt.id).filter(id => byT[id]); Object.keys(byT).forEach(id => { if (!tIds.includes(id)) tIds.push(id); });
     const tsum = {};
+    // правка админа «после X», где X выпал из Эло (оспоренный / отменённый матч) — применяется на месте X по порядку, а не в самом конце
+    const inT = new Set(tIds), tPos = {}; state.tournaments.forEach((tt, i) => tPos[tt.id] = i);
+    const applyGone = before => [...new Set(overrides.filter(o => !o.done && o.after && !inT.has(o.after) && tPos[o.after] != null && tPos[before] != null && tPos[o.after] < tPos[before]).map(o => o.after))].forEach(applyOv);
     tIds.forEach(tid => {
+      applyGone(tid);
       const snap = { ...r }, avg = ids => ids.reduce((a, id) => a + (snap[id] ?? 1500), 0) / ids.length;
-      const items = {}, sum = {};
+      const items = {}, sum = {}, isM = !!(tInfo[tid] && tInfo[tid].s && tInfo[tid].s.kind === "match"), sr = setsRes(tInfo[tid]);
       byT[tid].forEach(g => {
         const rA = avg(g.teamA), rB = avg(g.teamB), eA = eloExpect(rA, rB), m = eloMargin(g.scoreA - g.scoreB);
-        const sA = g.scoreA > g.scoreB ? 1 : g.scoreA < g.scoreB ? 0 : 0.5, dA = ELO.K * m * (sA - eA);
-        g.teamA.concat(g.teamB).forEach(id => { if (!st[id]) return; st[id].g++; tp[id].add(tid);
+        const sA = sr != null ? sr : g.scoreA > g.scoreB ? 1 : g.scoreA < g.scoreB ? 0 : 0.5, dA = ELO.K * m * (sA - eA);
+        g.teamA.concat(g.teamB).forEach(id => { if (!st[id]) return; st[id].g++; if (!isM) tp[id].add(tid);
           const inA = g.teamA.includes(id), own = inA ? g.scoreA : g.scoreB, opp = inA ? g.scoreB : g.scoreA, mine = inA ? g.teamA : g.teamB, them = inA ? g.teamB : g.teamA;
-          const win = own > opp, loss = own < opp; if (!win && !loss) st[id].d++; else if (win) st[id].w++; else st[id].l++;
+          const win = inA ? sA === 1 : sA === 0, loss = inA ? sA === 0 : sA === 1; if (!win && !loss) st[id].d++; else if (win) st[id].w++; else st[id].l++;
           const raw = inA ? dA : -dA; sum[id] = (sum[id] || 0) + raw;
           (items[id] = items[id] || []).push({ g, own, opp, win, loss, partner: mine.find(x => x !== id), opps: them, ownR: inA ? rA : rB, oppR: inA ? rB : rA, e: inA ? eA : 1 - eA, m, raw, d: raw }); });
       });
@@ -140,7 +154,7 @@ setLang(detectLang(BOOT.tgLang));
   // ---------- общие кусочки ----------
   const HOME_IC = `<svg class="home-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.5 9v11h13V9"/><path d="M12 11.5v5M9.5 14h5"/></svg>`;
   const SIL = `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="24" r="12"/><path d="M8 60c2-14 12-22 24-22s22 8 24 22z"/></svg>`;
-  const avatarHtml = (pid, sz) => { const p = byId(state.players, pid); sz = sz || 44; return p && p.avatar ? `<span class="avatar" style="width:${sz}px;height:${sz}px;"><img src="${p.avatar}" alt=""></span>` : `<span class="avatar ph" style="width:${sz}px;height:${sz}px;">${SIL}</span>`; };
+  const avatarHtml = (pid, sz) => { const p = byId(state.players, pid); sz = sz || 44; return p && p.avatar ? `<span class="avatar" style="width:${sz}px;height:${sz}px;"><img src="${esc(p.avatar)}" alt=""></span>` : `<span class="avatar ph" style="width:${sz}px;height:${sz}px;">${SIL}</span>`; };
   const pname = pid => { const p = byId(state.players, pid); return p ? p.name : "?"; };
   // ---------- партнёр (LuPadel): ссылки и переключатели живут в leagues.settings.partner, правит админ ----------
   const PARTNER_DEF = { name: "LuPadel", shop: "https://lupadel.olx.ua/uk/home/", consult: "", season: true };
@@ -160,7 +174,7 @@ setLang(detectLang(BOOT.tgLang));
   const lblHtml = pid => lblOf(pid) ? ` <span class="nm-lbl">(${esc(lblOf(pid))})</span>` : "";
   const pnl = pid => esc(pname(pid)) + lblHtml(pid);           // имя + подпись, без ссылки
   const pnt = pid => pname(pid) + (lblOf(pid) ? " (" + lblOf(pid) + ")" : ""); // то же простым текстом
-  const pl = pid => `<span class="plink" data-act="open-profile" data-id="${pid}">${esc(pname(pid))}</span>${lblHtml(pid)}`;
+  const pl = pid => `<span class="plink" data-act="open-profile" data-id="${esc(pid)}">${esc(pname(pid))}</span>${lblHtml(pid)}`;
   let toastTimer; function toast(m) { const el = document.getElementById("toast"); el.textContent = m; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2200); }
   const err = e => toast(t("error", { msg: (e && e.message) || e }));
   // поле ввода с кнопкой ✓ справа: прячет клавиатуру и сохраняет (scope: ob — анкета, pf:<id> — профиль)
@@ -219,6 +233,7 @@ setLang(detectLang(BOOT.tgLang));
         <p class="tiny" style="margin:0 0 14px;">${t("onboarding_hint")}</p>
         <label class="field"><span class="lbl">${t("your_name")}</span>${okWrap(`<input type="text" id="obName" value="${esc(d.name)}" maxlength="40" enterkeyhint="done">`, "ob")}</label>
         <label class="field"><span class="lbl">${t("instagram_opt")}</span>${okWrap(`<input type="text" id="obIg" value="${esc(d.ig)}" placeholder="@nickname" enterkeyhint="done">`, "ob")}</label>
+        ${bdSelects("ob", d.bd || { d: "", m: "", y: "" })}
         <div class="field"><span class="lbl">${t("level_source")}</span><div class="wrap-tags">${["playtomic","pado","raketo","quiz"].map(x => `<span class="chip ${d.source===x?'active':''} ${x==="quiz"?"chip-quiz":""}" data-act="ob-source" data-val="${x}">${t("src_"+x)}</span>`).join("")}</div></div>
         ${isQuiz ? `
         <div class="quiz-intro"><div class="quiz-intro-ic">?</div><p>${t("quiz_intro")}</p></div>
@@ -256,7 +271,8 @@ setLang(detectLang(BOOT.tgLang));
     const d = state._onb; const ig = d.ig.trim().replace(/^@/, "");
     const isQuiz = d.source === "quiz"; const score = d.answers.reduce((a, x) => a + x, 0);
     const lv = isQuiz ? quizLevel(d.answers) : toRaketo(d.source, d.level);
-    const extra = { ...(ig ? { instagram: ig } : {}), ...(isQuiz ? { quiz: d.answers.slice() } : { [d.source]: appLink(d.nick) || (d.nick || "").trim().replace(/^@/, ""), level_raw: String(d.level).trim() }) };
+    const bd = bdValue(d.bd); if (bd === null) { toast(t("bd_bad")); return; }
+    const extra = { ...(ig ? { instagram: ig } : {}), ...(bd ? { birthday: bd } : {}), ...(isQuiz ? { quiz: d.answers.slice() } : { [d.source]: appLink(d.nick) || (d.nick || "").trim().replace(/^@/, ""), level_raw: String(d.level).trim() }) };
     try {
       if (d.retest) await db.submitQuiz(d.answers.slice(), score);
       else await db.createMyPlayer(d.name.trim(), lv, d.source, extra);
@@ -294,7 +310,7 @@ setLang(detectLang(BOOT.tgLang));
   }
   function viewTournaments() {
     if (state.view.t) return viewTournamentDetail(state.view.t);
-    const up = state.tournaments.filter(isUpcoming), past = state.tournaments.filter(tt => !isUpcoming(tt)).reverse();
+    const list = state.tournaments.filter(tt => !isGameT(tt)), up = list.filter(isUpcoming), past = list.filter(tt => !isUpcoming(tt)).reverse();
     return `${levelBannerHtml()}<div class="section-head"><h2>${t("tournaments")}</h2>${canEdit() ? `<button class="btn primary sm" data-act="new-t">${t("new_tournament")}</button>` : ""}</div>
       ${up.length ? `<div class="stack">${up.map(tTile).join("")}</div>` : `<div class="card"><div class="empty"><div class="ic">&#127934;</div>${t("no_tournaments")}</div></div>`}
       ${past.length ? `<h3 class="sub-h">${t("past")}</h3><div class="stack">${past.map(tTile).join("")}</div>` : ""}`;
@@ -304,8 +320,8 @@ setLang(detectLang(BOOT.tgLang));
     const tt = byId(state.tournaments, tid); if (!tt) { state.view.t = null; return viewTournaments(); }
     LBL = (tt.s && tt.s.labels) || {};
     if (state.view.editT === tid) return tournamentFormHtml(tt);
-    if (state.view.run === tid && state._run && canEdit()) return runSetupHtml(tt);
-    if (tt.status === "live" || (state.view.fix === tid && canEdit())) return liveHtml(tt, tt.status !== "live");
+    if (state.view.run === tid && state._run && canEditT(tt)) return runSetupHtml(tt);
+    if (tt.status === "live" || (state.view.fix === tid && canEditT(tt))) return liveHtml(tt, tt.status !== "live");
     const tGames = state.games.filter(g => g.tournamentId === tid && g.scoreA != null && g.scoreB != null);
     if (tGames.length) return tournamentResultsHtml(tt, tGames);
     const regs = regsOf(tid), main = regs.filter(r => r.status === "main"), res = regs.filter(r => r.status === "reserve");
@@ -349,14 +365,14 @@ setLang(detectLang(BOOT.tgLang));
     const fullPairs = teamNos(tt).filter(n => teamMembers(tid, n).length === 2).length;
     const addTeamSel = pairs ? `<select id="addRegTeam" style="flex:0 0 auto;max-width:42%;">${teamNos(tt).filter(n => teamMembers(tid, n).length < 2).map(n => `<option value="${n}">${t("pair")} ${n}</option>`).join("")}<option value="">${t("reserve")}</option></select>` : "";
     return `
-      <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${t("tournaments")}</button>${canEdit() ? `<button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button>` : ""}</div>
+      <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${backLbl()}</button>${canEditT(tt) ? `<button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button>` : ""}</div>
       <h2 class="t-title">${esc(tt.name)}</h2>
       <div class="card">
         <div class="info-grid">
           <div><span class="tiny">${t("t_date")}</span><b>${dateFmt(tt.date, true)}</b></div>
           <div><span class="tiny">${t("time")}</span><b>${timeRange(tt.s) || "—"}</b></div>
           <div><span class="tiny">${t("place")}</span><b>${esc(tt.s.place || "—")}</b></div>
-          <div><span class="tiny">${t("format")}</span><b>${t(tt.format)}</b></div>
+          <div><span class="tiny">${t("format")}</span><b>${esc(t(tt.format))}</b></div>
           <div><span class="tiny">${t("level_range")}</span><b>${esc(rangeLabel(tt.s))}</b></div>
           <div><span class="tiny">${t("price")}</span><b>${tt.s.price ? esc(tt.s.price) + " ₴" : "—"}</b></div>
           ${(tt.s.court_nums || []).length ? `<div><span class="tiny">${t("courts_lbl")}</span><b>${tt.s.court_nums.map(esc).join(", ")}</b></div>` : ""}
@@ -371,7 +387,8 @@ setLang(detectLang(BOOT.tgLang));
         ? `<div class="card"><h3>${t("pairs_title")} <span class="tiny">· ${fullPairs}/${slots || teamNos(tt).length - 1}</span></h3><div class="pair-grid">${teamNos(tt).map(pairCard).join("")}</div></div>`
         : `<div class="card"><h3>${t("main_list")} <span class="tiny">· ${main.length}${slots ? "/" + slots : ""}</span></h3><div style="margin-top:6px;">${main.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>`}
       ${res.length || isAdmin() ? `<div class="card"><h3>${t("reserve_list")} <span class="tiny">· ${res.length}</span></h3><div style="margin-top:6px;">${res.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>` : ""}
-      ${canEdit() && tt.status !== "played" ? runCardHtml(tt) : ""}
+      ${tt.s.kind === "ftour" && tt.s.created_by ? `<div class="card"><span class="tiny">${t("organizer_lbl")}:</span> ${pl(tt.s.created_by)}</div>` : ""}
+      ${canEditT(tt) && tt.status !== "played" ? runCardHtml(tt) : ""}
       ${labelsCardHtml(tt, main.map(r => r.playerId))}
       ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${state.players.filter(p => p.active && !regs.some(r => r.playerId === p.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(p => `<option value="${p.id}">${esc(p.name)}${p.label ? " (" + esc(p.label) + ")" : ""} · ${letter(lvNow(p))}</option>`).join("")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
         <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`;
@@ -410,9 +427,9 @@ setLang(detectLang(BOOT.tgLang));
           <div class="pair right ${wb ? "winner" : ""}">${pl(g.teamB[0])}<small>${g.teamB[1] ? pl(g.teamB[1]) : ""}</small></div></div></div>`; };
     const medal = i => i === 0 ? "gold" : "";
     return `
-      <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${t("tournaments")}</button>${canEdit() ? `<span style="display:flex;gap:6px;"><button class="btn sm" data-act="fix-open" data-id="${tid}">${t("fix_scores")}</button><button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button></span>` : ""}</div>
+      <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${backLbl()}</button>${canEditT(tt) ? `<span style="display:flex;gap:6px;"><button class="btn sm" data-act="fix-open" data-id="${tid}">${t("fix_scores")}</button><button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button></span>` : ""}</div>
       <h2 class="t-title">${esc(tt.name)}</h2>
-      <p class="tiny" style="margin:-4px 0 12px;">${dateFmt(tt.date, true)}${tt.s.time ? " · " + timeRange(tt.s) : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""} · ${t(tt.format)} · ${esc(rangeLabel(tt.s))}</p>
+      <p class="tiny" style="margin:-4px 0 12px;">${dateFmt(tt.date, true)}${tt.s.time ? " · " + timeRange(tt.s) : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""} · ${esc(t(tt.format))} · ${esc(rangeLabel(tt.s))}</p>
       ${isTeamF(tt.format) && teamsOf(tt).length ? `<div class="card"><h3>${t("standings")}</h3>${standingsHtml(tt, tGames)}</div>` : ""}
       <div class="card"><h3>${isTeamF(tt.format) && teamsOf(tt).length ? t("players") : t("standings")}</h3>
         <table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("players")}</th><th>${t("pts")}</th><th>W-L</th><th>${t("diff")}</th><th>Elo</th></tr>
@@ -693,7 +710,7 @@ setLang(detectLang(BOOT.tgLang));
         <td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${r.g ? (d >= 0 ? "+" : "") + Math.round(d) : "—"}</td></tr>`; }).join("")}</table>`;
   }
   function liveHtml(tt, fix) {
-    const tid = tt.id, games = tGamesOf(tid), edit = canEdit(), me = myPlayer(), sc = tt.scoring || {};
+    const tid = tt.id, games = tGamesOf(tid), edit = canEditT(tt), me = myPlayer(), sc = tt.scoring || {};
     const maxR = games.length ? Math.max(...games.map(g => g.round)) : 0;
     const byR = r => games.filter(g => g.round === r).sort((a, b) => (a.court || 0) - (b.court || 0));
     const done = r => byR(r).length > 0 && byR(r).every(scoredG);
@@ -734,9 +751,9 @@ setLang(detectLang(BOOT.tgLang));
       : `<div class="card live-end"><div class="row"><span class="tiny">${t("scored_n", { a: nScored, b: games.length })}</span>${nScored ? "" : `<button class="btn ghost sm danger" data-act="live-cancel" data-id="${tid}">${t("cancel_start")}</button>`}</div>
           <button class="btn ${allDone && (!STEP_F.includes(tt.format) || maxR >= planned) ? "primary" : ""} block" style="margin-top:10px;" data-act="live-finish" data-id="${tid}">🏁 ${t("finish_t")}</button></div>`) : "";
     return `
-      <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${t("tournaments")}</button>${edit && !fix ? `<button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button>` : ""}</div>
+      <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${backLbl()}</button>${edit && !fix ? `<button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button>` : ""}</div>
       <div class="live-head"><h2 class="t-title">${esc(tt.name)}</h2>${fix ? `<span class="t-status planned">✎ ${t("fix_scores_short")}</span>` : `<span class="t-status live"><i></i>${t("live")}</span>`}</div>
-      <p class="tiny" style="margin:-4px 0 12px;">${t(tt.format)}${scLbl ? " · " + scLbl : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""}${tt.s.time ? " · " + timeRange(tt.s) : ""}</p>
+      <p class="tiny" style="margin:-4px 0 12px;">${esc(t(tt.format))}${scLbl ? " · " + scLbl : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""}${tt.s.time ? " · " + timeRange(tt.s) : ""}</p>
       <div class="seg live-tabs"><button class="${tab === "m" ? "active" : ""}" data-act="live-tab" data-val="m">${t("live_matches")}</button><button class="${tab === "t" ? "active" : ""}" data-act="live-tab" data-val="t">${t("live_table")}</button></div>
       ${tab === "t" ? `<div class="card"><h3>${t("standings")}</h3>${nScored ? "" : `<p class="tiny">${t("no_scores_yet")}</p>`}${standingsHtml(tt, games)}</div>` : `
         <div class="chips-scroll rnd-chips">${chips}</div>
@@ -817,7 +834,7 @@ setLang(detectLang(BOOT.tgLang));
   const curSeason = () => SEASONS.find(s => today() <= s.end) || SEASONS[SEASONS.length - 1];
   const LEAGUES = ["D", "C"];
   // лига турнира: вручную из настроек или по уровню допуска
-  const tLeague = tt => { const v = tt.s.season_league; if (v === "none") return null; if (LEAGUES.includes(v)) return v;
+  const tLeague = tt => { const v = tt.s.season_league; if (v === "none" || isGameT(tt)) return null; if (LEAGUES.includes(v)) return v;
     const lo = tt.s.level_min != null ? +tt.s.level_min : null, hi = tt.s.level_max != null ? +tt.s.level_max : null;
     const ref = lo != null ? lo : hi != null ? hi - 0.001 : null; if (ref == null) return "D";
     return ref < 2.5 ? "D" : ref < 3.5 ? "C" : null; };
@@ -948,11 +965,11 @@ setLang(detectLang(BOOT.tgLang));
     const fmts = ["americano", "team_americano", "mexicano", "swiss", "roundrobin", "playoff"];
     const inp = (id, label, val, type, extra) => `<label class="field"><span class="lbl">${label}</span><input type="${type || "text"}" id="${id}" value="${esc(val ?? "")}" ${extra || ""}></label>`;
     return `
-      <div class="section-head"><button class="btn ghost sm back" data-act="tf-cancel">‹ ${t("cancel")}</button><h2 style="font-size:16px;">${f.isNew ? t("new_tournament").replace("+ ", "") : t("edit")}</h2></div>
+      <div class="section-head"><button class="btn ghost sm back" data-act="tf-cancel">‹ ${t("cancel")}</button><h2 style="font-size:16px;">${f.s.kind === "ftour" && f.isNew ? t("friendly_tournament") : f.isNew ? t("new_tournament").replace("+ ", "") : t("edit")}</h2></div>
       <div class="card">
         ${inp("tfName", t("t_name"), f.name)}
         ${inp("tfDate", t("t_date"), f.date, "date")}
-        <div class="grid2">${inp("tfTime", t("t_time"), s.time, "time")}${inp("tfTimeEnd", t("t_time_end"), s.time_end, "time")}</div>
+        ${timeRangeHtml({ idS: "tfTime", idE: "tfTimeEnd", s: s.time || "", e: s.time_end || "", lblS: t("t_time"), lblE: t("t_time_end") })}
         ${(() => { const other = f.placeOther || (s.place && !CLUBS.includes(s.place));
           return `<label class="field"><span class="lbl">${t("t_place")}</span><select id="tfPlaceSel"><option value="" ${!s.place && !other ? "selected" : ""}>—</option>${CLUBS.map(c => `<option value="${esc(c)}" ${!other && s.place === c ? "selected" : ""}>${esc(c)}</option>`).join("")}<option value="__other" ${other ? "selected" : ""}>${t("place_other")}</option></select></label>
             ${other ? inp("tfPlace", t("place_other_name"), s.place) : ""}`; })()}
@@ -971,9 +988,9 @@ setLang(detectLang(BOOT.tgLang));
         ${inp("tfContact", t("t_contact"), s.contact, "url", 'placeholder="https://t.me/…"')}
         <label class="field"><span class="lbl">${t("t_note")}</span><textarea id="tfNote" rows="3">${esc(s.note || "")}</textarea></label>
         <label class="row" style="cursor:pointer;"><span>${t("t_reg_open")}</span><input type="checkbox" id="tfOpen" ${s.reg_open ? "checked" : ""} style="width:22px;height:22px;"></label>
-        <label class="field"><span class="lbl">${t("t_season")}</span><select id="tfSeason">${[["auto", t("t_season_auto", { lg: tLeague({ s: { ...s, season_league: "auto" } }) || "—" })], ["D", t("s_league", { lg: "D" })], ["C", t("s_league", { lg: "C" })], ["none", t("t_season_none")]].map(([v, l]) => `<option value="${v}" ${(s.season_league || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        ${s.kind ? "" : `<label class="field"><span class="lbl">${t("t_season")}</span><select id="tfSeason">${[["auto", t("t_season_auto", { lg: tLeague({ s: { ...s, season_league: "auto" } }) || "—" })], ["D", t("s_league", { lg: "D" })], ["C", t("s_league", { lg: "C" })], ["none", t("t_season_none")]].map(([v, l]) => `<option value="${v}" ${(s.season_league || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="row tf-toggle"><span>🎁 ${t("p_prizes")}<br><span class="tiny">${t("p_prizes_hint")}</span></span><input type="checkbox" id="tfPartner" ${s.partner_prizes ? "checked" : ""}></label>
-        <label class="row tf-toggle"><span>${t("t_approval")}<br><span class="tiny">${t("t_approval_hint")}</span></span><input type="checkbox" id="tfApproval" ${s.approval ? "checked" : ""}></label>
+        <label class="row tf-toggle"><span>${t("t_approval")}<br><span class="tiny">${t("t_approval_hint")}</span></span><input type="checkbox" id="tfApproval" ${s.approval ? "checked" : ""}></label>`}
         <div class="pf-actions" style="margin-top:14px;justify-content:space-between;">
           ${f.isNew ? "<span></span>" : `<button class="btn sm ghost danger" data-act="tf-delete">${t("delete")}</button>`}
           <span style="display:flex;gap:6px;"><button class="btn sm" data-act="tf-cancel">${t("cancel")}</button><button class="btn sm primary" data-act="tf-save">${t("save")}</button></span>
@@ -988,11 +1005,14 @@ setLang(detectLang(BOOT.tgLang));
     if (g("tfCourtNums")) { f.s.court_nums = parseCourts(g("tfCourtNums").value); if (f.s.court_nums.length) f.courts = f.s.court_nums.length; }
     const num = v => v === "" ? null : +v;
     const ps = g("tfPlaceSel"); if (ps) { f.placeOther = ps.value === "__other"; f.s.place = f.placeOther ? (g("tfPlace") ? g("tfPlace").value.trim() : (CLUBS.includes(f.s.place) ? "" : f.s.place || "")) : ps.value; }
-    Object.assign(f.s, { time: g("tfTime").value, time_end: g("tfTimeEnd").value, slots: num(g("tfSlots").value), price: num(g("tfPrice").value), level_min: num(g("tfMin").value), level_max: num(g("tfMax").value), contact: g("tfContact").value.trim(), note: g("tfNote").value.trim(), reg_open: g("tfOpen").checked, pairs: g("tfPairs").checked, approval: g("tfApproval").checked });
+    // поменяли начало — конец сдвигается на ту же длительность (новый турнир — 2 часа)
+    const ns = g("tfTime").value; let ne = g("tfTimeEnd").value; if (ns !== (f.s.time || "")) ne = shiftEnd(f.s.time, ns, ne, 120);
+    Object.assign(f.s, { time: ns, time_end: ne, slots: num(g("tfSlots").value), price: num(g("tfPrice").value), level_min: num(g("tfMin").value), level_max: num(g("tfMax").value), contact: g("tfContact").value.trim(), note: g("tfNote").value.trim(), reg_open: g("tfOpen").checked, pairs: g("tfPairs").checked, approval: g("tfApproval") ? g("tfApproval").checked : !!f.s.approval });
     return f;
   }
   async function saveTf() {
     const f = readTf(); if (!f.name) { toast(t("t_name") + "?"); return; }
+    if (f.s.kind && !f.date) { toast(t("t_date") + "?"); return; }
     try { const old = byId(state.tournaments, f.id) || {};
       await db.saveTournament({ id: f.id, seq: f.seq || old.seq || Date.now() % 1e9, name: f.name, date: f.date, status: f.status, format: f.format, courts: f.courts, s: f.s, participantIds: old.participantIds, teams: old.teams, scoring: old.scoring, rounds: old.rounds }); state._tf = null; state.view.editT = null; state.view.t = f.id; await reload(); toast(t("saved")); } catch (e) { err(e); }
   }
@@ -1022,6 +1042,26 @@ setLang(detectLang(BOOT.tgLang));
   // ---------- профиль ----------
   // ---------- контакты ----------
   const CI = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  // ---------- день рождения: contacts.birthday = "ГГГГ-ММ-ДД" или "--ММ-ДД" (год можно не указывать); другим видны только день и месяц ----------
+  const LOC = () => ({ uk: "uk-UA", ru: "ru-RU", en: "en-GB" })[getLang()] || "uk-UA";
+  const bdParts = v => { const m = /^(\d{4}|-)-(\d{2})-(\d{2})$/.exec(String(v || "")); return m ? { y: m[1] === "-" ? "" : m[1], m: String(+m[2]), d: String(+m[3]) } : { y: "", m: "", d: "" }; };
+  // "" — не заполнено, null — такой даты нет (31 февраля), иначе строка для сохранения
+  const bdValue = b => { if (!b || !b.d || !b.m) return ""; const y = b.y ? +b.y : 2000, mm = +b.m, dd = +b.d, x = new Date(y, mm - 1, dd);
+    if (x.getMonth() !== mm - 1 || x.getDate() !== dd) return null; return (b.y ? b.y : "-") + "-" + String(mm).padStart(2, "0") + "-" + String(dd).padStart(2, "0"); };
+  const bdOf = p => (p && p.contacts && p.contacts.birthday) || "";
+  const bdLabel = v => { const b = bdParts(v); if (!b.d) return ""; return new Date(2000, +b.m - 1, +b.d).toLocaleDateString(LOC(), { day: "numeric", month: "long" }); };
+  const bdToday = v => { const b = bdParts(v), n = new Date(); return !!b.d && +b.d === n.getDate() && +b.m === n.getMonth() + 1; };
+  const needBd = () => { const me = myPlayer(); return !!me && !bdOf(me); };
+  function bdSelects(prefix, b, warn) {
+    const yNow = new Date().getFullYear(), months = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString(LOC(), { month: "long" }));
+    const sel = (id, ph, opts, cur) => `<select id="${prefix}Bd${id}" class="bd-sel"><option value="">${ph}</option>${opts.map(([v, l]) => `<option value="${v}" ${String(cur) === String(v) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+    return `<div class="field bd-field ${warn ? "need" : ""}" id="${prefix}Bd"><span class="lbl">🎂 ${t("bd_title")}</span><div class="bd-row">
+      ${sel("D", t("bd_day"), Array.from({ length: 31 }, (_, i) => [i + 1, i + 1]), b.d)}
+      ${sel("M", t("bd_month"), months.map((m, i) => [i + 1, m]), b.m)}
+      ${sel("Y", t("bd_year"), Array.from({ length: yNow - 10 - 1939 }, (_, i) => [yNow - 10 - i, yNow - 10 - i]), b.y)}</div>
+      <p class="tiny" style="margin:6px 0 0;">${t("bd_hint")}</p></div>`;
+  }
+  const readBdSel = prefix => { const g = k => { const el = document.getElementById(prefix + "Bd" + k); return el ? el.value : null; }; return g("D") == null ? null : { d: g("D"), m: g("M"), y: g("Y") }; };
   const CONTACTS = [
     ["phone", CI('<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>'), v => "tel:" + v.replace(/[^\d+]/g, "")],
     ["telegram", CI('<path d="M21 3L3 10.5l6.5 2.5L12 20l3-5.5L21 3z"/><path d="M9.5 13L21 3"/>'), v => "https://t.me/" + v],
@@ -1049,7 +1089,7 @@ setLang(detectLang(BOOT.tgLang));
   // ---------- турниры игрока: место и изменение Эло ----------
   function playedTournaments(pid, E) {
     const byT = {}; (E.seq[pid] || []).forEach(x => { (byT[x.g.tournamentId] = byT[x.g.tournamentId] || []).push(x); });
-    return state.tournaments.filter(tt => byT[tt.id]).map(tt => {
+    return state.tournaments.filter(tt => byT[tt.id] && tt.format !== "match").map(tt => {
       const pts = {}, diff = {};
       state.games.filter(g => g.tournamentId === tt.id && g.scoreA != null && g.scoreB != null).forEach(g => {
         g.teamA.forEach(id => { pts[id] = (pts[id] || 0) + g.scoreA; diff[id] = (diff[id] || 0) + g.scoreA - g.scoreB; });
@@ -1132,7 +1172,7 @@ setLang(detectLang(BOOT.tgLang));
     return `<div class="card"><h3>${t("match_history")} <span class="tiny">· ${all.length}</span></h3><div class="mh-list">${list.map(x => `
       <div class="mh-row ${x.win ? "win" : x.loss ? "loss" : "draw"}">
         <span class="mh-res">${x.win ? "W" : x.loss ? "L" : "D"}</span>
-        <div class="mh-main"><div>${t("with_partner", { name: "" })}${x.partner ? pl(x.partner) : "—"}</div><div class="tiny">${t("vs")} ${x.opps.map(pl).join(" + ")}</div><div class="tiny dim">${esc(tn(x.g.tournamentId))} · ${t("round")} ${x.g.round}</div></div>
+        <div class="mh-main"><div>${t("with_partner", { name: "" })}${x.partner ? pl(x.partner) : "—"}</div><div class="tiny">${t("vs")} ${x.opps.map(pl).join(" + ")}</div><div class="tiny dim">${esc(tn(x.g.tournamentId))}${(byId(state.tournaments, x.g.tournamentId) || {}).format === "match" ? "" : ` · ${t("round")} ${x.g.round}`}</div></div>
         <div class="mh-score"><b>${x.own}:${x.opp}</b><span class="tiny ${x.d >= 0 ? "up" : "down"}">${x.d >= 0 ? "+" : ""}${Math.round(x.d)}</span>${x.e != null ? `<span class="tiny dim" title="${t("elo_chance")}">${Math.round(x.e * 100)}%</span>` : ""}</div>
       </div>`).join("")}</div>
       ${all.length > 8 ? `<button class="btn sm ghost block" style="margin-top:8px;" data-act="mh-all" data-id="${pid}">${showAll ? t("show_less") : t("show_all", { n: all.length })}</button>` : ""}</div>`;
@@ -1144,13 +1184,14 @@ setLang(detectLang(BOOT.tgLang));
     if (!pid || !byId(state.players, pid)) return viewOnboarding();
     const p = byId(state.players, pid), { E, list } = board(); const s = E.stats[pid]; const rank = list.findIndex(x => x.id === pid);
     const mine = my && my.id === pid, nav = !!state.view.pid;
-    const upcoming = state.registrations.filter(r => r.playerId === pid && r.status !== "cancelled").map(r => ({ r, tt: byId(state.tournaments, r.tournamentId) })).filter(x => x.tt && isUpcoming(x.tt));
+    const upcoming = state.registrations.filter(r => r.playerId === pid && r.status !== "cancelled").map(r => ({ r, tt: byId(state.tournaments, r.tournamentId) })).filter(x => x.tt && isUpcoming(x.tt) && x.tt.format !== "match");
     const head = nav ? `<div class="section-head"><button class="btn ghost sm back" data-act="p-back">‹ ${t("back")}</button><h2 style="flex:1;text-align:right;">${t("profile")}</h2></div>` : `<div class="section-head"><h2>${t("profile")}</h2></div>`;
     if (state.view.editP === pid && (mine || canEdit())) return head + profileEditHtml(p);
-    return `${head}${mine ? levelBannerHtml() : ""}
+    const bdCard = mine && needBd() ? `<div class="bd-need"><span class="bd-need-ic">🎂</span><div><b>${t("bd_need")}</b><p class="tiny">${t("bd_need_sub")}</p></div><button class="btn sm primary" data-act="p-edit-bd" data-id="${pid}">${t("bd_fill")}</button></div>` : "";
+    return `${head}${mine ? levelBannerHtml() : ""}${bdCard}
       <div class="card hero">
         <div class="hero-top">
-          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}${p.label ? ` <span class="nm-lbl">(${esc(p.label)})</span>` : ""}</div><div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${p.levelStatus === "ok" ? `${levelBadge(E.ratings[pid] / 1000)} ${fmtLv(Math.round(E.ratings[pid]) / 1000)}` : ""}</div>${mine || canEdit() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}</button>` : ""}</div></div>
+          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}${p.label ? ` <span class="nm-lbl">(${esc(p.label)})</span>` : ""}</div><div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${p.levelStatus === "ok" ? `${levelBadge(E.ratings[pid] / 1000)} ${fmtLv(Math.round(E.ratings[pid]) / 1000)}` : ""}</div>${bdOf(p) ? `<div class="tiny bd-line ${bdToday(bdOf(p)) ? "today" : ""}">🎂 ${bdToday(bdOf(p)) ? t("bd_today") : esc(bdLabel(bdOf(p)))}</div>` : ""}${mine || canEdit() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}${mine && needBd() ? `<i class="need-dot"></i>` : ""}</button>` : ""}</div></div>
           ${p.levelStatus === "ok" ? `<div class="hero-elo"><span class="${E.unconfirmed[pid]?'unc':''}">${Math.round(E.ratings[pid])}</span><small>${E.unconfirmed[pid] ? t("unconfirmed") : t("confirmed")}</small></div>` : `<div class="hero-elo"><span class="pend">⏳</span><small>${p.levelStatus === "pending" ? t("pending_short") : t("need_quiz_short")}</small></div>`}
         </div>
         ${p.levelStatus === "ok" && E.unconfirmed[pid] ? `<p class="tiny" style="margin:8px 0 0;">${t("unconfirmed_hint", { n: CONFIRM_N - E.tcount[pid] })}</p>` : ""}
@@ -1209,6 +1250,7 @@ setLang(detectLang(BOOT.tgLang));
         <label class="field" style="flex:1;"><span class="lbl">${t("player_lbl")}</span><input type="text" id="pfLbl" maxlength="30" value="${esc(pf.lbl)}" placeholder="${t("player_lbl_ph")}"></label></div>
         <p class="tiny" style="margin:4px 0 0;">${t("elo_now_hint")}</p></div>` : ""}
       <label class="field" style="margin-top:12px;"><span class="lbl">${t("bio")}</span>${okWrap(`<textarea id="pfBio" rows="2" maxlength="200">${esc(pf.bio)}</textarea>`, "pf:" + p.id)}</label>
+      ${mine ? bdSelects("pf", pf.bd || (pf.bd = bdParts(bdOf(p))), !bdValue(pf.bd)) : ""}
       ${mine ? `<h3 id="pfContacts" style="margin:6px 0 4px;scroll-margin-top:40px;">${t("contacts")}</h3><p class="tiny" style="margin:0 0 10px;">${t("contacts_hint")}</p>
       <div class="ct-form">${CONTACTS.map(([k, ic]) => `<label class="ct-field"><span class="ct-ic ct-${k}">${ic}</span>${okWrap(`<input type="${k === "phone" ? "tel" : "text"}" id="pfc_${k}" value="${esc(pf.c[k])}" placeholder="${t("c_" + k)}${k === "phone" ? " +380…" : ["playtomic","pado","raketo"].includes(k) ? " — " + t("nick_or_link") : " @nick"}" maxlength="${["playtomic","pado","raketo"].includes(k) ? 200 : 60}" enterkeyhint="done">`, "pf:" + p.id)}</label>`).join("")}</div>` : ""}
       <div class="pf-actions" style="justify-content:flex-end;"><button class="btn sm" data-act="pf-cancel">${t("cancel")}</button><button class="btn sm primary" data-act="pf-save" data-id="${p.id}">${t("save")}</button></div>
@@ -1225,6 +1267,7 @@ setLang(detectLang(BOOT.tgLang));
     const name = g("pfName").value.trim(), bio = g("pfBio").value.trim();
     const contacts = { ...(p.contacts || {}) }; CONTACTS.forEach(([k]) => { const el = g("pfc_" + k); if (el) { const v = cleanContact(k, el.value); if (v) contacts[k] = v; else delete contacts[k]; } });
     const avatar = pf.avatar === undefined ? (p.avatar || null) : pf.avatar;
+    const bsel = readBdSel("pf"); if (bsel) { const bd = bdValue(bsel); if (bd === null) { toast(t("bd_bad")); return; } if (bd) contacts.birthday = bd; else delete contacts.birthday; }
     try {
       if (myPlayer() && myPlayer().id === pid) { await db.updateMyCard(name, avatar, contacts, bio); if (pf.level != null && Math.abs(pf.level - p.level) > 1e-9) await db.adjustMyLevel(+pf.level.toFixed(1)); }
       else if (name && name !== p.name) await db.updatePlayer(pid, { name });
@@ -1327,38 +1370,50 @@ setLang(detectLang(BOOT.tgLang));
   }
 
   // ---------- рендер и события ----------
+  // ---------- вкладка «Игры» (games.js) ----------
+  const backLbl = () => state.tab === "games" ? G.backLabel() : t("tournaments");
+  function newFtour() { const me = myPlayer(), nid = uid();
+    state._tf = { id: nid, isNew: true, name: "", date: today(), format: "americano", courts: 2, status: "scheduled", s: { kind: "ftour", created_by: me ? me.id : null, season_league: "none", reg_open: true, slots: 8, approval: false } };
+    state.view.t = nid; state.view.editT = nid; window.scrollTo(0, 0); render(); }
+  const G = createGames({ state, db, esc, toast, err, render: () => render(), reload: () => reload(), myPlayer, isAdmin, computeElo, eloExpect, ELO, letter, levelBadge, letterClass, avatarHtml, pname, pl,
+    lvNow, fmtLv, today, uid, CLUBS, LV_G, lvLetters, setLvLetters, rangeLabel, regsOf, ask, byId, gameId, newFtour, regErrMsg });
+
   function render() { _EC = null;
     const v = document.getElementById("view");
     const me = myPlayer(); LBL = {};
     if (me && state._onb && state._onb.retest && state._onb.step != null) v.innerHTML = viewQuiz(state._onb);
     else if (!me && state.tab !== "admin") v.innerHTML = viewOnboarding();
     else if (state.tab === "tournaments") v.innerHTML = viewTournaments();
+    else if (state.tab === "games") { if (state.view.t && !byId(state.tournaments, state.view.t) && !(state._tf && state._tf.id === state.view.t)) state.view.t = null; // турнир удалили — назад к списку игр
+      v.innerHTML = state.view.t ? viewTournamentDetail(state.view.t) : G.view() || (state.view.t ? viewTournamentDetail(state.view.t) : ""); }
     else if (state.tab === "rating") v.innerHTML = viewRating();
     else if (state.tab === "season") v.innerHTML = viewSeason();
     else if (state.tab === "admin") v.innerHTML = viewAdmin();
     else v.innerHTML = viewProfile();
     document.querySelectorAll("nav.tabs button").forEach(b => { b.classList.toggle("active", b.dataset.tab === state.tab); if (b.dataset.tab === "admin") b.hidden = !canEdit(); });
-    const labels = { tournaments: t("tournaments"), season: t("season"), rating: t("rating"), admin: t("admin"), profile: t("profile") };
+    const labels = { games: G.label(), tournaments: t("tournaments"), season: t("season"), rating: t("rating"), admin: t("admin"), profile: t("profile") };
     document.querySelectorAll("nav.tabs button .lbl").forEach(l => l.textContent = labels[l.parentElement.dataset.tab]);
     updateNavAvatar(); updateNavBadges(); bind(v);
   }
   function updateNavBadges() {
+    const pb = document.querySelector('nav.tabs button[data-tab="profile"]'); if (pb) { let dot = pb.querySelector(".need-dot"); if (needBd()) { if (!dot) { dot = document.createElement("i"); dot.className = "need-dot nav"; pb.appendChild(dot); } } else if (dot) dot.remove(); }
     const lv = canEdit() ? state.players.filter(p => p.levelStatus === "pending").length : 0;
     const rg = isAdmin() ? state.registrations.filter(r => r.approval === "pending" && r.status !== "cancelled" && (tt => tt && isUpcoming(tt))(byId(state.tournaments, r.tournamentId))).length : 0;
-    [["admin", lv], ["tournaments", rg]].forEach(([tab, n]) => { const b = document.querySelector(`nav.tabs button[data-tab="${tab}"]`); if (!b) return;
+    [["admin", lv], ["tournaments", rg], ["games", G.disputesN() + G.needScoreN()]].forEach(([tab, n]) => { const b = document.querySelector(`nav.tabs button[data-tab="${tab}"]`); if (!b) return;
       let el = b.querySelector(".nav-badge"); if (!n) { if (el) el.remove(); return; }
       if (!el) { el = document.createElement("span"); el.className = "nav-badge"; b.appendChild(el); } el.textContent = n > 99 ? "99+" : n; });
   }
   function updateNavAvatar() {
     const ic = document.querySelector('nav.tabs button[data-tab="profile"] .ic'); const p = myPlayer(); if (!ic) return;
     const key = p && p.avatar ? "img:" + p.avatar.length : "ph"; if (ic.dataset.key === key) return; ic.dataset.key = key;
-    ic.innerHTML = p && p.avatar ? `<span class="nav-avatar"><img src="${p.avatar}" alt=""></span>` : `<span class="nav-avatar ph">${SIL}</span>`;
+    ic.innerHTML = p && p.avatar ? `<span class="nav-avatar"><img src="${esc(p.avatar)}" alt=""></span>` : `<span class="nav-avatar ph">${SIL}</span>`;
   }
   function openProfile(pid) { state.view.pBack = state.tab === "profile" ? state.view.pBack : state.tab; state.view.pid = pid; state.view.editP = null; state._pf = null; state.tab = "profile"; window.scrollTo(0, 0); render(); }
   function bind(v) {
     v.querySelectorAll("[data-act]").forEach(el => {
       const a = el.dataset.act, id = el.dataset.id;
       const on = fn => { el.onclick = ev => { ev.stopPropagation(); fn(ev); }; };
+      if (G.act(a, el, id, on)) return;
       if (a === "ob-source") on(() => { keepOnb(); if (state._onb.source !== el.dataset.val) state._onb.level = ""; state._onb.source = el.dataset.val; render(); });
       else if (a === "ob-save" || a === "quiz-save") on(saveOnboarding);
       else if (a === "quiz-start") on(() => { keepOnb(); if (state._onb.name.trim().length < 2) { toast(t("need_name")); return; } state._onb.step = 0; state._onb.answers = []; window.scrollTo(0, 0); render(); });
@@ -1421,6 +1476,7 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "lv-group") on(() => { state.view.lvGroup = el.dataset.val; render(); });
       else if (a === "open-profile") on(() => openProfile(id));
       else if (a === "p-back") on(() => { const b = state.view.pBack || "rating"; state.view.pid = null; state.view.editP = null; state.tab = b === "profile" ? "rating" : b; render(); });
+      else if (a === "p-edit-bd") on(() => { state._pf = null; state.view.editP = id; render(); const f = document.getElementById("pfBd"); if (f) f.scrollIntoView({ block: "center", behavior: "smooth" }); });
       else if (a === "p-edit") on(() => { state._pf = null; state.view.editP = id; render(); });
       else if (a === "pf-cancel") on(() => { state._pf = null; state.view.editP = null; render(); });
       else if (a === "pf-save") on(() => savePf(id));
@@ -1443,7 +1499,7 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "rf-run") on(() => runRaffle(id, el));
       else if (a === "rf-del") on(async () => { const tt = byId(state.tournaments, id); if (!tt || !confirm(t("rf_del_q"))) return; const raffles = (tt.s.raffles || []).filter((_, i) => i !== +el.dataset.val);
         try { await db.saveTournament(tRow(tt, { s: { ...tt.s, raffles } })); tt.s = { ...tt.s, raffles }; render(); } catch (e) { err(e); } });
-      else if (a === "open-link") on(() => { const u = el.dataset.url; if (el.dataset.pt) db.trackClick(el.dataset.pt, el.dataset.ptw, el.dataset.ptt).catch(() => {}); const tg = window.Telegram && window.Telegram.WebApp;
+      else if (a === "open-link") on(() => { const u = el.dataset.url; if (!/^https?:\/\//i.test(u || "")) return; // только обычные ссылки (не javascript: и т.п.) if (el.dataset.pt) db.trackClick(el.dataset.pt, el.dataset.ptw, el.dataset.ptt).catch(() => {}); const tg = window.Telegram && window.Telegram.WebApp;
         if (tg && tg.initData && /^https:\/\/t\.me\//.test(u) && tg.openTelegramLink) tg.openTelegramLink(u); else if (tg && tg.initData && tg.openLink) tg.openLink(u); else window.open(u, "_blank", "noopener"); });
       else if (a === "copy-nick") on(async () => { const v = el.dataset.val; try { await navigator.clipboard.writeText(v); toast(t("nick_copied", { app: t("src_" + el.dataset.app) })); } catch (e) { toast(v); } });
       else if (a === "logout") on(async () => { await db.signOut(); location.reload(); });
@@ -1458,6 +1514,8 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "adm-elo") el.onchange = async () => { const p = byId(state.players, id); const v = +el.value; if (!v) return; try { await db.updatePlayer(id, { eloStart: v }); await db.addLog(`Стартовое Эло ${p.name}: ${p.eloStart} → ${v}`); await reload(); } catch (e) { err(e); } };
       else if (a === "set-role") el.onchange = async () => { try { await db.setMemberRole(id, el.value); const m = state._members.find(x => x.userId === id); if (m) m.role = el.value; toast(t("saved")); } catch (e) { err(e); } };
     });
+    ["ob", "pf"].forEach(pr => ["D", "M", "Y"].forEach(k => { const el = document.getElementById(pr + "Bd" + k); if (!el) return;
+      el.onchange = () => { const b = readBdSel(pr); if (pr === "ob" && state._onb) state._onb.bd = b; if (pr === "pf" && state._pf) state._pf.bd = b; const f = document.getElementById(pr + "Bd"); if (f && pr === "pf") f.classList.toggle("need", !bdValue(b)); }; }));
     const keepOnb = () => { const n = document.getElementById("obName"), l = document.getElementById("obLevel"), i = document.getElementById("obIg"), k = document.getElementById("obNick"); if (n) state._onb.name = n.value; if (l) state._onb.level = l.value; if (i) state._onb.ig = i.value; if (k) state._onb.nick = k.value; };
     // ввод в анкете: страницу не перерисовываем (иначе курсор прыгает в начало) — обновляем только превью и кнопку
     ["obName", "obLevel", "obIg", "obNick"].forEach(id => { const el = document.getElementById(id); if (el) el.oninput = () => {
@@ -1470,6 +1528,7 @@ setLang(detectLang(BOOT.tgLang));
     const keepPf = () => { const n = document.getElementById("pfName"), b = document.getElementById("pfBio"), ee = document.getElementById("pfElo"), ll = document.getElementById("pfLbl"); if (state._pf && n) { state._pf.name = n.value; state._pf.bio = b.value; if (ee) { state._pf.elo = ee.value; state._pf.lbl = ll.value; } CONTACTS.forEach(([k]) => { const el = document.getElementById("pfc_" + k); if (el) state._pf.c[k] = el.value; }); } };
     // дробные поля — обычный текст с цифровой клавиатурой: в Telegram на Android/iPhone поле type=number не принимает точку
     // (или запятую), если в системе другой десятичный разделитель. Запятую превращаем в точку, лишнее убираем.
+    G.bindInputs(v);
     v.querySelectorAll("input.dec-in").forEach(inp => inp.addEventListener("input", () => decFix(inp), true));
     v.querySelectorAll("input.lbl-in").forEach(inp => { inp.onchange = () => saveLabel(inp); inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); inp.blur(); } }; });
     v.querySelectorAll(".ok-wrap input").forEach(inp => { inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); const b = inp.parentElement.querySelector(".ok-btn"); if (b) b.click(); } }; });
@@ -1490,9 +1549,9 @@ setLang(detectLang(BOOT.tgLang));
         const nx = all.slice(i + 1).find(x => x.value === "" && x.dataset.side === "A") || all.slice(i + 1).find(x => x.value === ""); if (nx) nx.focus(); else inp.blur(); };
     });
     ["runCourtNums", "runCourts", "runRounds", "runTarget"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { const r = readRun(); if ((id === "runCourts" || id === "runCourtNums") && !r.touched) { const tt = byId(state.tournaments, r.tid); r.rounds = runDefaultRounds(r, runPlayers(tt.id).length); } render(); }; });
-    ["tfName","tfDate","tfTime","tfTimeEnd","tfPlace","tfPlaceSel","tfCourtNums","tfCourts","tfSlots","tfPrice","tfMin","tfMax","tfContact","tfNote"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { readTf(); if (id === "tfMin" || id === "tfMax" || id === "tfCourtNums" || id === "tfPlaceSel") render(); }; });
+    ["tfName","tfDate","tfTime","tfTimeEnd","tfPlace","tfPlaceSel","tfCourtNums","tfCourts","tfSlots","tfPrice","tfMin","tfMax","tfContact","tfNote"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { readTf(); if (id === "tfMin" || id === "tfMax" || id === "tfCourtNums" || id === "tfPlaceSel" || id === "tfTime") render(); }; });
   }
-  document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; state.view.t = null; state.view.editT = null; state.view.run = null; state.view.fix = null; state.view.pid = null; state.view.editP = null; window.scrollTo(0, 0); render(); });
+  document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; state.view.t = null; state.view.editT = null; state.view.run = null; state.view.fix = null; state.view.pid = null; state.view.editP = null; state.view.g = null; state.view.gNew = null; state.view.gs = null; window.scrollTo(0, 0); render(); });
   const hb = homeBtnEl(); if (hb) { hb.onclick = addToHome; hb.title = t("home_add_long"); const hl = hb.querySelector(".home-lbl"); if (hl) hl.textContent = t("home_btn"); }
   const lo = document.getElementById("logoutBtn"); if (lo) lo.onclick = async () => { await db.signOut(); location.reload(); };
   const who = document.getElementById("whoami"); if (who) who.textContent = (myPlayer() && myPlayer().name) || U.name || "";
@@ -1503,5 +1562,8 @@ setLang(detectLang(BOOT.tgLang));
   document.addEventListener("focusin", e => { if (!isField(e.target)) return; document.body.classList.add("kb"); clearTimeout(kbTimer); kbTimer = setTimeout(() => scrollField(e.target), 320); });
   document.addEventListener("focusout", () => setTimeout(() => { if (isField(document.activeElement)) return; document.body.classList.remove("kb"); if (pendingLive) liveReload(); }, 150));
   if (window.visualViewport) window.visualViewport.addEventListener("resize", () => { clearTimeout(kbTimer); kbTimer = setTimeout(() => scrollField(document.activeElement), 120); });
+  // ссылка из бота: ?g=<id> — сразу открыть игру
+  try { const gq = new URLSearchParams(location.search).get("g"); const gt = gq && byId(state.tournaments, gq);
+    if (gt && isGameT(gt)) { state.tab = "games"; if (gt.s.kind === "ftour") state.view.t = gt.id; else state.view.g = gt.id; } } catch (e) {}
   render();
 })();

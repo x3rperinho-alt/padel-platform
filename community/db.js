@@ -134,6 +134,14 @@ export function createDb(cfg) {
     const want = new Set(ids); return Object.fromEntries((data || []).filter(p => want.has(p.user_id)).map(p => [p.user_id, p.display_name]));
   }
 
+  // ---------- игры игроков (вкладка «Игры»): всё через функции базы — они проверяют, что игрок участник / создатель ----------
+  async function createGame(t, partner) { return rpc("create_game", { p_id: t.id, p_seq: t.seq || 0, p_name: t.name, p_date: t.date, p_settings: t.s || {}, p_partner: partner || null }); }
+  async function gameTeams(tid, teams) { return rpc("game_set_teams", { p_tournament: tid, p_teams: teams }); }
+  async function gameScore(tid, teams, sets) { return rpc("game_score", { p_tournament: tid, p_teams: teams, p_sets: sets }); }
+  async function gameDispute(tid, reason) { return rpc("game_dispute", { p_tournament: tid, p_reason: reason }); }
+  async function gameResolve(tid, action) { return rpc("game_resolve", { p_tournament: tid, p_action: action }); }
+  async function gameCancel(tid) { return rpc("game_cancel", { p_tournament: tid }); }
+
   // ---------- живые обновления ----------
   function subscribe(onChange) {
     const ch = sb.channel("league-" + L);
@@ -143,5 +151,6 @@ export function createDb(cfg) {
 
   return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinOpen, loadAll,
     createMyPlayer, updateMyCard, adjustMyLevel, reviewLevel, submitQuiz, register, unregister, reviewRegistration, resetPlayer, adminMembers, promoteReserve, setDisplayName,
+    createGame, gameTeams, gameScore, gameDispute, gameResolve, gameCancel,
     saveTournament, deleteTournament, saveGames, saveScore, deleteGames, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, saveLeagueSettings, trackClick, partnerClicks, listMembers, setMemberRole, profileNames, subscribe };
 }
