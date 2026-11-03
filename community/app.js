@@ -389,6 +389,7 @@ setLang(detectLang(BOOT.tgLang));
       ${res.length || isAdmin() ? `<div class="card"><h3>${t("reserve_list")} <span class="tiny">· ${res.length}</span></h3><div style="margin-top:6px;">${res.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>` : ""}
       ${tt.s.kind === "ftour" && tt.s.created_by ? `<div class="card"><span class="tiny">${t("organizer_lbl")}:</span> ${pl(tt.s.created_by)}</div>` : ""}
       ${canEditT(tt) && tt.status !== "played" ? runCardHtml(tt) : ""}
+      ${canEditT(tt) && state.group && tt.status === "scheduled" && isUpcoming(tt) ? `<button class="btn block" style="margin-bottom:12px;" data-act="t-announce" data-id="${esc(tid)}">${t("announce_btn")}</button>` : ""}
       ${labelsCardHtml(tt, main.map(r => r.playerId))}
       ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${state.players.filter(p => p.active && !regs.some(r => r.playerId === p.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(p => `<option value="${p.id}">${esc(p.name)}${p.label ? " (" + esc(p.label) + ")" : ""} · ${letter(lvNow(p))}</option>`).join("")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
         <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`;
@@ -991,6 +992,8 @@ setLang(detectLang(BOOT.tgLang));
         ${s.kind ? "" : `<label class="field"><span class="lbl">${t("t_season")}</span><select id="tfSeason">${[["auto", t("t_season_auto", { lg: tLeague({ s: { ...s, season_league: "auto" } }) || "—" })], ["D", t("s_league", { lg: "D" })], ["C", t("s_league", { lg: "C" })], ["none", t("t_season_none")]].map(([v, l]) => `<option value="${v}" ${(s.season_league || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="row tf-toggle"><span>🎁 ${t("p_prizes")}<br><span class="tiny">${t("p_prizes_hint")}</span></span><input type="checkbox" id="tfPartner" ${s.partner_prizes ? "checked" : ""}></label>
         <label class="row tf-toggle"><span>${t("t_approval")}<br><span class="tiny">${t("t_approval_hint")}</span></span><input type="checkbox" id="tfApproval" ${s.approval ? "checked" : ""}></label>`}
+        ${f.isNew ? (state.group ? `<label class="row tf-toggle"><span>${t("t_announce")}<br><span class="tiny">${t("t_announce_hint", { g: esc(state.group) })}</span></span><input type="checkbox" id="tfAnnounce" ${f.announce !== false ? "checked" : ""}></label>`
+          : `<p class="tiny" style="margin:4px 0 0;">📣 ${t("no_group_hint")}</p>`) : ""}
         <div class="pf-actions" style="margin-top:14px;justify-content:space-between;">
           ${f.isNew ? "<span></span>" : `<button class="btn sm ghost danger" data-act="tf-delete">${t("delete")}</button>`}
           <span style="display:flex;gap:6px;"><button class="btn sm" data-act="tf-cancel">${t("cancel")}</button><button class="btn sm primary" data-act="tf-save">${t("save")}</button></span>
@@ -1001,6 +1004,7 @@ setLang(detectLang(BOOT.tgLang));
     const f = state._tf; const g = id => document.getElementById(id); if (!f || !g("tfName")) return f;
     f.name = g("tfName").value.trim(); f.date = g("tfDate").value; f.courts = +g("tfCourts").value || 1;
     if (g("tfSeason")) f.s.season_league = g("tfSeason").value;
+    if (g("tfAnnounce")) f.announce = g("tfAnnounce").checked;
     if (g("tfPartner")) f.s.partner_prizes = g("tfPartner").checked;
     if (g("tfCourtNums")) { f.s.court_nums = parseCourts(g("tfCourtNums").value); if (f.s.court_nums.length) f.courts = f.s.court_nums.length; }
     const num = v => v === "" ? null : +v;
@@ -1014,7 +1018,9 @@ setLang(detectLang(BOOT.tgLang));
     const f = readTf(); if (!f.name) { toast(t("t_name") + "?"); return; }
     if (f.s.kind && !f.date) { toast(t("t_date") + "?"); return; }
     try { const old = byId(state.tournaments, f.id) || {};
-      await db.saveTournament({ id: f.id, seq: f.seq || old.seq || Date.now() % 1e9, name: f.name, date: f.date, status: f.status, format: f.format, courts: f.courts, s: f.s, participantIds: old.participantIds, teams: old.teams, scoring: old.scoring, rounds: old.rounds }); state._tf = null; state.view.editT = null; state.view.t = f.id; await reload(); toast(t("saved")); } catch (e) { err(e); }
+      await db.saveTournament({ id: f.id, seq: f.seq || old.seq || Date.now() % 1e9, name: f.name, date: f.date, status: f.status, format: f.format, courts: f.courts, s: f.s, participantIds: old.participantIds, teams: old.teams, scoring: old.scoring, rounds: old.rounds }); state._tf = null; state.view.editT = null; state.view.t = f.id;
+      if (f.isNew && f.announce !== false && state.group) { try { await db.announceTournament(f.id); db.kick(); } catch (e) { console.error(e); } }
+      await reload(); toast(t("saved")); } catch (e) { err(e); }
   }
 
   // ---------- рейтинг ----------
@@ -1291,7 +1297,7 @@ setLang(detectLang(BOOT.tgLang));
     const queue = state.players.filter(p => p.levelStatus !== "ok");
     const pendingN = queue.filter(p => p.levelStatus === "pending").length;
     const sub = state.view.adm || (pendingN ? "review" : "ratings");
-    const tabs = [["review", t("review_tab"), pendingN], ["ratings", t("ratings_admin")], ...(isAdmin() ? [["visits", t("visits_tab")], ["nom", "🔒 " + t("nom_tab")], ["partner", "🤝 " + t("p_tab")]] : []), ["roles", t("roles")]];
+    const tabs = [["review", t("review_tab"), pendingN], ["ratings", t("ratings_admin")], ...(isAdmin() ? [["visits", t("visits_tab")], ["nom", "🔒 " + t("nom_tab")], ["partner", "🤝 " + t("p_tab")], ["group", "📣 " + t("grp_tab")]] : []), ["roles", t("roles")]];
     let body = "";
     if (sub === "ratings") {
       const q = (state.view.q || "").toLowerCase(); const E = computeElo();
@@ -1310,6 +1316,13 @@ setLang(detectLang(BOOT.tgLang));
           </div></div>`).join("")}</div></div>`;
     } else if (sub === "roles") body = membersCardHtml();
     else if (sub === "visits") body = visitsHtml();
+    else if (sub === "group" && isAdmin()) { const bot = state.view.grpBot || "Padel048Bot", er = state.view.grpErr;
+      body = `<div class="card"><h3>${t("grp_title")}</h3>
+        ${state.group ? `<p style="margin:8px 0 12px;">✅ ${t("grp_connected", { g: esc(state.group) })}</p>` : `<p class="tiny" style="margin:8px 0 0;">${t("grp_none")}</p>`}
+        <ol class="grp-steps"><li>${t("grp_s1", { bot: esc(bot) })}</li><li>${t("grp_s2", { bot: esc(bot) })}</li><li>${t("grp_s3")}</li></ol>
+        ${er ? `<div class="rej-note">${t(er === "not_found" ? "grp_err_nf" : er === "webhook" ? "grp_err_wh" : "grp_err", { bot: esc(bot) })}</div>` : ""}
+        <div class="row" style="gap:8px;justify-content:flex-end;margin-top:10px;">${state.group ? `<button class="btn sm ghost danger" data-act="grp-off">${t("grp_off")}</button>` : ""}<button class="btn sm primary" data-act="grp-connect">${state.group ? t("grp_change") : t("grp_connect")}</button></div>
+        <p class="tiny" style="margin:12px 0 0;">${t("grp_hint")}</p></div>`; }
     else if (sub === "nom" && isAdmin()) body = nominationsHtml();
     else if (sub === "partner" && isAdmin()) { const P = partner();
       body = `<div class="card"><div class="pt-top"><b>${esc(P.name)}</b><img class="pt-logo" src="lupadel.svg" alt=""></div><p class="tiny" style="margin:8px 0 12px;">${t("p_admin_hint")}</p>
@@ -1375,7 +1388,7 @@ setLang(detectLang(BOOT.tgLang));
   function newFtour() { const me = myPlayer(), nid = uid();
     state._tf = { id: nid, isNew: true, name: "", date: today(), format: "americano", courts: 2, status: "scheduled", s: { kind: "ftour", created_by: me ? me.id : null, season_league: "none", reg_open: true, slots: 8, approval: false } };
     state.view.t = nid; state.view.editT = nid; window.scrollTo(0, 0); render(); }
-  const G = createGames({ state, db, esc, toast, err, render: () => render(), reload: () => reload(), myPlayer, isAdmin, computeElo, eloExpect, ELO, letter, levelBadge, letterClass, avatarHtml, pname, pl,
+  const G = createGames({ state, db, esc, isField, toast, err, render: () => render(), reload: () => reload(), myPlayer, isAdmin, computeElo, eloExpect, ELO, letter, levelBadge, letterClass, avatarHtml, pname, pl,
     lvNow, fmtLv, today, uid, CLUBS, LV_G, lvLetters, setLvLetters, rangeLabel, regsOf, ask, byId, gameId, newFtour, regErrMsg });
 
   function render() { _EC = null;
@@ -1430,6 +1443,10 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "tf-pairs") { el.onchange = () => { readTf(); render(); }; }
       else if (a === "tf-cancel") on(() => { const f = state._tf; state._tf = null; state.view.editT = null; if (f && f.isNew) state.view.t = null; render(); });
       else if (a === "tf-save") on(saveTf);
+      else if (a === "t-announce") on(async () => { try { await db.announceTournament(id); db.kick(); toast(t("announce_sent")); } catch (e) { toast(/no group/.test(String(e.message)) ? t("no_group_hint") : t("error", { msg: e.message })); } });
+      else if (a === "grp-connect" || a === "grp-off") on(async () => { el.disabled = true; try { const r = await db.connectGroup(a === "grp-off" ? "disconnect" : "connect");
+          if (a === "grp-off") { state.group = null; toast(t("saved")); } else if (r.ok) { state.group = r.title || "✓"; toast(t("grp_ok")); } else { state.view.grpErr = r.reason || "x"; if (r.bot) state.view.grpBot = r.bot; }
+        } catch (e) { err(e); } render(); });
       else if (a === "tf-delete") on(async () => { const f = state._tf; if (!(await ask(t("delete_confirm", { name: f.name })))) return; try { await db.deleteTournament(f.id); state._tf = null; state.view.editT = null; state.view.t = null; await reload(); } catch (e) { err(e); } });
       else if (a === "reg") on(async () => { try { const r = await db.register(id); await reload(); toast(regToast(r)); } catch (e) { toast(regErrMsg(String(e.message || ""))); } });
       else if (a === "reg-team") on(async () => { try { const r = await db.register(id, +el.dataset.team); await reload(); toast(regToast(r)); } catch (e) { toast(regErrMsg(String(e.message || ""))); } });
@@ -1562,8 +1579,10 @@ setLang(detectLang(BOOT.tgLang));
   document.addEventListener("focusin", e => { if (!isField(e.target)) return; document.body.classList.add("kb"); clearTimeout(kbTimer); kbTimer = setTimeout(() => scrollField(e.target), 320); });
   document.addEventListener("focusout", () => setTimeout(() => { if (isField(document.activeElement)) return; document.body.classList.remove("kb"); if (pendingLive) liveReload(); }, 150));
   if (window.visualViewport) window.visualViewport.addEventListener("resize", () => { clearTimeout(kbTimer); kbTimer = setTimeout(() => scrollField(document.activeElement), 120); });
-  // ссылка из бота: ?g=<id> — сразу открыть игру
-  try { const gq = new URLSearchParams(location.search).get("g"); const gt = gq && byId(state.tournaments, gq);
+  // группа для анонсов (название — для переключателя «анонс у групу»)
+  state.group = null; db.leagueGroup().then(v => { if (v !== state.group) { state.group = v || null; if (!isField(document.activeElement)) render(); } });
+  // ссылка из бота: ?g=<id> (личка, кнопка web_app) или startapp=g_<id> (кнопка в группе) — сразу открыть игру
+  try { const sp = tgApp && tgApp.initDataUnsafe && tgApp.initDataUnsafe.start_param, gq = new URLSearchParams(location.search).get("g") || (sp && /^g_/.test(sp) ? sp.slice(2) : null); const gt = gq && byId(state.tournaments, gq);
     if (gt && isGameT(gt)) { state.tab = "games"; if (gt.s.kind === "ftour") state.view.t = gt.id; else state.view.g = gt.id; } } catch (e) {}
   render();
 })();

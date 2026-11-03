@@ -141,6 +141,12 @@ export function createDb(cfg) {
   async function gameDispute(tid, reason) { return rpc("game_dispute", { p_tournament: tid, p_reason: reason }); }
   async function gameResolve(tid, action) { return rpc("game_resolve", { p_tournament: tid, p_action: action }); }
   async function gameCancel(tid) { return rpc("game_cancel", { p_tournament: tid }); }
+  // ---------- группа сообщества (анонсы) ----------
+  async function leagueGroup() { try { return await rpc("league_group", {}); } catch (e) { return null; } }
+  async function announceTournament(tid) { return rpc("announce_tournament", { p_tournament: tid }); }
+  async function connectGroup(action) { await ensureSession(); const { data, error } = await sb.functions.invoke("games-notify", { body: { action: action || "connect", league: L } }); if (error) throw error; return data || {}; }
+  // «подтолкнуть» рассылку бота сразу после действия (иначе — в течение 5 минут по расписанию); ошибки не важны
+  function kick() { try { sb.functions.invoke("games-notify", { body: {} }).catch(() => {}); } catch (e) {} }
 
   // ---------- живые обновления ----------
   function subscribe(onChange) {
@@ -151,6 +157,6 @@ export function createDb(cfg) {
 
   return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinOpen, loadAll,
     createMyPlayer, updateMyCard, adjustMyLevel, reviewLevel, submitQuiz, register, unregister, reviewRegistration, resetPlayer, adminMembers, promoteReserve, setDisplayName,
-    createGame, gameTeams, gameScore, gameDispute, gameResolve, gameCancel,
+    createGame, gameTeams, gameScore, gameDispute, gameResolve, gameCancel, leagueGroup, announceTournament, connectGroup, kick,
     saveTournament, deleteTournament, saveGames, saveScore, deleteGames, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, saveLeagueSettings, trackClick, partnerClicks, listMembers, setMemberRole, profileNames, subscribe };
 }

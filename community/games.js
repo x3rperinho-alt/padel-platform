@@ -28,9 +28,9 @@ const S = {
     g_organizer: "Організатор", g_players: "Гравці", g_reserve: "Резерв", g_no_open: "Поки немає відкритих ігор. Створи свою — інші побачать її тут і в боті.",
     g_no_mine: "Ти ще не записаний на жодну гру.", g_upcoming: "Найближчі", g_need_score: "Внеси рахунок", g_history: "Зіграні", g_stats_played: "ігор", g_stats_wins: "перемог", g_reliab: "надійність",
     g_reliab_hint: "Надійність — скільки ігор ти зіграв з тих, на які записувався. Пізня відмова (менше ніж за 3 год) її знижує.",
-    g_late_n: "пізніх відмов: {n}", g_elo_d: "Ело", g_bot_note: "Бот надішле анонс у групу і нагадає учасникам за 2 години.", g_back: "Ігри",
+    g_late_n: "пізніх відмов: {n}", g_elo_d: "Ело", g_bot_note: "Бот нагадає учасникам за 2 години до гри.", g_back: "Ігри",
     g_need_card: "Щоб записуватися, заповни картку гравця в профілі.", g_need_level: "Записатися можна, коли рівень підтверджено.", g_not_fit: "Не твій рівень",
-    g_players_n: "гравців", g_today: "Сьогодні", g_tomorrow: "Завтра", g_court_free: "корт ще не заброньовано", g_booked_short: "корт є", g_your_lv: "твій рівень", g_from: "З", g_to: "До", g_past_time: "Цей час уже минув", g_err_many: "У тебе вже 5 запланованих ігор — спершу зіграй або скасуй одну", g_err_level: "Твій рівень не підходить під цей діапазон", g_err_disputed: "Рахунок уже оскаржено — чекаємо адміна", g_err_late: "Оскаржити можна лише протягом 24 год", g_err_early: "Рахунок можна внести за годину до початку гри", g_err_closed: "Гра вже закрита", g_err_rights: "Це може зробити лише учасник гри або організатор", g_err_teams: "Склад гри змінився — онови сторінку", g_score_draw: "1:1 за сетами — додай вирішальний сет (або тай-брейк)", g_st_expired: "не зібрались", g_time_lbl: "Час", g_price_lbl: "Ціна з людини",
+    g_players_n: "гравців", g_today: "Сьогодні", g_tomorrow: "Завтра", g_court_free: "корт ще не заброньовано", g_booked_short: "корт є", g_your_lv: "твій рівень", g_announce: "📣 Анонс у групу", g_announce_hint: "Бот опублікує гру в «{g}» і сам оновлюватиме: хто записався, зібрано, рахунок", g_no_group: "Група для анонсів ще не підключена — це робить адмін (Адмін → Група).", g_from: "З", g_to: "До", g_past_time: "Цей час уже минув", g_err_many: "У тебе вже 5 запланованих ігор — спершу зіграй або скасуй одну", g_err_level: "Твій рівень не підходить під цей діапазон", g_err_disputed: "Рахунок уже оскаржено — чекаємо адміна", g_err_late: "Оскаржити можна лише протягом 24 год", g_err_early: "Рахунок можна внести за годину до початку гри", g_err_closed: "Гра вже закрита", g_err_rights: "Це може зробити лише учасник гри або організатор", g_err_teams: "Склад гри змінився — онови сторінку", g_score_draw: "1:1 за сетами — додай вирішальний сет (або тай-брейк)", g_st_expired: "не зібрались", g_time_lbl: "Час", g_price_lbl: "Ціна з людини",
   },
   ru: {
     g_tab: "Игры", g_create: "+ Создать", g_open: "Открытые", g_mine: "Мои", g_all: "Все", g_my_level: "Мой уровень",
@@ -56,9 +56,9 @@ const S = {
     g_organizer: "Организатор", g_players: "Игроки", g_reserve: "Резерв", g_no_open: "Пока нет открытых игр. Создай свою — другие увидят её здесь и в боте.",
     g_no_mine: "Ты ещё не записан ни на одну игру.", g_upcoming: "Ближайшие", g_need_score: "Внеси счёт", g_history: "Сыгранные", g_stats_played: "игр", g_stats_wins: "побед", g_reliab: "надёжность",
     g_reliab_hint: "Надёжность — сколько игр ты сыграл из тех, на которые записывался. Поздний отказ (меньше чем за 3 ч) её снижает.",
-    g_late_n: "поздних отказов: {n}", g_elo_d: "Эло", g_bot_note: "Бот отправит анонс в группу и напомнит участникам за 2 часа.", g_back: "Игры",
+    g_late_n: "поздних отказов: {n}", g_elo_d: "Эло", g_bot_note: "Бот напомнит участникам за 2 часа до игры.", g_back: "Игры",
     g_need_card: "Чтобы записываться, заполни карточку игрока в профиле.", g_need_level: "Записаться можно, когда уровень подтверждён.", g_not_fit: "Не твой уровень",
-    g_players_n: "игроков", g_today: "Сегодня", g_tomorrow: "Завтра", g_court_free: "корт ещё не забронирован", g_booked_short: "корт есть", g_your_lv: "твой уровень", g_from: "С", g_to: "До", g_past_time: "Это время уже прошло", g_err_many: "У тебя уже 5 запланированных игр — сначала сыграй или отмени одну", g_err_level: "Твой уровень не подходит под этот диапазон", g_err_disputed: "Счёт уже оспорен — ждём админа", g_err_late: "Оспорить можно только в течение 24 ч", g_err_early: "Счёт можно внести за час до начала игры", g_err_closed: "Игра уже закрыта", g_err_rights: "Это может сделать только участник игры или организатор", g_err_teams: "Состав игры изменился — обнови страницу", g_score_draw: "1:1 по сетам — добавь решающий сет (или тай-брейк)", g_st_expired: "не собрались", g_time_lbl: "Время", g_price_lbl: "Цена с человека",
+    g_players_n: "игроков", g_today: "Сегодня", g_tomorrow: "Завтра", g_court_free: "корт ещё не забронирован", g_booked_short: "корт есть", g_your_lv: "твой уровень", g_announce: "📣 Анонс в группу", g_announce_hint: "Бот опубликует игру в «{g}» и сам будет обновлять: кто записался, собрано, счёт", g_no_group: "Группа для анонсов ещё не подключена — это делает админ (Админ → Группа).", g_from: "С", g_to: "До", g_past_time: "Это время уже прошло", g_err_many: "У тебя уже 5 запланированных игр — сначала сыграй или отмени одну", g_err_level: "Твой уровень не подходит под этот диапазон", g_err_disputed: "Счёт уже оспорен — ждём админа", g_err_late: "Оспорить можно только в течение 24 ч", g_err_early: "Счёт можно внести за час до начала игры", g_err_closed: "Игра уже закрыта", g_err_rights: "Это может сделать только участник игры или организатор", g_err_teams: "Состав игры изменился — обнови страницу", g_score_draw: "1:1 по сетам — добавь решающий сет (или тай-брейк)", g_st_expired: "не собрались", g_time_lbl: "Время", g_price_lbl: "Цена с человека",
   },
   en: {
     g_tab: "Games", g_create: "+ Create", g_open: "Open", g_mine: "Mine", g_all: "All", g_my_level: "My level",
@@ -84,9 +84,9 @@ const S = {
     g_organizer: "Organizer", g_players: "Players", g_reserve: "Reserve", g_no_open: "No open games yet. Create one — others will see it here and in the bot.",
     g_no_mine: "You haven't joined any games yet.", g_upcoming: "Upcoming", g_need_score: "Enter the score", g_history: "Played", g_stats_played: "games", g_stats_wins: "wins", g_reliab: "reliability",
     g_reliab_hint: "Reliability — how many of the games you joined you actually played. A late cancellation (under 3 h) lowers it.",
-    g_late_n: "late cancellations: {n}", g_elo_d: "Elo", g_bot_note: "The bot will post it to the group and remind players 2 hours before.", g_back: "Games",
+    g_late_n: "late cancellations: {n}", g_elo_d: "Elo", g_bot_note: "The bot will remind players 2 hours before the game.", g_back: "Games",
     g_need_card: "Fill in your player card in Profile to join games.", g_need_level: "You can join once your level is confirmed.", g_not_fit: "Not your level",
-    g_players_n: "players", g_today: "Today", g_tomorrow: "Tomorrow", g_court_free: "court not booked yet", g_booked_short: "court booked", g_your_lv: "your level", g_from: "From", g_to: "To", g_past_time: "That time has passed", g_err_many: "You already have 5 planned games — play or cancel one first", g_err_level: "Your level doesn't fit this range", g_err_disputed: "The score is already disputed — waiting for an admin", g_err_late: "You can only dispute within 24 h", g_err_early: "You can enter the score from 1 hour before the start", g_err_closed: "The game is closed", g_err_rights: "Only a player of this game or the organizer can do this", g_err_teams: "The line-up changed — refresh the page", g_score_draw: "1:1 in sets — add the deciding set (or tie-break)", g_st_expired: "didn't fill", g_time_lbl: "Time", g_price_lbl: "Per person",
+    g_players_n: "players", g_today: "Today", g_tomorrow: "Tomorrow", g_court_free: "court not booked yet", g_booked_short: "court booked", g_your_lv: "your level", g_announce: "📣 Announce in group", g_announce_hint: "The bot will post the game to “{g}” and keep it updated: who joined, full, score", g_no_group: "No announcement group is connected yet — an admin does this (Admin → Group).", g_from: "From", g_to: "To", g_past_time: "That time has passed", g_err_many: "You already have 5 planned games — play or cancel one first", g_err_level: "Your level doesn't fit this range", g_err_disputed: "The score is already disputed — waiting for an admin", g_err_late: "You can only dispute within 24 h", g_err_early: "You can enter the score from 1 hour before the start", g_err_closed: "The game is closed", g_err_rights: "Only a player of this game or the organizer can do this", g_err_teams: "The line-up changed — refresh the page", g_score_draw: "1:1 in sets — add the deciding set (or tie-break)", g_st_expired: "didn't fill", g_time_lbl: "Time", g_price_lbl: "Per person",
   },
 };
 
@@ -256,7 +256,7 @@ export function createGames(X) {
     const me = myPlayer(), lv = me ? lvNow(me) : null, s = { level_min: null, level_max: null };
     if (kind === "match" && lv != null) { const G = LV_G.find(([, lo, hi]) => lv >= lo && lv <= hi + 0.0009) || LV_G[0]; setLvLetters(s, G[0]); }
     const h = new Date().getHours() + 2;
-    const r = { kind, date: h >= 22 ? addDays(today(), 1) : today(), time: h >= 22 ? "19:00" : String(Math.min(h, 21)).padStart(2, "0") + ":00", place: "", placeOther: false, court: "", booked: false, s, partner: "", price: "", note: "" };
+    const r = { kind, date: h >= 22 ? addDays(today(), 1) : today(), time: h >= 22 ? "19:00" : String(Math.min(h, 21)).padStart(2, "0") + ":00", place: "", placeOther: false, court: "", booked: false, s, partner: "", price: "", note: "", announce: true };
     r.time_end = shiftEnd(null, r.time, null, 90); return r;
   }
   function readForm() {
@@ -265,6 +265,7 @@ export function createGames(X) {
     if (q("gfPlace")) f.place = q("gfPlace").value.trim();
     if (q("gfCourt")) f.court = q("gfCourt").value.trim();
     if (q("gfBooked")) f.booked = q("gfBooked").checked;
+    if (q("gfAnnounce")) f.announce = q("gfAnnounce").checked;
     if (q("gfPartner")) f.partner = q("gfPartner").value;
     if (q("gfPrice")) f.price = q("gfPrice").value;
     if (q("gfNote")) f.note = q("gfNote").value;
@@ -294,6 +295,8 @@ export function createGames(X) {
         <label class="field"><span class="lbl">${g("g_price")}</span><input type="number" id="gfPrice" min="0" step="50" inputmode="numeric" value="${esc(f.price)}" placeholder="—"></label>
         <p class="tiny" style="margin:-6px 0 12px;">${g("g_price_hint")}</p>
         <label class="field"><span class="lbl">${g("g_note")}</span><textarea id="gfNote" rows="2" maxlength="300" placeholder="${g("g_note_ph")}">${esc(f.note)}</textarea></label>
+        ${state.group ? `<label class="row tf-toggle g-ann"><span>${g("g_announce")}<br><span class="tiny">${g("g_announce_hint", { g: esc(state.group) })}</span></span><input type="checkbox" id="gfAnnounce" ${f.announce !== false ? "checked" : ""}></label>`
+          : `<p class="tiny" style="margin:0 0 12px;">📣 ${g("g_no_group")}</p>`}
         <button class="btn primary block" data-act="gf-save">${g("g_publish")}</button>
         <p class="tiny" style="margin:10px 0 0;text-align:center;">🤖 ${g("g_bot_note")}</p>
       </div>`;
@@ -309,8 +312,8 @@ export function createGames(X) {
     const id = uid();
     const row = { id, seq: Date.now() % 1e9, name: g("k_" + f.kind + "_t") + " · " + f.place, date: f.date, status: "scheduled", format: "match", courts: 1, teams: [],
       s: { kind: f.kind, created_by: me.id, time: f.time, time_end: f.time_end || null, dur: f.time_end ? durMin(f.time, f.time_end) : null, place: f.place, court: f.court || null, booked: !!f.booked,
-        level_min: f.s.level_min, level_max: f.s.level_max, price: f.price === "" ? null : +f.price, note: f.note.trim() || null, pair: f.partner ? [me.id, f.partner] : null, slots: 4, reg_open: true } };
-    try { await db.createGame(row, f.partner || null); state._gf = null; state.view.gNew = null; state.view.g = id; await reload(); toast(g("g_created")); window.scrollTo(0, 0); } catch (e) { gErr(e); }
+        level_min: f.s.level_min, level_max: f.s.level_max, price: f.price === "" ? null : +f.price, note: f.note.trim() || null, pair: f.partner ? [me.id, f.partner] : null, slots: 4, reg_open: true, announce: !!state.group && f.announce !== false } };
+    try { await db.createGame(row, f.partner || null); db.kick && db.kick(); state._gf = null; state.view.gNew = null; state.view.g = id; await reload(); toast(g("g_created")); window.scrollTo(0, 0); } catch (e) { gErr(e); }
   }
 
   // ---------- карточка матча ----------
@@ -419,7 +422,7 @@ export function createGames(X) {
     const won = num.reduce((w, [a, b]) => [w[0] + (a > b), w[1] + (b > a)], [0, 0]);
     if (won[0] === won[1]) { toast(g("g_score_draw")); return; } // 1:1 по сетам — нужен решающий сет
     const tm = d.tm || teamsOf(tt, computeElo()); if (!tm) return;
-    try { await db.gameScore(tid, tm, num); state._gs = null; state.view.gs = null; await reload(); toast(kindOf(tt) === "match" ? g("g_score_saved") : g("g_score_saved_f")); } catch (e) { gErr(e); }
+    try { await db.gameScore(tid, tm, num); db.kick && db.kick(); state._gs = null; state.view.gs = null; await reload(); toast(kindOf(tt) === "match" ? g("g_score_saved") : g("g_score_saved_f")); } catch (e) { gErr(e); }
   }
 
   // ошибки базы — человеческими словами
@@ -448,18 +451,18 @@ export function createGames(X) {
       case "gf-club": on(() => { const f = readForm(); if (val === "__other") { f.placeOther = true; if (CLUBS.includes(f.place)) f.place = ""; } else { f.placeOther = false; f.place = val; } render(); }); break;
       case "gf-lv": on(() => { setLvLetters(readForm().s, val); render(); }); break;
       case "gf-save": go(saveForm); break;
-      case "g-join": on(async () => { let r; try { r = await db.register(id); } catch (e) { toast(regErrMsg(String((e && e.message) || ""))); return; } await reload(); toast(/reserve/.test(r || "") ? t("registered_reserve") : g("g_joined")); }); break;
-      case "g-leave": go(async () => { const late = tt && hoursTo(tt) < 3 && hoursTo(tt) > 0 && mainIds(tt).includes((myPlayer() || {}).id); if (late && !(await ask(g("g_late_q")))) return; await db.unregister(id); await reload(); toast(g("g_left")); }); break;
-      case "g-cancel": go(async () => { if (!(await ask(g("g_cancel_q")))) return; await db.gameCancel(id); state.view.g = null; await reload(); toast(g("g_cancelled")); }); break;
-      case "g-split": go(async () => { const sp = allowedSplits(tt)[+val]; if (!sp) return; await db.gameTeams(id, sp); await reload(); toast(g("g_pairs_saved")); }); break;
+      case "g-join": on(async () => { let r; try { r = await db.register(id); db.kick && db.kick(); } catch (e) { toast(regErrMsg(String((e && e.message) || ""))); return; } await reload(); toast(/reserve/.test(r || "") ? t("registered_reserve") : g("g_joined")); }); break;
+      case "g-leave": go(async () => { const late = tt && hoursTo(tt) < 3 && hoursTo(tt) > 0 && mainIds(tt).includes((myPlayer() || {}).id); if (late && !(await ask(g("g_late_q")))) return; await db.unregister(id); db.kick && db.kick(); await reload(); toast(g("g_left")); }); break;
+      case "g-cancel": go(async () => { if (!(await ask(g("g_cancel_q")))) return; await db.gameCancel(id); db.kick && db.kick(); state.view.g = null; await reload(); toast(g("g_cancelled")); }); break;
+      case "g-split": go(async () => { const sp = allowedSplits(tt)[+val]; if (!sp) return; await db.gameTeams(id, sp); db.kick && db.kick(); await reload(); toast(g("g_pairs_saved")); }); break;
       case "g-score": on(() => { state.view.gs = id; state._gs = null; render(); const x = document.getElementById("gsA0"); if (x) x.focus(); }); break;
       case "g-score-cancel": on(() => { state.view.gs = null; state._gs = null; render(); }); break;
       case "g-set-add": on(() => { const d = readScore(); if (d.sets.length < 3) d.sets.push(["", ""]); render(); }); break;
       case "g-score-save": go(() => saveScore(id)); break;
       case "g-disp": on(() => { state.view.gd = id; render(); const x = document.getElementById("gdReason"); if (x) x.focus(); }); break;
       case "g-disp-cancel": on(() => { state.view.gd = null; render(); }); break;
-      case "g-disp-send": go(async () => { const r = (document.getElementById("gdReason") || {}).value || state._gdText || ""; if (r.trim().length < 3) { toast(g("g_dispute_ph")); return; } await db.gameDispute(id, r.trim()); state.view.gd = null; state._gdText = ""; await reload(); toast(g("g_disputed_sent")); }); break;
-      case "g-resolve": go(async () => { await db.gameResolve(id, val); await reload(); toast(g("g_resolved")); }); break;
+      case "g-disp-send": go(async () => { const r = (document.getElementById("gdReason") || {}).value || state._gdText || ""; if (r.trim().length < 3) { toast(g("g_dispute_ph")); return; } await db.gameDispute(id, r.trim()); db.kick && db.kick(); state.view.gd = null; state._gdText = ""; await reload(); toast(g("g_disputed_sent")); }); break;
+      case "g-resolve": go(async () => { await db.gameResolve(id, val); db.kick && db.kick(); await reload(); toast(g("g_resolved")); }); break;
       default: return false;
     }
     return true;
