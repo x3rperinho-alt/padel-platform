@@ -1528,8 +1528,13 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "rf-run") on(() => runRaffle(id, el));
       else if (a === "rf-del") on(async () => { const tt = byId(state.tournaments, id); if (!tt || !confirm(t("rf_del_q"))) return; const raffles = (tt.s.raffles || []).filter((_, i) => i !== +el.dataset.val);
         try { await db.saveTournament(tRow(tt, { s: { ...tt.s, raffles } })); tt.s = { ...tt.s, raffles }; render(); } catch (e) { err(e); } });
-      else if (a === "open-link") on(() => { const u = el.dataset.url; if (!/^https?:\/\//i.test(u || "")) return; // только обычные ссылки (не javascript: и т.п.) if (el.dataset.pt) db.trackClick(el.dataset.pt, el.dataset.ptw, el.dataset.ptt).catch(() => {}); const tg = window.Telegram && window.Telegram.WebApp;
-        if (tg && tg.initData && /^https:\/\/t\.me\//.test(u) && tg.openTelegramLink) tg.openTelegramLink(u); else if (tg && tg.initData && tg.openLink) tg.openLink(u); else window.open(u, "_blank", "noopener"); });
+      else if (a === "open-link") on(() => { const u = el.dataset.url;
+        if (!/^https?:\/\//i.test(u || "")) return; // только обычные ссылки (не javascript: и т.п.)
+        if (el.dataset.pt) db.trackClick(el.dataset.pt, el.dataset.ptw, el.dataset.ptt).catch(() => {});
+        const tg = window.Telegram && window.Telegram.WebApp;
+        try { if (tg && tg.initData && /^https:\/\/t\.me\//i.test(u) && tg.openTelegramLink) { tg.openTelegramLink(u); return; }
+          if (tg && tg.initData && tg.openLink) { tg.openLink(u); return; } } catch (e) {}
+        window.open(u, "_blank", "noopener"); });
       else if (a === "copy-nick") on(async () => { const v = el.dataset.val; try { await navigator.clipboard.writeText(v); toast(t("nick_copied", { app: t("src_" + el.dataset.app) })); } catch (e) { toast(v); } });
       else if (a === "logout") on(async () => { await db.signOut(); location.reload(); });
       else if (a === "rv-approve") on(async () => { const inp = document.getElementById("rv_" + id); const lv = inp && inp.value !== "" ? +inp.value : null; try { await db.reviewLevel(id, "approve", lv); await reload(); toast(t("saved")); } catch (e) { err(e); } });
