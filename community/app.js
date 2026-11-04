@@ -1197,7 +1197,7 @@ setLang(detectLang(BOOT.tgLang));
     return `${head}${mine ? levelBannerHtml() : ""}${bdCard}
       <div class="card hero">
         <div class="hero-top">
-          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}${p.label ? ` <span class="nm-lbl">(${esc(p.label)})</span>` : ""}</div><div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${p.levelStatus === "ok" ? `${levelBadge(E.ratings[pid] / 1000)} ${fmtLv(Math.round(E.ratings[pid]) / 1000)}` : ""}</div>${bdOf(p) ? `<div class="tiny bd-line ${bdToday(bdOf(p)) ? "today" : ""}">🎂 ${bdToday(bdOf(p)) ? t("bd_today") : esc(bdLabel(bdOf(p)))}</div>` : ""}${mine || canEdit() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}${mine && needBd() ? `<i class="need-dot"></i>` : ""}</button>` : ""}</div></div>
+          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}</div>${p.label ? `<div class="hero-lbl">(${esc(p.label)})</div>` : ""}<div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${p.levelStatus === "ok" ? `${levelBadge(E.ratings[pid] / 1000)} ${fmtLv(Math.round(E.ratings[pid]) / 1000)}` : ""}</div>${bdOf(p) ? `<div class="tiny bd-line ${bdToday(bdOf(p)) ? "today" : ""}">🎂 ${bdToday(bdOf(p)) ? t("bd_today") : esc(bdLabel(bdOf(p)))}</div>` : ""}${mine || canEdit() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}${mine && needBd() ? `<i class="need-dot"></i>` : ""}</button>` : ""}</div></div>
           ${p.levelStatus === "ok" ? `<div class="hero-elo"><span class="${E.unconfirmed[pid]?'unc':''}">${Math.round(E.ratings[pid])}</span><small>${E.unconfirmed[pid] ? t("unconfirmed") : t("confirmed")}</small></div>` : `<div class="hero-elo"><span class="pend">⏳</span><small>${p.levelStatus === "pending" ? t("pending_short") : t("need_quiz_short")}</small></div>`}
         </div>
         ${p.levelStatus === "ok" && E.unconfirmed[pid] ? `<p class="tiny" style="margin:8px 0 0;">${t("unconfirmed_hint", { n: CONFIRM_N - E.tcount[pid] })}</p>` : ""}
@@ -1406,8 +1406,20 @@ setLang(detectLang(BOOT.tgLang));
     document.querySelectorAll("nav.tabs button").forEach(b => { b.classList.toggle("active", b.dataset.tab === state.tab); if (b.dataset.tab === "admin") b.hidden = !canEdit(); });
     const labels = { games: G.label(), tournaments: t("tournaments"), season: t("season"), rating: t("rating"), admin: t("admin"), profile: t("profile") };
     document.querySelectorAll("nav.tabs button .lbl").forEach(l => l.textContent = labels[l.parentElement.dataset.tab]);
-    updateNavAvatar(); updateNavBadges(); bind(v);
+    updateNavAvatar(); updateNavBadges(); bind(v); fitHero(v);
   }
+  // длинное имя в профиле: уменьшаем шрифт, пока самое длинное слово не влезет, — вместо переноса посреди слова и наезда на Эло
+  function fitHero(root) {
+    (root || document).querySelectorAll(".hero-name, .hero-lbl").forEach(el => {
+      el.style.fontSize = ""; el.classList.remove("hero-brk");
+      const min = el.classList.contains("hero-lbl") ? 11 : 14;
+      let fs = parseFloat(getComputedStyle(el).fontSize) || 22;
+      while (el.scrollWidth > el.clientWidth + 1 && fs > min) { fs -= 1; el.style.fontSize = fs + "px"; }
+      if (el.scrollWidth > el.clientWidth + 1) el.classList.add("hero-brk"); // совсем длинное слово — тогда уж перенос
+    });
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fitHero());
+  window.addEventListener("resize", () => fitHero());
   function updateNavBadges() {
     const pb = document.querySelector('nav.tabs button[data-tab="profile"]'); if (pb) { let dot = pb.querySelector(".need-dot"); if (needBd()) { if (!dot) { dot = document.createElement("i"); dot.className = "need-dot nav"; pb.appendChild(dot); } } else if (dot) dot.remove(); }
     const lv = canEdit() ? state.players.filter(p => p.levelStatus === "pending").length : 0;
