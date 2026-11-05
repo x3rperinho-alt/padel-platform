@@ -37,6 +37,8 @@ setLang(detectLang(BOOT.tgLang));
   const isAdmin = () => U && (U.role === "owner" || U.role === "admin");
   const canEdit = () => isAdmin() || (U && U.role === "editor");
   const myPlayer = () => state.players.find(p => p.userId === U.id) || null;
+  const medalCls = n => n === 1 ? "gold" : n === 2 ? "silver" : n === 3 ? "bronze" : ""; // кружки мест: золото, серебро, бронза
+  const meCls = id => { const m = myPlayer(); return m && m.id === id ? "me" : ""; }; // своя строка в списках — подсвечена
   // дружеский турнир из вкладки «Игры» ведёт тот, кто его создал (плюс админы)
   const canEditT = tt => canEdit() || (!!tt && !!tt.s && tt.s.kind === "ftour" && tt.status !== "played" && !!myPlayer() && tt.s.created_by === myPlayer().id); // после завершения — только админ (как в базе)
   const isGameT = tt => !!(tt && tt.s && ["match", "friendly", "ftour"].includes(tt.s.kind));
@@ -426,7 +428,7 @@ setLang(detectLang(BOOT.tgLang));
         <div class="mrow"><div class="pair ${wa ? "winner" : ""}">${pl(g.teamA[0])}<small>${g.teamA[1] ? pl(g.teamA[1]) : ""}</small></div>
           <div class="score">${sbox(g.scoreA)}<span class="colon">:</span>${sbox(g.scoreB)}</div>
           <div class="pair right ${wb ? "winner" : ""}">${pl(g.teamB[0])}<small>${g.teamB[1] ? pl(g.teamB[1]) : ""}</small></div></div></div>`; };
-    const medal = i => i === 0 ? "gold" : "";
+    const medal = i => medalCls(i + 1);
     return `
       <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${backLbl()}</button>${canEditT(tt) ? `<span style="display:flex;gap:6px;"><button class="btn sm" data-act="fix-open" data-id="${tid}">${t("fix_scores")}</button><button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button></span>` : ""}</div>
       <h2 class="t-title">${esc(tt.name)}</h2>
@@ -434,7 +436,7 @@ setLang(detectLang(BOOT.tgLang));
       ${isTeamF(tt.format) && teamsOf(tt).length ? `<div class="card"><h3>${t("standings")}</h3>${standingsHtml(tt, tGames)}</div>` : ""}
       <div class="card"><h3>${isTeamF(tt.format) && teamsOf(tt).length ? t("players") : t("standings")}</h3>
         <table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("players")}</th><th>${t("pts")}</th><th>W-L</th><th>${t("diff")}</th><th>Elo</th></tr>
-        ${rows.map((r, i) => { const d = eloD(r.id); return `<tr><td><span class="pos-badge ${medal(i)}">${i + 1}</span></td>
+        ${rows.map((r, i) => { const d = eloD(r.id); return `<tr class="${meCls(r.id)}"><td><span class="pos-badge ${medal(i)}">${i + 1}</span></td>
           <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span>${lblHtml(r.id)}</span></td>
           <td class="lb-elo">${r.pts}</td><td>${r.w}-${r.l}${r.d ? "-" + r.d : ""}</td><td>${r.pts - r.pa >= 0 ? "+" : ""}${r.pts - r.pa}</td>
           <td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${d >= 0 ? "+" : ""}${Math.round(d)}</td></tr>`; }).join("")}
@@ -710,12 +712,12 @@ setLang(detectLang(BOOT.tgLang));
     if (isTeamF(tt.format) && teams.length) {
       const rows = tt.format === "playoff" ? playoffPlaces(teams, sg) : teamTable(teams, sg);
       return `<table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("team_col")}</th>${tt.format === "playoff" ? "" : `<th>${t("pts")}</th>`}<th>W-L</th><th>${t("diff")}</th></tr>
-        ${rows.map((r, i) => `<tr><td><span class="pos-badge ${i === 0 && (tt.format !== "playoff" || r.place === 1) ? "gold" : ""}">${tt.format === "playoff" ? (r.place || "–") : i + 1}</span></td><td class="lb-name team-cell">${pairName(r.players)}</td>${tt.format === "playoff" ? "" : `<td class="lb-elo">${r.pts}</td>`}<td>${r.w}-${r.l}${r.d ? "-" + r.d : ""}</td><td>${diff(r)}</td></tr>`).join("")}</table>`;
+        ${rows.map((r, i) => `<tr><td><span class="pos-badge ${medalCls(tt.format === "playoff" ? r.place : i + 1)}">${tt.format === "playoff" ? (r.place || "–") : i + 1}</span></td><td class="lb-name team-cell">${pairName(r.players)}</td>${tt.format === "playoff" ? "" : `<td class="lb-elo">${r.pts}</td>`}<td>${r.w}-${r.l}${r.d ? "-" + r.d : ""}</td><td>${diff(r)}</td></tr>`).join("")}</table>`;
     }
     const ids = tt.participantIds && tt.participantIds.length ? tt.participantIds : [...new Set(games.flatMap(g => g.teamA.concat(g.teamB)))];
     const eloD = id => (E.seq[id] || []).filter(x => x.g.tournamentId === tid).reduce((a, x) => a + x.d, 0);
     return `<table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("players")}</th><th>${t("pts")}</th><th>W-L</th><th>${t("diff")}</th><th>Elo</th></tr>
-      ${playerTable(ids, sg).map((r, i) => { const d = eloD(r.id); return `<tr><td><span class="pos-badge ${i === 0 && r.pts ? "gold" : ""}">${i + 1}</span></td>
+      ${playerTable(ids, sg).map((r, i) => { const d = eloD(r.id); return `<tr class="${meCls(r.id)}"><td><span class="pos-badge ${r.pts ? medalCls(i + 1) : ""}">${i + 1}</span></td>
         <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span>${lblHtml(r.id)}</span></td>
         <td class="lb-elo">${r.pts}</td><td>${r.w}-${r.l}${r.d ? "-" + r.d : ""}</td><td>${diff(r)}</td>
         <td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${r.g ? (d >= 0 ? "+" : "") + Math.round(d) : "—"}</td></tr>`; }).join("")}</table>`;
@@ -915,7 +917,7 @@ setLang(detectLang(BOOT.tgLang));
       ${rows.map((r, k) => { const open = state.view.sOpen === r.id, isMe = me && r.id === me.id;
         return `${k === F && rows.length > F ? `<tr class="s-cut"><td colspan="4"><span>${t("s_final_zone", { n: F })}</span></td></tr>` : ""}
         <tr class="s-row ${isMe ? "me" : ""} ${r.z ? "z" : ""}" data-act="s-open" data-id="${r.id}">
-          <td><span class="pos-badge ${r.pos === 1 ? "gold" : ""}">${r.pos}</span></td>
+          <td><span class="pos-badge ${medalCls(r.pos)}">${r.pos}</span></td>
           <td class="lb-name"><span class="lb-p">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span>${lblHtml(r.id)}</span></td>
           <td>${r.n}</td><td class="lb-elo">${r.pts}<span class="s-chev ${open ? "open" : ""}">›</span></td></tr>
         ${open ? `<tr class="s-open-row"><td colspan="4">${detail(r)}<div class="s-det-foot"><span class="tiny">${t("s_total")}</span><b>${ptsWord(r.pts)}</b></div>
@@ -1046,8 +1048,8 @@ setLang(detectLang(BOOT.tgLang));
         <button type="button" class="fold-h" style="margin:2px 0 10px;font-size:13px;" data-act="elo-how"><span>ⓘ ${t("elo_how")}</span><span class="chev ${state.view.eloHow ? "open" : ""}">›</span></button>
         ${state.view.eloHow ? `<div class="elo-how">${t("elo_how_body").split("\n").map(x => `<p>${esc(x)}</p>`).join("")}</div>` : ""}
         <table class="tbl"><tr><th></th><th>${t("players")}</th><th></th><th>Elo</th><th>${t("games")}</th><th>W-L</th></tr>
-        ${rows.map((p, i) => { const s = E.stats[p.id]; return `<tr>
-          <td><span class="pos-badge ${i===0?'gold':''}">${i+1}</span></td>
+        ${rows.map((p, i) => { const s = E.stats[p.id]; return `<tr class="${meCls(p.id)}">
+          <td><span class="pos-badge ${medalCls(i + 1)}">${i+1}</span></td>
           <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 30)}<span class="plink">${esc(p.name)}</span>${lblHtml(p.id)}</span></td>
           <td>${levelBadge(E.ratings[p.id] / 1000)}</td>
           <td class="lb-elo ${E.unconfirmed[p.id]?'unc':''}">${Math.round(E.ratings[p.id])}</td>

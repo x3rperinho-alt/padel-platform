@@ -464,3 +464,13 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
 .hero-id .hero-name { word-break: normal; overflow-wrap: normal; hyphens: manual; }
 .hero-lbl { font: 700 15px/1.2 "Manrope", sans-serif; color: var(--ink-3); margin-top: 3px; word-break: normal; overflow-wrap: normal; }
 .hero-name.hero-brk, .hero-lbl.hero-brk { overflow-wrap: anywhere; }
+
+/* места 1–3: золото, серебро, бронза */
+.pos-badge.gold { background: linear-gradient(160deg, #FFE9A3, #F5C542 45%, #C9920E); color: #3A2800; border-color: transparent; box-shadow: 0 0 0 3px rgba(245,197,66,.18), 0 4px 12px -4px rgba(245,197,66,.6); }
+.pos-badge.silver { background: linear-gradient(160deg, #FFFFFF, #D5DAE1 45%, #8E97A3); color: #23282F; border-color: transparent; box-shadow: 0 0 0 3px rgba(213,218,225,.14), 0 4px 12px -4px rgba(213,218,225,.45); }
+.pos-badge.bronze { background: linear-gradient(160deg, #FFD1A6, #D98A4E 45%, #8F4F22); color: #2E1605; border-color: transparent; box-shadow: 0 0 0 3px rgba(217,138,78,.16), 0 4px 12px -4px rgba(217,138,78,.5); }
+.s-row .pos-badge.gold, .s-row .pos-badge.silver, .s-row .pos-badge.bronze { opacity: 1; }
+/* своя строка: ник светится оранжевым */
+.tbl tr.me td { background: rgba(255,122,26,.08); }
+.tbl tr.me td:first-child { box-shadow: inset 3px 0 0 var(--orange, #FF7A1A); }
+.tbl tr.me .plink { color: #FF8A33; font-weight: 700; text-shadow: 0 0 10px rgba(255,122,26,.75), 0 0 22px rgba(255,122,26,.35); opacity: 1 !important; }
