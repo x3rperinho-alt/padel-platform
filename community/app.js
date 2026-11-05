@@ -422,7 +422,7 @@ setLang(detectLang(BOOT.tgLang));
     if (eg && eg.d > 0) facts.push([t("f_elo"), pl(eg.id), "+" + Math.round(eg.d) + " Elo"]);
     const sbox = v => `<span class="sbox">${v}</span>`;
     const match = g => { const wa = g.scoreA > g.scoreB, wb = g.scoreB > g.scoreA; return `<div class="match">
-        <div class="court-lbl">${t("court")} ${g.court || "—"}</div>
+        <div class="court-lbl">${esc(courtLbl(g))}</div>
         <div class="mrow"><div class="pair ${wa ? "winner" : ""}">${pl(g.teamA[0])}<small>${g.teamA[1] ? pl(g.teamA[1]) : ""}</small></div>
           <div class="score">${sbox(g.scoreA)}<span class="colon">:</span>${sbox(g.scoreB)}</div>
           <div class="pair right ${wb ? "winner" : ""}">${pl(g.teamB[0])}<small>${g.teamB[1] ? pl(g.teamB[1]) : ""}</small></div></div></div>`; };
@@ -588,9 +588,19 @@ setLang(detectLang(BOOT.tgLang));
   const teamsOf = tt => (tt.teams || []).map(x => x.players || x).filter(x => Array.isArray(x) && x.length === 2);
   const pairName = tm => `${pl(tm[0])} + ${pl(tm[1])}`;
   const gameId = (tid, r, c) => `${tid}-r${r}-c${c}`;
-  // номера кортов, на которых идёт турнир («2, 3, 5»); пусто — корты 1, 2, 3…
-  const parseCourts = v => [...new Set(String(v || "").split(/[^0-9]+/).filter(Boolean).map(Number).filter(n => n > 0 && n < 100))];
+  // корты турнира: номера («2, 3, 5», «2.3.5», «2 3 5») или названия через запятую («Центральний, Скляний, 3»); пусто — корты 1, 2, 3…
+  const parseCourts = v => {
+    const out = [];
+    String(v || "").split(/[,;\n]+/).map(x => x.trim()).filter(Boolean).forEach(tok => {
+      if (/^[\d\s.]+$/.test(tok)) tok.split(/[^0-9]+/).filter(Boolean).map(Number).filter(n => n > 0 && n < 100).forEach(n => out.push(n));
+      else out.push(tok.replace(/\s+/g, " ").slice(0, 24));
+    });
+    const seen = new Set(); return out.filter(x => { const k = String(x).toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 12);
+  };
   const courtNo = (nums, i) => (nums && nums[i - 1]) || i; // i — порядковый номер матча в раунде (с 1)
+  // в базе games.court — число (по нему сортируем); если среди кортов есть названия — court = порядковый номер, а имя в court_name
+  const courtOf = (nums, i) => (nums || []).some(x => typeof x === "string") ? { court: i, courtName: String((nums || [])[i - 1] ?? i) } : { court: courtNo(nums, i), courtName: null };
+  const courtLbl = g => { const n = g.courtName; if (!n) return `${t("court")} ${g.court || "—"}`; return /^\d+$/.test(n) ? `${t("court")} ${n}` : n; };
   // пары: как записались парами, остальных — «сильный + слабый»
   function buildTeams(tt, ids, shuffle) {
     const S = strengthFn(), used = new Set(), list = [];
@@ -660,7 +670,7 @@ setLang(detectLang(BOOT.tgLang));
           : `<div class="chips-wrap" style="margin-top:8px;">${ids.map(id => `<span class="chip sm run-p">${pnl(id)} <b>${lv(id)}</b></span>`).join("")}</div>`}
       </div>
       <div class="card">
-        <label class="field"><span class="lbl">${t("t_court_nums")}</span><input type="text" inputmode="decimal" autocomplete="off" id="runCourtNums" value="${esc(r.courtNums.join(", "))}" placeholder="${t("t_court_nums_ph")}"></label>
+        <label class="field"><span class="lbl">${t("t_court_nums")}</span><input type="text" autocomplete="off" id="runCourtNums" value="${esc(r.courtNums.join(", "))}" maxlength="200" placeholder="${t("t_court_nums_ph")}"></label>
         <p class="tiny" style="margin:-6px 0 12px;">${r.courtNums.length ? t("run_courts_used", { list: r.courtNums.slice(0, r.courts).join(", ") }) : t("t_court_nums_hint")}</p>
         <div class="grid2">${inp("runCourts", t("t_courts"), r.courts, 'min="1" max="12"')}${f === "playoff" ? `<div></div>` : inp("runRounds", t("run_rounds"), r.rounds, `min="1" max="${fullRR || 40}"`)}</div>
         <div class="field"><span class="lbl">${t("run_scoring")}</span><div class="wrap-tags">
@@ -683,7 +693,7 @@ setLang(detectLang(BOOT.tgLang));
     else if (r.format === "playoff") rounds = [playoffFirst(r.teams.list.slice().sort((a, b) => S(b[0]) + S(b[1]) - S(a[0]) - S(a[1])))];
     else rounds = (roundRobinSchedule(r.teams.list, r.courts) || []).slice(0, r.rounds).map(rd => rd.map(M));
     if (!rounds.length || !rounds[0] || !rounds[0].length) { toast(t("run_need_n", { n: 4 })); return; }
-    const games = []; rounds.forEach((rd, i) => rd.forEach((m, c) => games.push({ id: gameId(tt.id, i + 1, c + 1), tournamentId: tt.id, round: i + 1, court: courtNo(r.courtNums, c + 1), teamA: m.teamA, teamB: m.teamB, scoreA: null, scoreB: null, label: m.label })));
+    const games = []; rounds.forEach((rd, i) => rd.forEach((m, c) => games.push({ id: gameId(tt.id, i + 1, c + 1), tournamentId: tt.id, round: i + 1, ...courtOf(r.courtNums, c + 1), teamA: m.teamA, teamB: m.teamB, scoreA: null, scoreB: null, label: m.label })));
     const team = isTeamF(r.format);
     try {
       await db.deleteGames(tGamesOf(tt.id).map(g => g.id));
@@ -726,7 +736,7 @@ setLang(detectLang(BOOT.tgLang));
       const inp = s => `<input class="sc-in" type="number" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" min="0" max="99" data-gid="${g.id}" data-side="${s}" value="${(s === "A" ? g.scoreA : g.scoreB) ?? ""}" aria-label="${t("score")}">`;
       const box = v => `<span class="sbox">${v ?? "–"}</span>`;
       return `<div class="match live-m ${mine ? "mine" : ""} ${scoredG(g) ? "is-done" : ""}" data-gid="${g.id}">
-        <div class="court-lbl"><span>${lbl(g)}${t("court")} ${g.court || "—"}${mine ? ` · <b class="your-m">${t("your_match")}</b>` : ""}</span>${edit ? `<button type="button" class="sc-ok ${scoredG(g) ? "saved" : ""}" aria-label="${t("save")}">✓</button>` : ""}</div>
+        <div class="court-lbl"><span>${lbl(g)}${esc(courtLbl(g))}${mine ? ` · <b class="your-m">${t("your_match")}</b>` : ""}</span>${edit ? `<button type="button" class="sc-ok ${scoredG(g) ? "saved" : ""}" aria-label="${t("save")}">✓</button>` : ""}</div>
         <div class="mrow"><div class="pair ${wa ? "winner" : ""}">${pl(g.teamA[0])}<small>${pl(g.teamA[1])}</small></div>
           <div class="score">${edit ? inp("A") : box(g.scoreA)}<span class="colon">:</span>${edit ? inp("B") : box(g.scoreB)}</div>
           <div class="pair right ${wb ? "winner" : ""}">${pl(g.teamB[0])}<small>${pl(g.teamB[1])}</small></div></div></div>`; };
@@ -799,7 +809,7 @@ setLang(detectLang(BOOT.tgLang));
     for (let r = 1; r <= maxR; r++) {
       const nx = playoffNext(gs.filter(g => g.round <= r)); if (!nx) continue;
       const ex = gs.filter(g => g.round === r + 1).sort((a, b) => a.court - b.court);
-      if (!ex.length) nx.forEach((m, i) => { const g = { id: gameId(tt.id, r + 1, i + 1), tournamentId: tt.id, round: r + 1, court: courtNo(tt.s.court_nums, i + 1), teamA: m.teamA, teamB: m.teamB, scoreA: null, scoreB: null, label: m.label }; upd.push(g); gs.push(g); state.games.push(g); });
+      if (!ex.length) nx.forEach((m, i) => { const g = { id: gameId(tt.id, r + 1, i + 1), tournamentId: tt.id, round: r + 1, ...courtOf(tt.s.court_nums, i + 1), teamA: m.teamA, teamB: m.teamB, scoreA: null, scoreB: null, label: m.label }; upd.push(g); gs.push(g); state.games.push(g); });
       else if (ex.every(g => !scoredG(g))) nx.forEach((m, i) => { const g = ex[i]; if (g && (g.teamA.join() !== m.teamA.join() || g.teamB.join() !== m.teamB.join())) { g.teamA = m.teamA; g.teamB = m.teamB; upd.push(g); } });
     }
     if (upd.length) { await db.saveGames(upd); toast(t("po_next_ready")); }
@@ -810,7 +820,7 @@ setLang(detectLang(BOOT.tgLang));
     const S = strengthFn(), ids = tt.participantIds || [], courts = tt.courts || 2;
     const ms = tt.format === "mexicano" ? mexicanoRound(ids, gs, courts, S) : swissRound(ids, gs, courts, S, 2);
     if (!ms || !ms.length) return;
-    const r = maxR + 1, rows = ms.map(([a, b], i) => ({ id: gameId(tid, r, i + 1), tournamentId: tid, round: r, court: courtNo(tt.s.court_nums, i + 1), teamA: a, teamB: b, scoreA: null, scoreB: null, label: null }));
+    const r = maxR + 1, rows = ms.map(([a, b], i) => ({ id: gameId(tid, r, i + 1), tournamentId: tid, round: r, ...courtOf(tt.s.court_nums, i + 1), teamA: a, teamB: b, scoreA: null, scoreB: null, label: null }));
     try { await db.saveGames(rows); if (r > (tt.rounds || 0)) await db.saveTournament(tRow(tt, { rounds: r })); state.view.liveRound = r; window.scrollTo(0, 0); await reload(); toast(t("round_ready", { n: r })); } catch (e) { err(e); }
   }
   async function removeLastRound(tid) {
@@ -976,7 +986,7 @@ setLang(detectLang(BOOT.tgLang));
             ${other ? inp("tfPlace", t("place_other_name"), s.place) : ""}`; })()}
         <div class="field"><span class="lbl">${t("t_format")}</span><div class="wrap-tags">${fmts.map(x => `<span class="chip ${f.format===x?'active':''}" data-act="tf-format" data-val="${x}">${t(x)}</span>`).join("")}</div></div>
         <label class="row tf-toggle"><span>${t("t_pairs_mode")}<br><span class="tiny">${t("t_pairs_hint")}</span></span><input type="checkbox" id="tfPairs" data-act="tf-pairs" ${s.pairs ? "checked" : ""}></label>
-        ${inp("tfCourtNums", t("t_court_nums"), (s.court_nums || []).join(", "), "text", 'inputmode="decimal" autocomplete="off" placeholder="' + t("t_court_nums_ph") + '"')}
+        ${inp("tfCourtNums", t("t_court_nums"), (s.court_nums || []).join(", "), "text", 'autocomplete="off" maxlength="200" placeholder="' + t("t_court_nums_ph") + '"')}
         <p class="tiny" style="margin:-6px 0 12px;">${t("t_court_nums_hint")}</p>
         <div class="grid3">${inp("tfCourts", t("t_courts"), f.courts, "number", 'min="1" max="12"')}${inp("tfSlots", s.pairs ? t("t_pairs") : t("t_slots"), s.slots, "number", 'min="0" max="64"')}${inp("tfPrice", t("t_price"), s.price, "number", 'min="0"')}</div>
         ${(() => { const sel = lvLetters(s), exact = lvExact(s) || (s.level_min == null && s.level_max == null);

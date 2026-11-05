@@ -56,7 +56,7 @@ export function createDb(cfg) {
   const toPlayer = p => ({ id: p.id, name: p.name, active: p.active, userId: p.user_id || null, avatar: p.avatar || null, level: p.level != null ? +p.level : null, eloStart: p.elo_start ?? 1500, confirmed: !!p.elo_confirmed, contacts: p.contacts || {}, bio: p.bio || "", levelStatus: p.level_status || "ok", levelClaim: p.level_claim != null ? +p.level_claim : null, eloAdj: Array.isArray(p.elo_adj) ? p.elo_adj : [], label: p.label || "" });
   const toTournament = t => ({ id: t.id, seq: t.seq || 0, name: t.name, date: t.date, status: t.status, format: t.format, courts: t.courts, participantIds: t.participant_ids || [], teams: t.teams || [],
     scoring: t.scoring || {}, rounds: t.rounds || null, money: t.money || {}, s: t.settings || {} });
-  const toGame = g => ({ id: g.id, tournamentId: g.tournament_id, round: g.round, court: g.court, teamA: g.team_a, teamB: g.team_b, scoreA: g.score_a, scoreB: g.score_b, label: g.label || null });
+  const toGame = g => ({ id: g.id, tournamentId: g.tournament_id, round: g.round, court: g.court, courtName: g.court_name || null, teamA: g.team_a, teamB: g.team_b, scoreA: g.score_a, scoreB: g.score_b, label: g.label || null });
   const toReg = r => ({ tournamentId: r.tournament_id, playerId: r.player_id, status: r.status, paid: !!r.paid, at: r.created_at, team: r.team_no ?? null, approval: r.approval || "ok", addedBy: r.added_by || null });
   async function loadAll() {
     await ensureSession();
@@ -94,7 +94,7 @@ export function createDb(cfg) {
     const { error } = await sb.from("tournaments").upsert(row, { onConflict: "league_id,id" }); if (error) throw error;
   }
   // ---------- проведение турнира: матчи ----------
-  const gameRow = g => ({ id: g.id, league_id: L, tournament_id: g.tournamentId, round: g.round, court: g.court ?? null, team_a: g.teamA, team_b: g.teamB, score_a: g.scoreA ?? null, score_b: g.scoreB ?? null, label: g.label || null });
+  const gameRow = g => ({ id: g.id, league_id: L, tournament_id: g.tournamentId, round: g.round, court: g.court ?? null, court_name: g.courtName ?? null, team_a: g.teamA, team_b: g.teamB, score_a: g.scoreA ?? null, score_b: g.scoreB ?? null, label: g.label || null });
   async function saveGames(games) { if (!games.length) return; await ensureSession(); const { error } = await sb.from("games").upsert(games.map(gameRow), { onConflict: "league_id,id" }); if (error) throw error; }
   async function saveScore(gid, a, b) { await ensureSession(); const { error } = await sb.from("games").update({ score_a: a, score_b: b }).eq("league_id", L).eq("id", gid); if (error) throw error; }
   async function deleteGames(ids) { if (!ids.length) return; await ensureSession(); const { error } = await sb.from("games").delete().eq("league_id", L).in("id", ids); if (error) throw error; }
