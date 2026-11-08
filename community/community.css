@@ -474,3 +474,9 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
 .tbl tr.me td { background: rgba(255,122,26,.08); }
 .tbl tr.me td:first-child { box-shadow: inset 3px 0 0 var(--orange, #FF7A1A); }
 .tbl tr.me .plink { color: #FF8A33; font-weight: 700; text-shadow: 0 0 10px rgba(255,122,26,.75), 0 0 22px rgba(255,122,26,.35); opacity: 1 !important; }
+
+/* смешанный турнир: лига игрока в сезоне */
+.split-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line, rgba(255,255,255,.08)); }
+.split-seg { display: inline-flex; flex: 0 0 auto; }
+.split-seg button { min-width: 44px; padding: 6px 12px; font-weight: 700; }
+.split-seg button.auto { opacity: .7; outline: 1px dashed rgba(255,122,26,.6); outline-offset: -3px; }

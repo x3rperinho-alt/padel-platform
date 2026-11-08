@@ -385,6 +385,7 @@ setLang(detectLang(BOOT.tgLang));
       </div>
       ${tt.s.partner_prizes ? partnerHtml("prizes", tt.id) : ""}
       ${raffleHtml(tt)}
+      ${splitCardHtml(tt, main.map(r => r.playerId))}
       ${pairs
         ? `<div class="card"><h3>${t("pairs_title")} <span class="tiny">· ${fullPairs}/${slots || teamNos(tt).length - 1}</span></h3><div class="pair-grid">${teamNos(tt).map(pairCard).join("")}</div></div>`
         : `<div class="card"><h3>${t("main_list")} <span class="tiny">· ${main.length}${slots ? "/" + slots : ""}</span></h3><div style="margin-top:6px;">${main.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>`}
@@ -445,6 +446,7 @@ setLang(detectLang(BOOT.tgLang));
       ${isAdmin() && finished ? announceCardHtml(tt, tGames) : ""}
       ${tt.s.partner_prizes ? partnerHtml("prizes", tt.id) : ""}
       ${raffleHtml(tt)}
+      ${splitCardHtml(tt, rows.map(r => r.id))}
       ${labelsCardHtml(tt, rows.map(r => r.id))}
       ${finished ? `<button class="rounds-toggle ${roundsOpen ? "open" : ""}" data-act="toggle-rounds" data-id="${tid}">${roundsOpen ? t("hide_rounds") : t("view_rounds", { n: rKeys.length })}<span class="chev">›</span></button>` : ""}
       ${roundsOpen ? rKeys.map(r => `<h3 style="margin:16px 0 8px;">${t("round").charAt(0).toUpperCase() + t("round").slice(1)} ${r}</h3>${byRound[r].sort((a, b) => (a.court || 0) - (b.court || 0)).map(match).join("")}`).join("") : ""}`;
@@ -564,6 +566,21 @@ setLang(detectLang(BOOT.tgLang));
       await db.addLog(`Розыгрыш «${tt.name}»${prize ? " (" + prize + ")" : ""}: ${pname(winner)} из ${pool.length}`).catch(() => {});
       await new Promise(r => setTimeout(r, 1800));
     } catch (e) { err(e); } finally { rfBusy = false; savingN--; render(); }
+  }
+  // смешанный турнир: админ сам решает, в какую лигу сезона идут очки каждого игрока
+  function splitCardHtml(tt, ids) {
+    if (!isAdmin() || tLeague(tt) !== "split" || !ids.length) return "";
+    const open = state.view.splitOpen === tt.id, fixedN = ids.filter(id => splitFixed(tt, id)).length;
+    const cnt = lg => ids.filter(id => splitLg(tt, id) === lg).length;
+    const head = `<button class="row split-head" data-act="split-toggle" data-id="${tt.id}" style="width:100%;background:none;border:0;color:inherit;padding:0;text-align:left;">
+      <div style="flex:1;min-width:0;"><h3 style="margin:0;">${t("split_title")}</h3><div class="tiny" style="margin-top:4px;">D · ${cnt("D")} &nbsp;·&nbsp; C · ${cnt("C")}${fixedN < ids.length ? ` · <span style="color:var(--orange,#FF7A1A)">${t("split_auto_n", { n: ids.length - fixedN })}</span>` : ""}</div></div>
+      <span class="s-chev ${open ? "open" : ""}">›</span></button>`;
+    if (!open) return `<div class="card">${head}</div>`;
+    const rowsH = ids.slice().sort((a, b) => pname(a).localeCompare(pname(b))).map(id => { const lg = splitLg(tt, id), fx = splitFixed(tt, id);
+      return `<div class="row split-row"><span class="lb-p" style="flex:1;min-width:0;">${avatarHtml(id, 26)}<span class="plink">${esc(pname(id))}</span><span class="tiny" style="margin-left:6px;">${lvNow(id) != null ? (+lvNow(id)).toFixed(2) : ""}</span></span>
+        <div class="seg split-seg">${LEAGUES.map(L => `<button class="${lg === L ? "active" : ""} ${lg === L && !fx ? "auto" : ""}" data-act="split-set" data-id="${tt.id}" data-pid="${id}" data-val="${L}">${L}</button>`).join("")}</div></div>`; }).join("");
+    return `<div class="card">${head}<p class="tiny" style="margin:10px 0 8px;line-height:1.45;">${t("split_hint")}</p>${rowsH}
+      ${fixedN < ids.length ? `<button class="btn sm ghost" style="margin-top:10px;" data-act="split-fix" data-id="${tt.id}">${t("split_fix_all")}</button>` : ""}</div>`;
   }
   function labelsCardHtml(tt, ids) {
     if (!isAdmin() || !ids.length) return "";
@@ -847,12 +864,18 @@ setLang(detectLang(BOOT.tgLang));
   const curSeason = () => SEASONS.find(s => today() <= s.end) || SEASONS[SEASONS.length - 1];
   const LEAGUES = ["D", "C"];
   // лига турнира: вручную из настроек или по уровню допуска
-  const tLeague = tt => { const v = tt.s.season_league; if (v === "none" || isGameT(tt)) return null; if (LEAGUES.includes(v)) return v;
+  // "split" — смешанный турнир (D+ / C−): каждый игрок получает очки в своей лиге (лигу игрока назначает админ, по умолчанию — по уровню)
+  const tLeague = tt => { const v = tt.s.season_league; if (v === "none" || isGameT(tt)) return null; if (LEAGUES.includes(v) || v === "split") return v;
     const lo = tt.s.level_min != null ? +tt.s.level_min : null, hi = tt.s.level_max != null ? +tt.s.level_max : null;
+    if (lo != null && hi != null && lo < 2.5 && hi >= 2.5 && hi < 3.5) return "split";
     const ref = lo != null ? lo : hi != null ? hi - 0.001 : null; if (ref == null) return "D";
     return ref < 2.5 ? "D" : ref < 3.5 ? "C" : null; };
+  const lgByLevel = pid => { const lv = lvNow(pid); return lv != null && lv >= 2.5 ? "C" : "D"; };
+  const splitLg = (tt, pid) => { const m = tt.s.season_lg || {}; return LEAGUES.includes(m[pid]) ? m[pid] : lgByLevel(pid); };
+  const splitFixed = (tt, pid) => LEAGUES.includes((tt.s.season_lg || {})[pid]);
   // итоговые места турнира: группы с одинаковым результатом делят место; beaten — сколько игроков ниже
-  function tournamentPlaces(tt) {
+  // only — множество игроков: места считаются только среди них (смешанный турнир — внутри своей лиги)
+  function tournamentPlaces(tt, only) {
     const sg = tGamesOf(tt.id).filter(scoredG); if (!sg.length) return null;
     let rows, unitPairs = false;
     let teams = teamsOf(tt);
@@ -870,6 +893,7 @@ setLang(detectLang(BOOT.tgLang));
       const ids = [...new Set(sg.flatMap(g => g.teamA.concat(g.teamB)))];
       rows = playerTable(ids, sg).filter(r => r.g > 0).map(r => ({ ids: [r.id], key: [r.pts, r.w, r.pts - r.pa].join() }));
     }
+    if (only) rows = rows.map(r => ({ ...r, ids: r.ids.filter(id => only.has(id)) })).filter(r => r.ids.length);
     const N = rows.reduce((a, r) => a + r.ids.length, 0), out = {};
     let i = 0, above = 0;
     while (i < rows.length) {
@@ -883,14 +907,16 @@ setLang(detectLang(BOOT.tgLang));
   }
   // таблица сезона для лиги
   function seasonTable(season, lg) {
-    const ts = state.tournaments.filter(tt => tt.status === "played" && tt.date && tt.date >= season.start && tt.date <= season.end && tLeague(tt) === lg)
+    const ts = state.tournaments.filter(tt => tt.status === "played" && tt.date && tt.date >= season.start && tt.date <= season.end && (tLeague(tt) === lg || tLeague(tt) === "split"))
       .sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.seq - b.seq);
     const by = {};
-    ts.forEach(tt => { const pl = tournamentPlaces(tt); if (!pl) return;
+    ts.forEach(tt => { let only = null;
+      if (tLeague(tt) === "split") { const ids = [...new Set(tGamesOf(tt.id).filter(scoredG).flatMap(g => g.teamA.concat(g.teamB)))]; only = new Set(ids.filter(id => splitLg(tt, id) === lg)); if (!only.size) return; }
+      const pl = tournamentPlaces(tt, only); if (!pl) return;
       Object.entries(pl).forEach(([id, r]) => { const x = by[id] = by[id] || { id, pts: 0, n: 0, wins: 0, pod: 0, list: [] }; x.pts += r.pts; x.n++; if (r.place === 1) x.wins++; if (r.place <= 3) x.pod++; x.list.push({ tt, ...r }); }); });
     const rows = Object.values(by).sort((a, b) => b.pts - a.pts || b.wins - a.wins || b.pod - a.pod || pname(a.id).localeCompare(pname(b.id)));
     rows.forEach((r, k) => { const pr = rows[k - 1]; r.pos = pr && pr.pts === r.pts && pr.wins === r.wins && pr.pod === r.pod ? pr.pos : k + 1; r.z = k < season.finalists; });
-    return { ts: ts.filter(tt => tGamesOf(tt.id).some(scoredG)), rows };
+    return { ts: ts.filter(tt => tGamesOf(tt.id).some(scoredG) && Object.values(by).some(r => r.list.some(x => x.tt === tt))), rows };
   }
   const ptsWord = n => t(n % 10 === 1 && n % 100 !== 11 ? "pt1" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? "pt2" : "pt5", { n });
   function viewSeason() {
@@ -1001,7 +1027,7 @@ setLang(detectLang(BOOT.tgLang));
         ${inp("tfContact", t("t_contact"), s.contact, "url", 'placeholder="https://t.me/…"')}
         <label class="field"><span class="lbl">${t("t_note")}</span><textarea id="tfNote" rows="3">${esc(s.note || "")}</textarea></label>
         <label class="row" style="cursor:pointer;"><span>${t("t_reg_open")}</span><input type="checkbox" id="tfOpen" ${s.reg_open ? "checked" : ""} style="width:22px;height:22px;"></label>
-        ${s.kind ? "" : `<label class="field"><span class="lbl">${t("t_season")}</span><select id="tfSeason">${[["auto", t("t_season_auto", { lg: tLeague({ s: { ...s, season_league: "auto" } }) || "—" })], ["D", t("s_league", { lg: "D" })], ["C", t("s_league", { lg: "C" })], ["none", t("t_season_none")]].map(([v, l]) => `<option value="${v}" ${(s.season_league || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        ${s.kind ? "" : `<label class="field"><span class="lbl">${t("t_season")}</span><select id="tfSeason">${[["auto", t("t_season_auto", { lg: ((l) => l === "split" ? "D + C" : l || "—")(tLeague({ s: { ...s, season_league: "auto" } })) })], ["D", t("s_league", { lg: "D" })], ["C", t("s_league", { lg: "C" })], ["split", t("t_season_split")], ["none", t("t_season_none")]].map(([v, l]) => `<option value="${v}" ${(s.season_league || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="row tf-toggle"><span>🎁 ${t("p_prizes")}<br><span class="tiny">${t("p_prizes_hint")}</span></span><input type="checkbox" id="tfPartner" ${s.partner_prizes ? "checked" : ""}></label>
         <label class="row tf-toggle"><span>${t("t_approval")}<br><span class="tiny">${t("t_approval_hint")}</span></span><input type="checkbox" id="tfApproval" ${s.approval ? "checked" : ""}></label>`}
         ${f.isNew ? (state.group ? `<label class="row tf-toggle"><span>${t("t_announce")}<br><span class="tiny">${t("t_announce_hint", { g: esc(state.group) })}</span></span><input type="checkbox" id="tfAnnounce" ${f.announce !== false ? "checked" : ""}></label>`
@@ -1540,6 +1566,15 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "rf-run") on(() => runRaffle(id, el));
       else if (a === "rf-del") on(async () => { const tt = byId(state.tournaments, id); if (!tt || !confirm(t("rf_del_q"))) return; const raffles = (tt.s.raffles || []).filter((_, i) => i !== +el.dataset.val);
         try { await db.saveTournament(tRow(tt, { s: { ...tt.s, raffles } })); tt.s = { ...tt.s, raffles }; render(); } catch (e) { err(e); } });
+      else if (a === "split-toggle") on(() => { state.view.splitOpen = state.view.splitOpen === el.dataset.id ? null : el.dataset.id; render(); });
+      else if (a === "split-set" || a === "split-fix") on(async () => {
+        const tt = byId(state.tournaments, el.dataset.id); if (!tt || !isAdmin()) return;
+        const ids = [...new Set(tGamesOf(tt.id).flatMap(g => g.teamA.concat(g.teamB)).concat(regsOf(tt.id).filter(r => r.status === "main").map(r => r.playerId)))];
+        const m = { ...(tt.s.season_lg || {}) }; ids.forEach(id => { if (!LEAGUES.includes(m[id])) m[id] = splitLg(tt, id); }); // закрепляем всех, чтобы позже уровень не сдвинул лигу
+        if (a === "split-set") m[el.dataset.pid] = el.dataset.val;
+        const prev = tt.s.season_lg; tt.s = { ...tt.s, season_lg: m }; render();
+        try { await db.saveTournament(tt); toast(t("saved")); } catch (e) { tt.s = { ...tt.s, season_lg: prev }; render(); toast(t("error", { msg: e.message || e })); }
+      });
       else if (a === "open-link") on(() => { const u = el.dataset.url;
         if (!/^https?:\/\//i.test(u || "")) return; // только обычные ссылки (не javascript: и т.п.)
         if (el.dataset.pt) db.trackClick(el.dataset.pt, el.dataset.ptw, el.dataset.ptt).catch(() => {});
