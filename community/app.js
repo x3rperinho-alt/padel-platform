@@ -98,8 +98,23 @@ setLang(detectLang(BOOT.tgLang));
     const is = cur.map(at), lo = Math.min(...is), hi = Math.max(...is);
     s.level_min = lo === 0 ? null : LV_G[lo][1]; s.level_max = hi === LV_G.length - 1 ? null : LV_G[hi][2];
   }
+  // подуровни для выбора «від … до …» (границы как в letter())
+  const LV_S = [["D-", 0, 1.899], ["D", 1.9, 2.199], ["D+", 2.2, 2.499], ["C-", 2.5, 2.749], ["C", 2.75, 3.099], ["C+", 3.1, 3.499], ["B-", 3.5, 3.749], ["B", 3.75, 3.999], ["B+", 4, 4.499], ["A-", 4.5, 4.999], ["A", 5, 5.999], ["A+", 6, 7]];
+  const lvSelHtml = s => {
+    const a = s.level_min, b = s.level_max, f2 = x => (+x).toFixed(2);
+    const fi = a == null || +a <= 0.01 ? -1 : LV_S.findIndex(g => Math.abs(g[1] - a) < 0.006);
+    const ti = b == null || +b >= 6.99 ? -1 : LV_S.findIndex(g => Math.abs(g[2] - b) < 0.011);
+    const from = `<option value="" ${fi === -1 && (a == null || +a <= 0.01) ? "selected" : ""}>${t("lv_any_from")}</option>` +
+      LV_S.slice(1).map((g, k) => `<option value="${g[1]}" ${fi === k + 1 ? "selected" : ""}>${g[0]} · ${t("lv_from_n", { n: f2(g[1]) })}</option>`).join("") +
+      (fi === -1 && a != null && +a > 0.01 ? `<option value="${a}" selected>${t("lv_custom", { n: f2(a) })}</option>` : "");
+    const to = LV_S.slice(0, -1).map((g, k) => `<option value="${g[2]}" ${ti === k ? "selected" : ""}>${g[0]} · ${t("lv_upto_n", { n: f2(g[2]) })}</option>`).join("") +
+      `<option value="" ${ti === -1 && (b == null || +b >= 6.99) ? "selected" : ""}>${t("lv_any_to")}</option>` +
+      (ti === -1 && b != null && +b < 6.99 ? `<option value="${b}" selected>${t("lv_custom", { n: f2(b) })}</option>` : "");
+    return `<div class="grid2 lv-sel"><label class="field"><span class="lbl">${t("t_level_min")}</span><select data-act="tf-lvsel" data-val="min">${from}</select></label>
+      <label class="field"><span class="lbl">${t("t_level_max")}</span><select data-act="tf-lvsel" data-val="max">${to}</select></label></div>`;
+  };
   const CLUBS = ["Dynamica", "Padel Point", "Beat на Фонтане", "Beat на Шевченка", "UnderAir", "Yellow Padel Club", "JustPadel"];
-  const rangeLabel = s => { const ex = lvExact(s); if (ex) return ex; const a = s.level_min != null ? letter(+s.level_min) : null, b = s.level_max != null ? letter(+s.level_max) : null; return !a && !b ? t("all_levels") : a && b ? (a === b ? a : a + " – " + b) : a ? a + "+" : "≤ " + b; };
+  const rangeLabel = s => { const ex = lvExact(s); if (ex) return ex; const a = s.level_min != null ? letter(+s.level_min) : null, b = s.level_max != null ? letter(+s.level_max) : null; return !a && !b ? t("all_levels") : a && b ? (a === b ? a : a + " – " + b) : a ? t("lv_from", { l: a }) : t("lv_upto", { l: b }); }; // «від D», а не «D+» — чтобы не путать с подуровнем D+
 
   // ---------- Эло: старт из анкеты, K удвоен пока не подтверждён (меньше 3 турниров и не подтверждён админом) ----------
   function orderedGames() {
@@ -1017,13 +1032,10 @@ setLang(detectLang(BOOT.tgLang));
         ${inp("tfCourtNums", t("t_court_nums"), (s.court_nums || []).join(", "), "text", 'autocomplete="off" maxlength="200" placeholder="' + t("t_court_nums_ph") + '"')}
         <p class="tiny" style="margin:-6px 0 12px;">${t("t_court_nums_hint")}</p>
         <div class="grid3">${inp("tfCourts", t("t_courts"), f.courts, "number", 'min="1" max="12"')}${inp("tfSlots", s.pairs ? t("t_pairs") : t("t_slots"), s.slots, "number", 'min="0" max="64"')}${inp("tfPrice", t("t_price"), s.price, "number", 'min="0"')}</div>
-        ${(() => { const sel = lvLetters(s), exact = lvExact(s) || (s.level_min == null && s.level_max == null);
-          return `<div class="field"><span class="lbl">${t("t_levels")}</span><div class="wrap-tags lv-chips">
-            <span class="chip ${!sel.length ? "active" : ""}" data-act="tf-lv" data-val="all">${t("all_levels")}</span>
-            ${LV_G.map(([L]) => `<span class="chip lv-chip ${sel.includes(L) ? "active" : ""}" data-act="tf-lv" data-val="${L}">${L}</span>`).join("")}</div>
-            <p class="tiny" style="margin:8px 0 0;">${t("level_range")}: <b>${esc(rangeLabel(s))}</b>${s.level_min != null || s.level_max != null ? ` <span class="muted">(${s.level_min != null ? fmtLv(s.level_min) : "0"} – ${s.level_max != null ? fmtLv(s.level_max) : "∞"})</span>` : ""}</p></div>
-          <details class="lv-fine" ${exact ? "" : "open"}><summary class="tiny">${t("lv_fine")}</summary>
-            <div class="grid2" style="margin-top:8px;">${inp("tfMin", t("t_level_min"), s.level_min, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}${inp("tfMax", t("t_level_max"), s.level_max, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}</div></details>`; })()}
+        ${(() => `<div class="field" style="margin-bottom:4px;"><span class="lbl">${t("t_levels")}</span></div>${lvSelHtml(s)}
+            <p class="tiny" style="margin:-4px 0 10px;">${t("level_range")}: <b>${esc(rangeLabel(s))}</b>${s.level_min != null || s.level_max != null ? ` <span class="muted">(${s.level_min != null ? fmtLv(s.level_min) : "0"} – ${s.level_max != null ? fmtLv(s.level_max) : "∞"})</span>` : ""}</p>
+          <details class="lv-fine"><summary class="tiny">${t("lv_fine")}</summary>
+            <div class="grid2" style="margin-top:8px;">${inp("tfMin", t("t_level_min"), s.level_min, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}${inp("tfMax", t("t_level_max"), s.level_max, "text", 'inputmode="decimal" autocomplete="off" class="dec-in"')}</div></details>`)()}
         ${inp("tfContact", t("t_contact"), s.contact, "url", 'placeholder="https://t.me/…"')}
         <label class="field"><span class="lbl">${t("t_note")}</span><textarea id="tfNote" rows="3">${esc(s.note || "")}</textarea></label>
         <label class="row" style="cursor:pointer;"><span>${t("t_reg_open")}</span><input type="checkbox" id="tfOpen" ${s.reg_open ? "checked" : ""} style="width:22px;height:22px;"></label>
@@ -1491,6 +1503,7 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "edit-t") on(() => { state._tf = null; state.view.editT = id; render(); });
       else if (a === "tf-format") on(() => { const f = readTf(), was = f.format; f.format = el.dataset.val; if (f.format === "team_americano") f.s.pairs = true; else if (was === "team_americano") f.s.pairs = false; render(); });
       else if (a === "tf-pairs") { el.onchange = () => { readTf(); render(); }; }
+      else if (a === "tf-lvsel") { el.onchange = () => { const box = document.getElementById(el.dataset.val === "min" ? "tfMin" : "tfMax"); if (box) box.value = el.value; readTf(); render(); }; }
       else if (a === "tf-cancel") on(() => { const f = state._tf; state._tf = null; state.view.editT = null; if (f && f.isNew) state.view.t = null; render(); });
       else if (a === "tf-save") on(saveTf);
       else if (a === "t-announce") on(async () => { try { await db.announceTournament(id); db.kick(); toast(t("announce_sent")); } catch (e) { toast(/no group/.test(String(e.message)) ? t("no_group_hint") : t("error", { msg: e.message })); } });
