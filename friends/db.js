@@ -72,7 +72,7 @@ export function createDb(cfg) {
 
   // ---------- загрузка ----------
   const rowsToState = (r) => ({
-    players: r.players.map(p => ({ id: p.id, name: p.name, active: p.active, userId: p.user_id || null, avatar: p.avatar || null })),
+    players: r.players.map(p => ({ id: p.id, name: p.name, active: p.active, userId: p.user_id || null, avatar: p.avatar || null, eloStart: p.elo_start ?? 1500, eloAdj: Array.isArray(p.elo_adj) ? p.elo_adj : [] })),
     clubs: r.clubs.slice().sort((a,b)=>a.sort-b.sort).map(c => c.name),
     bookings: r.bookings.map(b => ({ id: b.id, date: b.date, time: b.time_start || "", timeEnd: b.time_end || "", club: b.club || "", court: b.courts || "", type: b.court_type || null })),
     tournaments: r.tournaments.slice().sort((a,b)=>a.seq-b.seq).map(t => ({
@@ -84,7 +84,7 @@ export function createDb(cfg) {
     log: r.logs.map(l => ({ t: new Date(l.at).getTime(), who: l.user_id, a: l.action, _id: l.id })),
   });
   const stateToRows = (s) => ({
-    players: s.players.map(p => ({ id: p.id, league_id: L, name: p.name, active: !!p.active, user_id: p.userId || null, avatar: p.avatar || null })),
+    players: s.players.map(p => ({ id: p.id, league_id: L, name: p.name, active: !!p.active, user_id: p.userId || null, avatar: p.avatar || null, elo_start: Math.round(+p.eloStart || 1500), elo_adj: Array.isArray(p.eloAdj) ? p.eloAdj : [] })),
     clubs: s.clubs.map((n, i) => ({ league_id: L, name: n, sort: i })),
     bookings: s.bookings.map(b => ({ id: b.id, league_id: L, date: b.date, time_start: b.time || null, time_end: b.timeEnd || null, club: b.club || null, courts: b.court != null ? String(b.court) : null, court_type: b.type || null })),
     tournaments: s.tournaments.map(t => ({ id: t.id, league_id: L, seq: t.seq || 0, name: t.name, date: t.date || null, status: t.status || "scheduled", format: t.format, courts: t.courts || null, participant_ids: t.participantIds || [], teams: t.teams || [],

@@ -149,11 +149,54 @@ const DATA = BOOT.data;
 
   // ---------------- Elo engine ----------------
   const ELO_START = 1500, K = 32;
+  // стартовое Эло игрока (ставится вручную, пока он не сыграл ни одного турнира)
+  function eloInit() { const r = {}; state.players.forEach(p => r[p.id] = +p.eloStart || ELO_START); return r; }
+  // ручные правки организатора: p.eloAdj = [{ after: <id турнира>, afterGame: <id матча>, value: <Эло>, at }] —
+  // «сразу после этого матча (а если его уже нет — после этого турнира) Эло = value». Матчи, сыгранные позже, считаются от нового значения.
+  // Все пересчёты Эло проходят игры по порядку и вызывают ov.before(g) перед каждой игрой и ov.end() в конце.
+  function eloOverrides(ratings, onSet) {
+    const games = orderedGames(), idx = {}; games.forEach((g, i) => idx[g.id] = i);
+    const tOrd = {}; state.tournaments.forEach(t => tOrd[t.id] = t.seq || 0);
+    const lastIdxUpTo = seq => { let k = -1; games.forEach((g, i) => { if ((tOrd[g.tournamentId] || 0) <= seq) k = i; }); return k; };
+    const list = []; state.players.forEach(p => (p.eloAdj || []).forEach(o => {
+      if (!o || o.value == null) return;
+      const pos = o.afterGame && idx[o.afterGame] != null ? idx[o.afterGame] : o.after && tOrd[o.after] != null ? lastIdxUpTo(tOrd[o.after]) : null;
+      if (pos != null) list.push({ pid: p.id, pos, value: +o.value });
+    }));
+    list.sort((a,b) => a.pos - b.pos); let i = 0;
+    const upTo = n => { while (i < list.length && list[i].pos < n) { const o = list[i++]; if (ratings[o.pid] == null) continue; const from = ratings[o.pid]; ratings[o.pid] = o.value; if (onSet) onSet(o.pid, from, o.value); } };
+    return { before: g => upTo(idx[g.id] != null ? idx[g.id] : Infinity), through: seq => upTo(lastIdxUpTo(seq) + 1), end: () => upTo(Infinity) };
+  }
+  // последний матч (по порядку) с внесённым счётом — сразу после него встаёт ручная правка
+  function lastScoredGame() {
+    const sc = orderedGames().filter(g => g.scoreA != null && g.scoreB != null && g.scoreA + g.scoreB > 0);
+    return sc.length ? sc[sc.length - 1] : null;
+  }
+  function lastScoredTournament() { const g = lastScoredGame(); return g ? byId(state.tournaments, g.tournamentId) : null; }
+  // организатор ставит игроку текущее Эло: до первых сыгранных матчей лиги — это стартовое Эло, потом — правка «после последнего турнира»
+  function setEloNow(pid, v) {
+    const p = byId(state.players, pid); v = Math.round(+v);
+    if (!p || !canWrite) return false;
+    if (!v || v < 100 || v > 4000) { toast("Эло — число от 100 до 4000"); return false; }
+    const cur = Math.round(computeElo().ratings[pid] || ELO_START); if (v === cur) return false;
+    const lastG = lastScoredGame();
+    if (!lastG) p.eloStart = v;
+    else p.eloAdj = (p.eloAdj || []).filter(o => o && !(o.afterGame === lastG.id || (!o.afterGame && o.after === lastG.tournamentId))).concat([{ after: lastG.tournamentId, afterGame: lastG.id, value: v, at: new Date().toISOString() }]);
+    addLog("Эло " + p.name + ": " + cur + " → " + v + " (вручную)");
+    commit(500); return true;
+  }
+  function resetEloAdj(pid) {
+    const p = byId(state.players, pid); if (!p || !canWrite) return;
+    p.eloAdj = []; p.eloStart = ELO_START;
+    addLog("Эло " + p.name + ": ручные правки сброшены"); commit(500);
+  }
   function computeElo() {
-    const ratings = {}; const history = {};
-    state.players.forEach(p => { ratings[p.id] = ELO_START; history[p.id] = [{ i:0, r: ELO_START }]; });
-    const games = orderedGames();
+    const ratings = eloInit(); const history = {};
+    state.players.forEach(p => { history[p.id] = [{ i:0, r: ratings[p.id] }]; });
+    const games = orderedGames(); let cur = 0;
+    const ov = eloOverrides(ratings, (pid, from, to) => history[pid].push({ i: cur, r: to, manual: true }));
     games.forEach((g, idx) => {
+      cur = idx; ov.before(g);
       if (g.scoreA == null || g.scoreB == null) return;
       const total = g.scoreA + g.scoreB; if (total <= 0) return;
       const teamARating = avgRating(g.teamA, ratings);
@@ -165,14 +208,16 @@ const DATA = BOOT.data;
       g.teamA.forEach(pid => { if (ratings[pid]==null) return; ratings[pid]+=deltaA; history[pid].push({i:idx+1, r:ratings[pid]}); });
       g.teamB.forEach(pid => { if (ratings[pid]==null) return; ratings[pid]+=deltaB; history[pid].push({i:idx+1, r:ratings[pid]}); });
     });
+    cur = games.length; ov.end();
     return { ratings, history };
   }
   // Эло в разрезе одного турнира: рейтинг до его начала, после, дельта и вклад каждого матча
   function eloDetail(tid, alsoIds) {
     const mineIds = new Set([tid].concat(alsoIds || [])); // у этапа 2 — вместе с играми этапа 1
-    const ratings = {}; state.players.forEach(p => ratings[p.id] = ELO_START);
+    const ratings = eloInit(), ov = eloOverrides(ratings);
     const before = {}, after = {}, perGame = {};
     orderedGames().forEach(g => {
+      ov.before(g);
       if (g.scoreA == null || g.scoreB == null) return;
       const total = g.scoreA + g.scoreB; if (total <= 0) return;
       const rA = avgRating(g.teamA, ratings), rB = avgRating(g.teamB, ratings);
@@ -637,8 +682,10 @@ const DATA = BOOT.data;
     { key: "roundrobin", label: "TeamAmericano", desc: "То же самое, что Americano, но играют постоянные пары. Записался с другом — играешь весь турнир с ним, состав вашей команды не меняется. Зачёт командный: побеждает пара, набравшая больше всех очков.\n\nПо расписанию каждая команда играет со всеми остальными командами (round-robin или его укороченная версия — зависит от количества команд и кортов). Счёт каждого матча идёт в общую копилку пары.\n\nФормат для тех, кто хочет именно «свою команду» — например, готовится к парному турниру с конкретным напарником и хочет сыграться вместе.\n\nВ отличие от обычного Американо здесь меньше «социалки» (партнёр всегда один), зато больше тактики: вы с напарником можете прорабатывать связки, привыкать к стилю друг друга и расти как пара." },
     { key: "playoff", label: "Плей-офф", desc: "Турнир на вылет для 4 пар: два полуфинала, затем автоматически создаются финал (победители) и матч за 3-е место (проигравшие). Быстрый формат — всего 2 раунда, зато с настоящей развязкой." },
     { key: "two", label: "Американо → SwissCourt", desc: "Один турнир из двух этапов. Этап 1 — Американо: пары перемешиваются по расписанию, все играют одинаковое число матчей, набирается стартовая таблица. Этап 2 — SwissCourt: пары каждого раунда собираются по текущей общей таблице так, чтобы матчи были максимально равными. Таблица, W-D-L, Эло, призовой фонд и рекорды — общие за оба этапа; в статистике это один турнир.\n\nПервый раунд этапа 2 собирается кнопкой «Сгенерировать пары на основе этапа 1», когда счета первого этапа внесены." },
+    { key: "mexicano", label: "Мексикано", desc: "Индивидуальный зачёт, как в Американо, но пары каждого раунда собираются по текущей таблице.\n\nРаунд 1 — по Эло лиги: четвёрки по силе. Дальше после каждого раунда все выстраиваются по таблице (очки, затем победы и разница), делятся на четвёрки сверху вниз, и в каждой четвёрке 1-й и 4-й играют против 2-го и 3-го. Лидер берёт в партнёры самого слабого из своей четвёрки — поэтому матчи ровные, а набивать очки на слабых не получится.\n\nСледующий раунд собирается кнопкой, когда внесены все счета предыдущего. Количество раундов организатор выбирает сам. Нужно ровно 4 игрока на корт (8, 12, 16… участников). Первая четвёрка всегда играет на Корте 1." },
     { key: "swiss", label: "SwissCourt", desc: "Формат на основе швейцарской системы: пары и соперники каждый раунд подбираются алгоритмом так, чтобы матчи были максимально равными, а состав твоих напарников за турнир — максимально разным.\n\nИндивидуальный зачёт, как в Американо: сумма набранных очков за все матчи. Победа 14:7 даёт больше, чем 11:10 — формат учитывает не только сам факт победы, но и её разницу. Количество раундов организатор выбирает сам, матч играется до 21 очка. Нужно ровно 4 игрока на корт (8, 12, 16… участников).\n\nКак алгоритм собирает раунд? После каждого раунда берётся текущая таблица (очки, при равенстве — Buchholz, сумма очков соперников). Алгоритм перебирает возможные расклады и выбирает тот, где в каждом матче суммы очков двух команд максимально близки — сильный играет в паре со слабым против такой же сбалансированной пары, а не сильные против слабых. Повторы напарников и соперников при этом по возможности разводятся. В 1-м раунде таблицы ещё нет, поэтому баланс считается по Эло лиги.\n\nВажно: корты не имеют веса. Победа 21:15 на Корте 1 и такая же победа на Корте 3 приносят одинаковые 21 очко. Первый корт — это просто «где сейчас лидеры», а не премия к счёту.\n\nГлавное отличие — лимит повторов задаёт организатор. Параметр cap: cap = 1 — с каждым напарником максимум один матч за турнир, максимальная социальность. cap = 2 — до двух матчей с одним напарником (по умолчанию). cap = 3 — до трёх: алгоритму проще балансировать составы, чуть точнее итоговая таблица." },
   ];
+  const isStep = f => f === "swiss" || f === "mexicano"; // раунды собираются по ходу турнира по таблице
   // ---- TeamAmericano (fixed pairs) helpers ----
   function teamTable(t, games) {
     // порядок пар: очки → победы → личные встречи (победы, затем разница) → общая разница
@@ -804,8 +851,20 @@ const DATA = BOOT.data;
     best.sort((x,y) => (strength(y[0][0])+strength(y[0][1])+strength(y[1][0])+strength(y[1][1])) - (strength(x[0][0])+strength(x[0][1])+strength(x[1][0])+strength(x[1][1])));
     return best;
   }
+  // Мексикано: порядок по таблице (раунд 1 — по Эло), четвёрки сверху вниз, в каждой 1+4 против 2+3
+  function generateMexicanoRound(t, games) {
+    const s = swissStats(t, games), { ratings } = computeElo();
+    const played = games.some(g => g.scoreA!=null && g.scoreB!=null);
+    const rnd = {}; s.ids.forEach(id => rnd[id] = Math.random());
+    const order = s.ids.slice().sort((a,b) => played
+      ? ((s.pts[b]||0)-(s.pts[a]||0)) || ((s.wins[b]||0)-(s.wins[a]||0)) || ((s.diff[b]||0)-(s.diff[a]||0)) || ((ratings[b]||1500)-(ratings[a]||1500)) || (rnd[a]-rnd[b])
+      : ((ratings[b]||1500)-(ratings[a]||1500)) || (rnd[a]-rnd[b]));
+    if (order.length < 4 || order.length % 4) return null;
+    const out = []; for (let i = 0; i < order.length; i += 4) { const q = order.slice(i, i+4); out.push([[q[0], q[3]], [q[1], q[2]]]); }
+    return out;
+  }
   function swissNextRound(tid) {
-    const t = byId(state.tournaments, tid); if (!t || t.format!=="swiss") return;
+    const t = byId(state.tournaments, tid); if (!t || !isStep(t.format)) return;
     const games = state.games.filter(g => g.tournamentId===tid);
     const last = games.length ? Math.max(...games.map(g=>g.round)) : 0;
     if (games.some(g => g.round===last && (g.scoreA==null || g.scoreB==null))) { toast("Сначала внесите все счета раунда " + last); return; }
@@ -816,11 +875,11 @@ const DATA = BOOT.data;
       if (!pg.length || unscored === pg.length) { toast("Сначала внесите счета этапа 1 — «" + linkedParent(t).name + "»"); return; }
       if (unscored && !confirm("В этапе 1 ещё не внесены счета " + plural(unscored, "игры", "игр", "игр") + ". Собрать пары по текущей таблице этапа 1?")) return;
     }
-    const matches = generateSwissRound(t, games);
+    const matches = t.format==="mexicano" ? generateMexicanoRound(t, games) : generateSwissRound(t, games);
     if (!matches) { toast("Нужно число участников, кратное 4"); return; }
     matches.forEach((m, i) => state.games.push({ id: tid+"-r"+round+"-c"+(i+1), tournamentId: tid, round, court: i+1, teamA: m[0], teamB: m[1], scoreA: null, scoreB: null, decided: false }));
     if (round > (t.rounds||0)) t.rounds = round;
-    addLog("SwissCourt «" + t.name + "»: собран раунд " + round);
+    addLog(formatLabel(t.format) + " «" + t.name + "»: собран раунд " + round);
     toast("Раунд " + round + " собран по таблице");
     render(); commit(1500);
   }
@@ -845,8 +904,8 @@ const DATA = BOOT.data;
       <div class="card" style="margin-top:14px;">
         <div class="row">
           <div>
-            <h3>Раунды SwissCourt</h3>
-            <p class="tiny">Сыграно ${last} из ${planned} · cap ${t.swissCap||2}${last < planned ? (lastDone ? " · можно собирать следующий" : " · внесите все счета раунда " + last) : " · все раунды сыграны"}</p>
+            <h3>Раунды ${t.format==="mexicano" ? "Мексикано" : "SwissCourt"}</h3>
+            <p class="tiny">Сыграно ${last} из ${planned}${t.format==="mexicano" ? " · 1+4 против 2+3 по таблице" : " · cap " + (t.swissCap||2)}${last < planned ? (lastDone ? " · можно собирать следующий" : " · внесите все счета раунда " + last) : " · все раунды сыграны"}</p>
           </div>
           <button class="btn primary sm" data-act="swiss-next-round" data-id="${t.id}" style="white-space:nowrap;" ${lastDone ? "" : "disabled"}>${last < planned ? "+ Раунд " + (last+1) : "+ Доп. раунд"}</button>
         </div>
@@ -1023,7 +1082,8 @@ const DATA = BOOT.data;
       format: null,
       teams: [],
       scoringType: null, scoringMode: null, scoringTarget: "", scoringMinutes: 20,
-      court: "", prizeEnabled: false, fee: "", places: 3, split: PRESETS[3].slice(),
+      // по умолчанию: фонд 200 с человека, призы 800 / 600 / 200 (всё можно поменять в форме)
+      court: "", prizeEnabled: true, fee: "200", places: 3, split: PRESETS[3].slice(), amounts: [800, 600, 200], amountsTouched: true,
     });
     const chips = active.map(p => `<span class="chip ${st.participants.includes(p.id)?'active':''}" data-act="toggle-participant" data-id="${p.id}">${esc(p.name)}</span>`).join("");
 
@@ -1106,6 +1166,13 @@ const DATA = BOOT.data;
           <p class="tiny" style="margin:8px 0 0;">${st.participants.length>=4 && st.participants.length%4===0
             ? `${st.participants.length/4} ${st.participants.length/4===1?"корт":st.participants.length/4<5?"корта":"кортов"}. Этап 1 (Американо) создастся сразу по расписанию. Этап 2 (SwissCourt) — раунды собираются внутри турнира кнопкой, первый — по таблице этапа 1. Таблица, Эло, призовой и рекорды общие.`
             : `Нужно число участников, кратное 4 (сейчас ${st.participants.length}).`}</p>`:""}
+        ${st.format==="mexicano" ? `
+          <div class="row" style="gap:10px;margin-top:10px;align-items:flex-end;">
+            <label class="field" style="flex:1;margin-bottom:0;"><span class="lbl">Раундов</span><input type="number" id="tRounds" min="1" max="20" value="${st.rounds ?? 5}"></label>
+          </div>
+          <p class="tiny" style="margin:8px 0 0;">${st.participants.length>=4 && st.participants.length%4===0
+            ? `${st.participants.length/4} ${st.participants.length/4===1?"корт":st.participants.length/4<5?"корта":"кортов"}, по 4 игрока на корт. Сейчас создастся раунд 1 (четвёрки по Эло), следующие — кнопкой «+ Раунд» по таблице: 1+4 против 2+3.`
+            : `Нужно число участников, кратное 4 (сейчас ${st.participants.length}).`}</p>` : ""}
         ${st.format==="swiss" ? `
           <div class="row" style="gap:10px;margin-top:10px;align-items:flex-end;">
             <label class="field" style="flex:1;margin-bottom:0;"><span class="lbl">Раундов</span><input type="number" id="tRounds" min="1" max="20" value="${st.rounds ?? 5}"></label>
@@ -1157,7 +1224,7 @@ const DATA = BOOT.data;
 
   function canGenerateDraft(st) {
     return !!(st.name && st.date && st.participants.length>=4 && st.format &&
-      (st.format==="americano" ? st.participants.length>=4 : (st.format==="swiss" || st.format==="two") ? st.participants.length%4===0 : st.teams.length*2===st.participants.length && st.teams.length>=2) &&
+      (st.format==="americano" ? st.participants.length>=4 : (isStep(st.format) || st.format==="two") ? st.participants.length%4===0 : st.teams.length*2===st.participants.length && st.teams.length>=2) &&
       st.scoringType && (st.scoringType==="time" || st.scoringMode==="tennis" || (st.scoringMode && st.scoringTarget)));
   }
   function refreshGenerateBtn() {
@@ -1198,7 +1265,7 @@ const DATA = BOOT.data;
             <label class="field" style="flex:1;margin-bottom:0;"><span class="lbl">Раундов (план)</span><input type="number" id="etRounds" min="1" max="20" value="${esc(e.rounds)}"></label>
             <div style="flex:2;"><span class="lbl" style="display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:6px;">Лимит повторов напарника (cap)</span>
               <div class="seg" id="etCap">${[1,2,3].map(k => `<button type="button" data-val="${k}" class="${e.swissCap===k?'active':''}">${k}</button>`).join("")}</div></div>
-          </div>` : t.format==="roundrobin" ? `<label class="field" style="margin-bottom:0;"><span class="lbl">Раундов (план)</span><input type="number" id="etRounds" min="1" max="40" value="${esc(e.rounds)}"></label>` : ""}
+          </div>` : t.format==="mexicano" ? `<label class="field" style="margin-bottom:0;"><span class="lbl">Раундов (план)</span><input type="number" id="etRounds" min="1" max="20" value="${esc(e.rounds)}"></label>` : t.format==="roundrobin" ? `<label class="field" style="margin-bottom:0;"><span class="lbl">Раундов (план)</span><input type="number" id="etRounds" min="1" max="40" value="${esc(e.rounds)}"></label>` : ""}
           <p class="tiny" style="margin:0;">Меняются только настройки${linkedParent(t) ? " (для обоих этапов)" : ""}. Уже внесённые счета, пары и раунды остаются как есть; «до X» влияет на подпись и на будущие раунды, а не пересчитывает сыгранное.</p>
           <div class="row" style="gap:8px;">
             <button class="btn block" data-act="edit-tournament" data-id="${t.id}">Отмена</button>
@@ -1227,7 +1294,7 @@ const DATA = BOOT.data;
       delete x.scoringSystem; delete x.target; // старый формат хранения
     });
     const after = scoringLabel(t); if (before !== after) changes.push("система очков: " + before + " → " + after);
-    if (t.format==="swiss" || t.format==="roundrobin") { const r = +e.rounds; if (r > 0 && r !== t.rounds) { changes.push("раундов " + (t.rounds||"—") + " → " + r); t.rounds = r; } }
+    if (isStep(t.format) || t.format==="roundrobin") { const r = +e.rounds; if (r > 0 && r !== t.rounds) { changes.push("раундов " + (t.rounds||"—") + " → " + r); t.rounds = r; } }
     if (t.format==="swiss" && e.swissCap !== t.swissCap) { changes.push("cap " + (t.swissCap||2) + " → " + e.swissCap); t.swissCap = e.swissCap; }
     if (changes.length) { addLog("Турнир «" + t.name + "»: " + changes.join("; ")); commit(1500); toast("Сохранено"); } else toast("Без изменений");
     state.view.editT = null; state._editT = null; render();
@@ -1241,7 +1308,7 @@ const DATA = BOOT.data;
     const byRound = {};
     games.forEach(g => { (byRound[g.round] = byRound[g.round]||[]).push(g); });
 
-    const isSwiss = t.format==="swiss";
+    const isSwiss = isStep(t.format);
     const isTeam = t.format==="roundrobin" && (t.teams||[]).length>=2;
     const parent = linkedParent(t), child = linkedChild(t);
     const sw = isSwiss ? swissStats(t, stageGames(t)) : null;
@@ -1293,7 +1360,7 @@ const DATA = BOOT.data;
       ${p1ByRound[r].map(g => matchHtml(g, parent)).join("")}`).join("")}
       <div class="section-head" style="margin:18px 0 6px;"><h2 style="font-size:17px;">Этап 2 · SwissCourt</h2><span class="tiny">${games.filter(g=>g.scoreA!=null).length}/${games.length} игр</span></div>` : "";
     const roundsHtml = stage1Html + Object.keys(byRound).sort((a,b)=>a-b).map(r => `
-      <h3 style="margin:${parent ? "12px" : "16px"} 0 8px;">Раунд ${r}${t.format==="swiss" ? ` <span class="tiny" style="font-weight:400;">${+r===1 ? (parent ? "· пары по таблице этапа 1" : "· баланс по Эло") : "· пары собраны по " + (parent ? "общей " : "") + "таблице после раунда " + (r-1)}</span>` : ""}</h3>
+      <h3 style="margin:${parent ? "12px" : "16px"} 0 8px;">Раунд ${r}${t.format==="mexicano" ? ` <span class="tiny" style="font-weight:400;">${+r===1 ? "· четвёрки по Эло" : "· 1+4 против 2+3 по таблице после раунда " + (r-1)}</span>` : t.format==="swiss" ? ` <span class="tiny" style="font-weight:400;">${+r===1 ? (parent ? "· пары по таблице этапа 1" : "· баланс по Эло") : "· пары собраны по " + (parent ? "общей " : "") + "таблице после раунда " + (r-1)}</span>` : ""}</h3>
       ${byRound[r].map(g => matchHtml(g, t)).join("")}
     `).join("");
 
@@ -1397,8 +1464,8 @@ const DATA = BOOT.data;
     const tb = tournamentTable(t.id);
     const diff = {};
     tb.games.forEach(g => { g.teamA.forEach(p => diff[p]=(diff[p]||0)+g.scoreA-g.scoreB); g.teamB.forEach(p => diff[p]=(diff[p]||0)+g.scoreB-g.scoreA); });
-    if (t.format === "swiss") {
-      // SwissCourt: очки → Buchholz → победы → разница; у продолжения — общая таблица с первым этапом
+    if (isStep(t.format)) {
+      // SwissCourt / Мексикано: очки → Buchholz → победы → разница; у продолжения — общая таблица с первым этапом
       const sw = swissStats(t, stageGames(t));
       const order = Object.keys(sw.gp).filter(id => sw.gp[id] > 0);
       return withPlace(order.sort((a,b) => (sw.pts[b]-sw.pts[a]) || ((sw.bh[b]||0)-(sw.bh[a]||0)) || ((sw.wins[b]||0)-(sw.wins[a]||0)) || ((sw.diff[b]||0)-(sw.diff[a]||0)))
@@ -1509,19 +1576,19 @@ const DATA = BOOT.data;
     if (ci < 0) { ci = ent.findIndex(e => !done(e)); if (ci < 0) ci = ent.length - 1; }
     const cur = ent[ci];
     const maxR = games.length ? Math.max(...games.map(g=>g.round)) : 0;
-    const planned = t.format==="swiss" ? Math.max(t.rounds||0, maxR) : maxR;
+    const planned = isStep(t.format) ? Math.max(t.rounds||0, maxR) : maxR;
     const chips = ent.map((e,i) => `<span class="chip sm rnd-chip ${i===ci?"active":""} ${done(e)?"done":""}" data-act="live-round" data-id="${t.id}" data-val="${e.key}" data-n="${ent.length}">${e.label}${done(e)?" ✓":""}</span>`).join("")
       + Array.from({ length: Math.max(0, planned - maxR) }, (_,i) => `<span class="chip sm rnd-chip future">${maxR+i+1}</span>`).join("");
     const inR = new Set(cur.games.flatMap(g => g.teamA.concat(g.teamB)));
     const tt = cur.t, team = (tt.format==="roundrobin" || tt.format==="playoff") && (tt.teams||[]).length>=2;
     const rest = team ? tt.teams.map(x=>x.players).filter(p => !inR.has(p[0])).map(p => esc(playerName(p[0]))+" + "+esc(playerName(p[1])))
       : (tt.participantIds||[]).filter(id => !inR.has(id)).map(id => esc(playerName(id)));
-    const swissNote = !cur.stage1 && t.format==="swiss" ? ` <span class="tiny" style="font-weight:400;">${cur.r===1 ? (parent ? "· пары по таблице этапа 1" : "· баланс по Эло") : "· пары по " + (parent ? "общей " : "") + "таблице после раунда " + (cur.r-1)}</span>` : "";
+    const swissNote = !cur.stage1 && t.format==="mexicano" ? ` <span class="tiny" style="font-weight:400;">${cur.r===1 ? "· четвёрки по Эло" : "· 1+4 против 2+3 по таблице"}</span>` : !cur.stage1 && t.format==="swiss" ? ` <span class="tiny" style="font-weight:400;">${cur.r===1 ? (parent ? "· пары по таблице этапа 1" : "· баланс по Эло") : "· пары по " + (parent ? "общей " : "") + "таблице после раунда " + (cur.r-1)}</span>` : "";
     let ctl = "";
     if (canWrite) {
       if (done(cur) && ci < ent.length-1) ctl = `<button class="btn primary block" data-act="live-round" data-id="${t.id}" data-val="${ent[ci+1].key}" data-n="${ent.length}">${ent[ci+1].stage1 === cur.stage1 ? "Перейти к раунду " + ent[ci+1].r : "Перейти к этапу 2"} ▸</button>`;
-      else if (!done(cur)) ctl = `<p class="tiny" style="text-align:center;margin:4px 0;">Внесите счёт всех матчей раунда ${cur.r}${ci === ent.length-1 && t.format==="swiss" && maxR < planned ? " — потом соберём раунд " + (maxR+1) : ""}</p>`;
-      else if (t.format==="swiss" && maxR < planned) ctl = `<p class="tiny" style="text-align:center;margin:4px 0;">Раунд ${cur.r} заполнен — соберите следующий кнопкой «+ Раунд» ниже</p>`;
+      else if (!done(cur)) ctl = `<p class="tiny" style="text-align:center;margin:4px 0;">Внесите счёт всех матчей раунда ${cur.r}${ci === ent.length-1 && isStep(t.format) && maxR < planned ? " — потом соберём раунд " + (maxR+1) : ""}</p>`;
+      else if (isStep(t.format) && maxR < planned) ctl = `<p class="tiny" style="text-align:center;margin:4px 0;">Раунд ${cur.r} заполнен — соберите следующий кнопкой «+ Раунд» ниже</p>`;
       else ctl = `<div class="all-done">🏁 Все раунды сыграны</div>`;
     }
     return `
@@ -1610,7 +1677,7 @@ const DATA = BOOT.data;
     const medal = i => i===0 ? "🥇" : i===1 ? "🥈" : i===2 ? "🥉" : (i+1)+".";
     const ed = eloDetail(t.id, linkedParent(t) ? [linkedParent(t).id] : []); const dl = id => (id in ed.delta) ? ", Эло " + fmtDelta(ed.delta[id]) : "";
     if (isPairFormat(t) && pairStandings(t).length) pairStandings(t).forEach(r => lines.push(`${medal(r.place-1)} ${playerName(r.players[0])} + ${playerName(r.players[1])} — ${r.pts} очк., ${r.w}-${r.d}-${r.l}`));
-    else if (t.format==="swiss") { const sw = swissStats(t, stageGames(t)); if (linkedParent(t)) lines.splice(1, 0, "Американо → SwissCourt · итог по двум этапам"); ranked.forEach((r, i) => lines.push(`${medal(i)} ${playerName(r.id)} — ${sw.pts[r.id]||0} очк., ${sw.wins[r.id]||0}-${sw.draws[r.id]||0}-${(sw.gp[r.id]||0)-(sw.wins[r.id]||0)-(sw.draws[r.id]||0)}${dl(r.id)}`)); }
+    else if (isStep(t.format)) { const sw = swissStats(t, stageGames(t)); if (linkedParent(t)) lines.splice(1, 0, "Американо → SwissCourt · итог по двум этапам"); ranked.forEach((r, i) => lines.push(`${medal(i)} ${playerName(r.id)} — ${sw.pts[r.id]||0} очк., ${sw.wins[r.id]||0}-${sw.draws[r.id]||0}-${(sw.gp[r.id]||0)-(sw.wins[r.id]||0)-(sw.draws[r.id]||0)}${dl(r.id)}`)); }
     else ranked.forEach((r, i) => lines.push(`${medal(i)} ${playerName(r.id)} — ${tb.pts[r.id]} очк., ${tb.wdl(r.id)}${dl(r.id)}`));
     const pp = prizePayouts(t);
     if (pp.payouts.length) { lines.push("", `💰 Призовой фонд ${fmtMoney(pp.pool)}:`); pp.payouts.forEach(p => lines.push(`${p.place===p.to ? p.place : p.place+"–"+p.to} место: ${p.ids.map(playerName).join(", ")} — ${fmtMoney(p.each)}`)); }
@@ -1631,7 +1698,7 @@ const DATA = BOOT.data;
     const tb = tournamentTable(t.id);
     const ranked = isPairFormat(t) && pairStandings(t).length
       ? pairStandings(t).map(r => ({ place: r.place, name: playerName(r.players[0]) + " + " + playerName(r.players[1]), pts: r.pts, wl: r.w + "-" + r.d + "-" + r.l }))
-      : t.format==="swiss" ? (() => { const sw = swissStats(t, stageGames(t)); return rankedForPrizes(t).map(r => ({ name: playerName(r.id), pts: sw.pts[r.id]||0, wl: (sw.wins[r.id]||0) + "-" + (sw.draws[r.id]||0) + "-" + ((sw.gp[r.id]||0)-(sw.wins[r.id]||0)-(sw.draws[r.id]||0)) })); })()
+      : isStep(t.format) ? (() => { const sw = swissStats(t, stageGames(t)); return rankedForPrizes(t).map(r => ({ name: playerName(r.id), pts: sw.pts[r.id]||0, wl: (sw.wins[r.id]||0) + "-" + (sw.draws[r.id]||0) + "-" + ((sw.gp[r.id]||0)-(sw.wins[r.id]||0)-(sw.draws[r.id]||0)) })); })()
       : rankedForPrizes(t).map(r => ({ name: playerName(r.id), pts: tb.pts[r.id], wl: tb.wdl(r.id) }));
     const W = 720, rowH = 46, top = 120, H = top + rowH*ranked.length + 40;
     const c = document.createElement("canvas"); c.width = W*2; c.height = H*2;
@@ -1864,8 +1931,9 @@ const DATA = BOOT.data;
   }
   // изменение Эло каждого матча (тот же расчёт, что в computeElo)
   function gameEloDeltas() {
-    const ratings = {}; state.players.forEach(p => ratings[p.id] = ELO_START); const out = {};
+    const ratings = eloInit(), ov = eloOverrides(ratings); const out = {};
     orderedGames().forEach(g => {
+      ov.before(g);
       if (g.scoreA == null || g.scoreB == null) return;
       const total = g.scoreA + g.scoreB; if (total <= 0) return;
       const eA = 1/(1+Math.pow(10, (avgRating(g.teamB, ratings)-avgRating(g.teamA, ratings))/400));
@@ -1924,8 +1992,9 @@ const DATA = BOOT.data;
       <div class="card hero">
         <div class="hero-top">
           <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(playerName(pid))}${publicName(pid) ? ` <span class="pub-name">(${esc(publicName(pid))})</span>` : ""}</div><div class="tiny">${rank >= 0 ? `#${rank+1} в лиге из ${board.length}` : "ещё не играл"}${p && !p.active ? " · не играет" : ""}</div>${canEditProfile(pid) ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="profile-edit" data-id="${pid}">✎ Редактировать</button>` : ""}</div></div>
-          <div class="hero-elo"><span>${Math.round(ratings[pid]||1500)}</span><small>Эло</small></div>
+          <div class="hero-elo"><span>${Math.round(ratings[pid]||1500)}</span><small>Эло${canWrite && p ? ` <button class="edit-pen" data-act="elo-edit" data-id="${pid}" title="изменить Эло вручную">✎</button>` : ""}</small></div>
         </div>
+        ${canWrite && p && state.view.eloEdit === pid ? eloEditHtml(p, ratings[pid]) : ""}
         <div class="hero-grid">
           <div><strong>${prof.gp}</strong><span>игр</span></div>
           <div><strong>${prof.w}-${prof.d}-${prof.l}</strong><span>W-D-L</span></div>
@@ -1969,6 +2038,21 @@ const DATA = BOOT.data;
           <button class="btn sm primary" data-act="pf-save" data-id="${pid}">Сохранить</button>
         </div>
       </div>`;
+  }
+  function eloEditHtml(p, cur) {
+    const manual = (p.eloAdj || []).length || (+p.eloStart && +p.eloStart !== ELO_START);
+    const lastT = lastScoredTournament();
+    return `<div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);">
+      <div class="row" style="gap:8px;align-items:flex-end;">
+        <label class="field" style="flex:1;margin-bottom:0;"><span class="lbl">Эло вручную (сейчас ${Math.round(cur || ELO_START)})</span><input type="number" id="eloInput" min="100" max="4000" step="1" value="${Math.round(cur || ELO_START)}" inputmode="numeric"></label>
+        <button class="btn sm" data-act="elo-cancel">Отмена</button>
+        <button class="btn sm primary" data-act="elo-save" data-id="${p.id}">Сохранить</button>
+      </div>
+      <p class="tiny" style="margin:8px 0 0;">${lastT
+        ? `Эло станет таким с этого момента (после последнего сыгранного матча — «${esc(lastT.name)}»), следующие матчи считаются уже от него. Прошлые матчи не меняются.`
+        : `Матчей в лиге ещё нет — это будет стартовое Эло игрока.`}</p>
+      ${manual ? `<p class="tiny" style="margin:6px 0 0;">У игрока уже есть ручные правки Эло. <button class="edit-pen" style="font-size:12px;text-decoration:underline;" data-act="elo-reset" data-id="${p.id}">Сбросить все</button></p>` : ""}
+    </div>`;
   }
   function readAvatarFile(file) {
     return new Promise((res, rej) => {
@@ -2087,11 +2171,13 @@ const DATA = BOOT.data;
   function gameLabel(g) { const t = byId(state.tournaments, g.tournamentId); return (t ? t.name : "") + " · р." + g.round; }
   function eloByTournament() {
     // rating of every player after each tournament (chronological)
-    const ratings = {}; state.players.forEach(p => ratings[p.id] = ELO_START);
+    const ratings = eloInit(), ov = eloOverrides(ratings);
     const out = {};
     const games = orderedGames();
-    state.tournaments.forEach(t => {
+    state.tournaments.slice().sort((a,b) => (a.seq||0) - (b.seq||0)).forEach(t => {
+      ov.through((t.seq||0) - 1);
       games.filter(g => g.tournamentId===t.id && g.scoreA!=null && g.scoreB!=null).forEach(g => {
+        ov.before(g);
         const total = g.scoreA+g.scoreB; if (total<=0) return;
         const rA = avgRating(g.teamA, ratings), rB = avgRating(g.teamB, ratings);
         const eA = 1/(1+Math.pow(10,(rB-rA)/400));
@@ -2690,6 +2776,10 @@ const DATA = BOOT.data;
       else if (act==="open-profile") el.onclick = (ev) => { ev.stopPropagation(); openProfile(el.dataset.id); };
       else if (act==="profile-back") el.onclick = () => { const back = state.view.profileBack || "players"; state.view.profilePid = null; state.view.profileEdit = false; state._pf = null; state.tab = back === "profile" ? "players" : back; render(); };
       else if (act==="profile-edit") el.onclick = () => { if (!canEditProfile(el.dataset.id)) return; state.view.profileEdit = true; state._pf = null; render(); const i = document.getElementById("pfName"); if (i) i.focus(); };
+      else if (act==="elo-edit") el.onclick = () => { if (!canWrite) return; state.view.eloEdit = state.view.eloEdit === el.dataset.id ? null : el.dataset.id; render(); const i = document.getElementById("eloInput"); if (i) { i.focus(); i.select(); } };
+      else if (act==="elo-cancel") el.onclick = () => { state.view.eloEdit = null; render(); };
+      else if (act==="elo-save") el.onclick = () => { const i = document.getElementById("eloInput"); if (!i) return; const v = +i.value; if (!v || v < 100 || v > 4000) { toast("Эло — число от 100 до 4000"); return; } if (setEloNow(el.dataset.id, v)) toast("Эло обновлено"); state.view.eloEdit = null; render(); };
+      else if (act==="elo-reset") el.onclick = () => { if (!confirm("Сбросить все ручные правки Эло этого игрока? Эло пересчитается только по матчам.")) return; resetEloAdj(el.dataset.id); state.view.eloEdit = null; toast("Ручные правки сброшены"); render(); };
       else if (act==="pf-cancel") el.onclick = () => { state.view.profileEdit = false; state._pf = null; render(); };
       else if (act==="pf-save") el.onclick = () => saveProfileEdit(el.dataset.id);
       else if (act==="pf-photo") el.onclick = () => { const f = document.getElementById("pfPhoto"); if (f) f.click(); };
@@ -2784,7 +2874,7 @@ const DATA = BOOT.data;
     if (fmt) fmt.querySelectorAll(".chip[data-val]").forEach(b => b.onclick = (ev) => {
       if (ev.target.closest(".fmt-info")) return;
       const d = getDraft(); d.format = b.dataset.val; d.teams=[];
-      if (d.format==="swiss" && !d.scoringType) { d.scoringType="points"; d.scoringMode="race"; d.scoringTarget=21; } // по умолчанию матч до 21 очка
+      if (isStep(d.format) && !d.scoringType) { d.scoringType="points"; d.scoringMode="race"; d.scoringTarget=21; } // по умолчанию матч до 21 очка
       if (d.format==="two" && !d.scoringType) { d.scoringType="points"; d.scoringMode="fixed"; d.scoringTarget=16; } // два этапа за вечер — «всего 16»
       render();
     });
@@ -3045,6 +3135,12 @@ const DATA = BOOT.data;
         if (!matches) { toast("Не удалось собрать 1-й раунд"); return; }
         matches.forEach((m, i) => scheduleGames.push({ id: id+"-r1-c"+(i+1), tournamentId:id, round:1, court:i+1, teamA:m[0], teamB:m[1], scoreA:null, scoreB:null, decided:false }));
       }
+    } else if (d.format === "mexicano") {
+      if (d.participants.length < 4 || d.participants.length % 4) { toast("Мексикано: нужно число участников, кратное 4"); return; }
+      d.courts = d.participants.length / 4;
+      const matches = generateMexicanoRound({ participantIds: d.participants }, []);
+      if (!matches) { toast("Не удалось собрать 1-й раунд"); return; }
+      matches.forEach((m, i) => scheduleGames.push({ id: id+"-r1-c"+(i+1), tournamentId:id, round:1, court:i+1, teamA:m[0], teamB:m[1], scoreA:null, scoreB:null, decided:false }));
     } else if (d.format === "playoff") {
       if (d.teams.length !== 4) { toast("Плей-офф пока поддерживает ровно 4 команды"); return; }
       const t = d.teams;
@@ -3059,7 +3155,7 @@ const DATA = BOOT.data;
       scoringType: d.scoringType, scoringMode: d.scoringMode, scoringTarget: d.scoringMode==="tennis" ? 6 : (d.scoringTarget? +d.scoringTarget : null),
       scoringMinutes: d.scoringType==="time"? d.scoringMinutes : null,
       teams: d.teams,
-      rounds: d.format==="swiss" ? (+d.rounds || 5) : undefined,
+      rounds: isStep(d.format) ? (+d.rounds || 5) : undefined,
       swissCap: d.format==="swiss" ? (d.swissCap || 2) : undefined,
       linkedTo: d.format==="swiss" && d.linkedTo ? d.linkedTo : undefined,
       money: { court: d.court==="" ? null : Math.max(0,+d.court), prize: { enabled: !!d.prizeEnabled, fee: d.fee==="" ? null : Math.max(0,+d.fee), places: d.places||3, amounts: (d.amounts && d.amounts.length===(d.places||3)) ? d.amounts.map(x=>+x||0) : defaultAmounts((+d.fee||0)*d.participants.length, d.places||3) } },
