@@ -902,12 +902,12 @@ const DATA = BOOT.data;
     }
     return `
       <div class="card" style="margin-top:14px;">
-        <div class="row">
-          <div>
+        <div class="row" style="gap:10px;align-items:center;">
+          <div style="flex:1;min-width:0;">
             <h3>Раунды ${t.format==="mexicano" ? "Мексикано" : "SwissCourt"}</h3>
             <p class="tiny">Сыграно ${last} из ${planned}${t.format==="mexicano" ? " · 1+4 против 2+3 по таблице" : " · cap " + (t.swissCap||2)}${last < planned ? (lastDone ? " · можно собирать следующий" : " · внесите все счета раунда " + last) : " · все раунды сыграны"}</p>
           </div>
-          <button class="btn primary sm" data-act="swiss-next-round" data-id="${t.id}" style="white-space:nowrap;" ${lastDone ? "" : "disabled"}>${last < planned ? "+ Раунд " + (last+1) : "+ Доп. раунд"}</button>
+          <button class="btn primary sm" data-act="swiss-next-round" data-id="${t.id}" style="white-space:nowrap;flex:none;" ${lastDone ? "" : "disabled"}>${last < planned ? "+ Раунд " + (last+1) : "+ Доп. раунд"}</button>
         </div>
         ${lastEmpty && (last > 1 || parent) ? `<button class="btn ghost sm danger" data-act="remove-round" data-id="${t.id}" style="margin-top:6px;">Убрать раунд ${last} (без счёта)${last===1 && parent ? " — пересобрать по этапу 1" : ""}</button>` : ""}
       </div>`;
@@ -1345,12 +1345,14 @@ const DATA = BOOT.data;
     const eloPanel = state.view.eloDetail === tid ? eloDetailHtml(t, isSwiss ? stageGames(t) : games, ed) : "";
     const allG = isSwiss ? stageGames(t) : games;
     const anyScored = allG.some(g => g.scoreA!=null && g.scoreB!=null);
-    const finished = allG.length > 0 && allG.every(g => g.scoreA!=null && g.scoreB!=null); // все игры внесены — турнир прошёл
+    // все игры внесены — турнир прошёл (у SwissCourt/Мексикано — ещё и сыграны все запланированные раунды)
+    const maxRound = Math.max(0, ...games.map(g => g.round || 0));
+    const finished = allG.length > 0 && allG.every(g => g.scoreA!=null && g.scoreB!=null) && !(isSwiss && maxRound < (t.rounds || 0));
     const factsPanel = state.view.tFacts === tid && !finished ? tournamentFactsHtml(t, allG, ed) : "";
     const stageNote = "";
     const p1Games = parent ? state.games.filter(g=>g.tournamentId===parent.id).sort((a,b)=> a.round-b.round || a.court-b.court) : [];
-    // турнир идёт: как в приложении сообщества — вкладки «Матчи | Таблица»
-    const running = !finished && (allG.length > 0 || p1Games.length > 0), liveTab = state.view.liveTab === "t" ? "t" : "m";
+    // турнир идёт: вкладки «Матчи | Таблица | Финансы»
+    const running = !finished && (allG.length > 0 || p1Games.length > 0), liveTab = ["t","f"].includes(state.view.liveTab) ? state.view.liveTab : "m";
     const p1ByRound = {}; p1Games.forEach(g => { (p1ByRound[g.round] = p1ByRound[g.round]||[]).push(g); });
     const p1Done = p1Games.length && p1Games.every(g => g.scoreA!=null && g.scoreB!=null);
     const stage1Html = parent ? `
@@ -1372,8 +1374,8 @@ const DATA = BOOT.data;
       ${stageNote}
       ${canWrite && state.view.editT === tid ? tournamentEditHtml(t) : ""}
 
-      ${running ? `<div class="seg live-tabs"><button class="${liveTab==="m"?"active":""}" data-act="live-tab" data-val="m">Матчи</button><button class="${liveTab==="t"?"active":""}" data-act="live-tab" data-val="t">Таблица</button></div>` : ""}
-      ${running && liveTab === "m" ? "" : `<div class="card">
+      ${running ? `<div class="seg live-tabs"><button class="${liveTab==="m"?"active":""}" data-act="live-tab" data-val="m">Матчи</button><button class="${liveTab==="t"?"active":""}" data-act="live-tab" data-val="t">Таблица</button><button class="${liveTab==="f"?"active":""}" data-act="live-tab" data-val="f">Финансы</button></div>` : ""}
+      ${running && liveTab !== "t" ? "" : `<div class="card">
         <h3>Таблица</h3>
         <div class="toolbar">
           ${anyScored && !finished ? `<button class="btn sm${state.view.tFacts===tid?' primary':''}" data-act="t-facts" data-id="${tid}" title="интересное за турнир">Факты</button>` : ""}
@@ -1388,12 +1390,13 @@ const DATA = BOOT.data;
       ${finished ? `<div class="card"><h3>Статистика турнира</h3>${linkedParent(t) ? `<p class="tiny" style="margin:4px 0 0;">По обоим этапам вместе.</p>` : ""}<div style="margin-top:8px;">${factsListHtml(gameFacts(allG, ed))}</div></div>` : ""}
 
       ${finished ? `<button class="rounds-toggle ${state.view.roundsOpen === tid ? "open" : ""}" data-act="toggle-rounds" data-id="${tid}">${state.view.roundsOpen === tid ? "Скрыть раунды" : `Посмотреть раунды · ${Object.keys(byRound).length + (parent ? Object.keys(p1ByRound).length : 0)}`}<span class="chev">›</span></button>` : ""}
-      ${!finished ? (running && liveTab === "t" ? "" : roundStripHtml(t, games, parent, p1Games)) : state.view.roundsOpen === tid ? roundsHtml : ""}
+      ${!finished ? (running && liveTab !== "m" ? "" : roundStripHtml(t, games, parent, p1Games)) : state.view.roundsOpen === tid ? roundsHtml : ""}
 
-      ${financeCardHtml(t)}
-
+      ${!running || liveTab === "m" ? `
       ${canWrite && t.format==="roundrobin" && (t.teams||[]).length>=2 ? roundControlsHtml(t, games) : ""}
-      ${canWrite && isSwiss ? swissControlsHtml(t, games) : ""}
+      ${canWrite && isSwiss ? swissControlsHtml(t, games) : ""}` : ""}
+
+      ${!running || liveTab === "f" ? financeCardHtml(t) : ""}
 
       ${canWrite ? (state.view.confirmDelete === tid ? `
         <div class="card" style="border-color:var(--danger);margin-top:18px;">
