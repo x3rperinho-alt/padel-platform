@@ -25,21 +25,53 @@ function loginScreen(db) {
   });
 }
 
+// Кэш последних данных на устройстве: приложение открывается мгновенно на нём, а свежие данные подтягиваются следом.
+const CACHE_KEY = () => "c048_cache_v1:" + location.pathname;
+export function saveCache(tgId, user, data) {
+  if (!tgId || !user || !data) return;
+  try { localStorage.setItem(CACHE_KEY(), JSON.stringify({ tgId, user, data, at: Date.now() })); } catch (e) {}
+}
+function readCache(tgId) {
+  try { const c = JSON.parse(localStorage.getItem(CACHE_KEY()) || "null");
+    if (c && c.tgId === tgId && c.user && c.user.role && c.data && Date.now() - c.at < 14 * 864e5) return c; } catch (e) {}
+  return null;
+}
+
 export async function bootstrap(db) {
-  screen(`<p class="tiny">…</p>`);
   const tg = window.Telegram && window.Telegram.WebApp;
+  const tgUser = tg && tg.initData && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  const tgId = tgUser ? tgUser.id : null, tgLang = tgUser ? tgUser.language_code : null;
   if (tg && tg.initData) {
     try { tg.ready(); tg.expand(); } catch (e) {}
     // свайп вниз по странице не должен сворачивать мини-приложение — пусть он просто листает интерфейс
     try { if (tg.disableVerticalSwipes) tg.disableVerticalSwipes(); } catch (e) {}
-    try { await db.signInTelegram(tg.initData); }
-    catch (e) { screen(`<h3>Telegram</h3><p class="tiny">${esc(e.message)}</p>`); throw e; }
   }
-  let s = await db.session();
-  if (!s) s = await loginScreen(db);
-  await db.ensureProfile();
-  let user = await db.me();
-  if (!user || !user.role) { try { await db.joinOpen(); } catch (e) { screen(`<h3>Closed</h3><p class="tiny">${esc(e.message)}</p>`); throw e; } user = await db.me(); }
-  const data = await db.loadAll();
-  return { user, data, tgLang: tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.language_code : null };
+  // полный путь входа и загрузки (раньше он всегда блокировал открытие)
+  const full = async (quiet) => { // quiet — приложение уже открыто из кэша, ошибки не рисуем поверх него
+    if (tg && tg.initData) {
+      // уже есть живая сессия этого же Telegram-аккаунта — не ждём вход заново, обновляем его в фоне
+      const s0 = await db.session().catch(() => null);
+      const same = s0 && tgId && s0.user && s0.user.email === `tg${tgId}@telegram.local`;
+      if (same) db.signInTelegram(tg.initData).catch(() => {});
+      else { try { await db.signInTelegram(tg.initData); }
+        catch (e) { if (!quiet) screen(`<h3>Telegram</h3><p class="tiny">${esc(e.message)}</p>`); throw e; } }
+    }
+    let s = await db.session();
+    if (!s) { if (quiet) return null; s = await loginScreen(db); }
+    const dataP = db.loadAll().catch(() => null); // данные грузим параллельно с проверкой профиля
+    let [user] = await Promise.all([db.me(), db.ensureProfile()]);
+    let data;
+    if (!user || !user.role) { try { await db.joinOpen(); } catch (e) { if (!quiet) screen(`<h3>Closed</h3><p class="tiny">${esc(e.message)}</p>`); throw e; }
+      user = await db.me(); data = await db.loadAll(); }
+    else data = (await dataP) || await db.loadAll();
+    saveCache(tgId, user, data);
+    return { user, data };
+  };
+  const cached = tgId ? readCache(tgId) : null;
+  if (cached) {
+    return { user: cached.user, data: cached.data, tgLang, tgId, fresh: full(true).catch(e => { console.error(e); return null; }) };
+  }
+  screen(`<p class="tiny">…</p>`);
+  const r = await full();
+  return { ...r, tgLang, tgId, fresh: null };
 }

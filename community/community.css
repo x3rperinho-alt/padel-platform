@@ -480,3 +480,9 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
 .split-seg { display: inline-flex; flex: 0 0 auto; }
 .split-seg button { min-width: 44px; padding: 6px 12px; font-weight: 700; }
 .split-seg button.auto { opacity: .7; outline: 1px dashed rgba(255,122,26,.6); outline-offset: -3px; }
+
+/* нажатие принято — идёт сохранение (кнопка не реагирует на повторный тап) */
+.busy { opacity: .55; pointer-events: none; position: relative; transition: opacity .12s; }
+.btn.busy::after { content: ""; position: absolute; right: 8px; top: 50%; width: 12px; height: 12px; margin-top: -6px; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent; animation: busySpin .7s linear infinite; }
+@keyframes busySpin { to { transform: rotate(360deg); } }

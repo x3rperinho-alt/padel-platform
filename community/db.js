@@ -41,8 +41,9 @@ export function createDb(cfg) {
   async function signOut() { await sb.auth.signOut(); }
   async function me() {
     const s = await session(); if (!s) return null;
-    const { data: m } = await sb.from("league_members").select("role, player_id").eq("league_id", L).eq("user_id", s.user.id).maybeSingle();
-    const { data: p } = await sb.from("profiles").select("display_name").eq("user_id", s.user.id).maybeSingle();
+    const [{ data: m }, { data: p }] = await Promise.all([ // два запроса параллельно, а не по очереди
+      sb.from("league_members").select("role, player_id").eq("league_id", L).eq("user_id", s.user.id).maybeSingle(),
+      sb.from("profiles").select("display_name").eq("user_id", s.user.id).maybeSingle()]);
     return { id: s.user.id, role: m ? m.role : null, playerId: m ? m.player_id : null, name: (p && p.display_name) || s.user.user_metadata?.name || s.user.email || "" };
   }
   async function ensureProfile(name) {

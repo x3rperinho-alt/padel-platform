@@ -1,7 +1,7 @@
 // 048 Padel Community — турниры по уровням с записью, рейтинг Эло по анкете, профили. Счёт вносит только админ.
 import { CONFIG } from "./config.js";
 import { createDb } from "./db.js";
-import { bootstrap } from "./auth.js";
+import { bootstrap, saveCache } from "./auth.js";
 import { americanoSchedule, defaultAmericanoRounds, mexicanoRound, swissRound, balanceTeams, roundRobinSchedule, playerTable, teamTable, playoffFirst, playoffNext, playoffPlaces, isBracket } from "./engine.js";
 import { t, setLang, getLang, detectLang, LANGS, dateFmt, quiz, quizLevel, quizElo } from "./i18n.js";
 import { createGames, timeRangeHtml, shiftEnd } from "./games.js";
@@ -212,7 +212,17 @@ setLang(detectLang(BOOT.tgLang));
   let savingN = 0, saveEpoch = 0; // сколько счетов сейчас сохраняется; номер «поколения» сохранений
   async function reload() { try { const ep = saveEpoch; const d = await db.loadAll();
       if (savingN || ep !== saveEpoch) { pendingLive = true; return; } // пока грузили, ушёл новый счёт — эти данные уже устарели
-      Object.assign(state, d); render(); } catch (e) { console.error(e); } }
+      Object.assign(state, d); render(); cacheSoon(); } catch (e) { console.error(e); } }
+  let cacheT; const cacheSoon = () => { clearTimeout(cacheT); cacheT = setTimeout(() => saveCache(BOOT.tgId, U, { league: state.league, players: state.players, tournaments: state.tournaments, games: state.games, registrations: state.registrations }), 1500); };
+  // открылись из кэша — подменяем на свежие данные, как только они придут
+  if (BOOT.fresh) BOOT.fresh.then(r => { if (!r) return; Object.assign(U, r.user);
+    if (savingN) { pendingLive = true; return; } Object.assign(state, r.data); if (isField(document.activeElement)) { pendingLive = true; return; } render(); });
+  // мгновенная правка в интерфейсе: меняем сразу, сохраняем в фоне, при ошибке откатываем
+  async function optimistic(apply, save, revert) {
+    apply(); savingN++; saveEpoch++; render();
+    try { await save(); } catch (e) { revert(); render(); err(e); }
+    finally { savingN--; if (pendingLive && !savingN && !isField(document.activeElement)) liveReload(); else cacheSoon(); }
+  }
   let reloadTimer, pendingLive = false;
   const liveReload = () => { if (isField(document.activeElement) || savingN) { pendingLive = true; return; } pendingLive = false; reload(); };
   db.subscribe(() => { clearTimeout(reloadTimer); reloadTimer = setTimeout(liveReload, 600); });
@@ -409,8 +419,15 @@ setLang(detectLang(BOOT.tgLang));
       ${canEditT(tt) && tt.status !== "played" ? runCardHtml(tt) : ""}
       ${canEditT(tt) && state.group && tt.status === "scheduled" && isUpcoming(tt) ? `<button class="btn block" style="margin-bottom:12px;" data-act="t-announce" data-id="${esc(tid)}">${t("announce_btn")}</button>` : ""}
       ${labelsCardHtml(tt, main.map(r => r.playerId))}
-      ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${state.players.filter(p => p.active && !regs.some(r => r.playerId === p.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(p => `<option value="${p.id}">${esc(p.name)}${p.label ? " (" + esc(p.label) + ")" : ""} · ${letter(lvNow(p))}</option>`).join("")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
+      ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><input id="addRegQ" data-act="reg-q" data-id="${tid}" type="search" autocomplete="off" placeholder="${t("search")}" value="${esc(state._addQ || "")}" style="margin-top:8px;"><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${addRegOptions(tid, state._addQ || "")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
         <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`;
+  }
+  // игроки, которых админ может добавить в турнир (без уже записанных), с фильтром по имени
+  function addRegOptions(tid, q) {
+    const taken = new Set(state.registrations.filter(r => r.tournamentId === tid && r.status !== "cancelled").map(r => r.playerId));
+    const qq = String(q || "").trim().toLowerCase();
+    const list = state.players.filter(p => p.active && !taken.has(p.id) && (!qq || (p.name + " " + (p.label || "")).toLowerCase().includes(qq))).sort((a,b) => a.name.localeCompare(b.name));
+    return list.map(p => `<option value="${p.id}">${esc(p.name)}${p.label ? " (" + esc(p.label) + ")" : ""} · ${letter(lvNow(p))}</option>`).join("") || `<option value="">—</option>`;
   }
   // ---------- итоги турнира: таблица, статистика, раунды по кнопке ----------
   function tournamentResultsHtml(tt, tGames) {
@@ -1487,7 +1504,8 @@ setLang(detectLang(BOOT.tgLang));
   function bind(v) {
     v.querySelectorAll("[data-act]").forEach(el => {
       const a = el.dataset.act, id = el.dataset.id;
-      const on = fn => { el.onclick = ev => { ev.stopPropagation(); fn(ev); }; };
+      const on = fn => { el.onclick = ev => { ev.stopPropagation(); if (el.classList.contains("busy")) return; const r = fn(ev);
+        if (r && typeof r.then === "function") { el.classList.add("busy"); r.finally(() => el.classList.remove("busy")); } }; };
       if (G.act(a, el, id, on)) return;
       if (a === "ob-source") on(() => { keepOnb(); if (state._onb.source !== el.dataset.val) state._onb.level = ""; state._onb.source = el.dataset.val; render(); });
       else if (a === "ob-save" || a === "quiz-save") on(saveOnboarding);
@@ -1518,13 +1536,27 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "reg-pair") on(async () => { const sel = document.getElementById("partnerSel"); if (!sel || !sel.value) return; try { const r = await db.register(id, null, sel.value); state.view.partnerFor = null; await reload(); toast(regToast(r)); } catch (e) { toast(regErrMsg(String(e.message || ""))); } });
       else if (a === "reg-approve" || a === "reg-reject") on(async () => { try { await db.reviewRegistration(el.dataset.tid, el.dataset.pid, a === "reg-approve" ? "approve" : "reject"); await reload(); toast(a === "reg-approve" ? t("approved_toast") : t("rejected_toast")); } catch (e) { err(e); } });
       else if (a === "unreg") on(async () => { try { await db.unregister(id); await reload(); } catch (e) { err(e); } });
-      else if (a === "reg-paid") on(async () => { const r = regsOf(el.dataset.tid).find(x => x.playerId === el.dataset.pid); try { await db.setRegistration(el.dataset.tid, el.dataset.pid, { paid: !r.paid }); await reload(); } catch (e) { err(e); } });
+      else if (a === "reg-paid") on(() => { const r = regsOf(el.dataset.tid).find(x => x.playerId === el.dataset.pid); if (!r) return; const v = !r.paid;
+        return optimistic(() => { r.paid = v; }, () => db.setRegistration(el.dataset.tid, el.dataset.pid, { paid: v }), () => { r.paid = !v; }); });
       else if (a === "reg-move") on(async () => { const tid = el.dataset.tid, tt = byId(state.tournaments, tid), to = el.dataset.to; let patch = { status: to };
         if (isPairs(tt)) { if (to === "main") { const n = firstFreeTeam(tid, 1); if (n == null) { toast(t("no_free_place")); return; } patch.team_no = n; } else patch.team_no = null; }
-        try { await db.setRegistration(tid, el.dataset.pid, patch); await reload(); } catch (e) { err(e); } });
-      else if (a === "reg-remove") on(async () => { try { await db.removeRegistration(el.dataset.tid, el.dataset.pid); await db.promoteReserve(el.dataset.tid).catch(() => {}); await reload(); } catch (e) { err(e); } });
+        const r = regsOf(tid).find(x => x.playerId === el.dataset.pid); if (!r) return; const was = { status: r.status, team: r.team };
+        return optimistic(() => { r.status = patch.status; if ("team_no" in patch) r.team = patch.team_no; }, () => db.setRegistration(tid, el.dataset.pid, patch), () => Object.assign(r, was)); });
+      else if (a === "reg-remove") on(async () => { const tid = el.dataset.tid, pid = el.dataset.pid;
+        const was = state.registrations.slice(); state.registrations = state.registrations.filter(r => !(r.tournamentId === tid && r.playerId === pid)); render();
+        try { await db.removeRegistration(tid, pid); await db.promoteReserve(tid).catch(() => {}); reload(); } catch (e) { state.registrations = was; render(); err(e); } });
       else if (a === "reg-add") on(async () => { const sel = document.getElementById("addRegSel"); if (!sel || !sel.value) return; const ts = document.getElementById("addRegTeam");
-        const team = ts ? (ts.value ? +ts.value : null) : null; try { await db.addRegistration(id, sel.value, ts && !ts.value ? "reserve" : "main", team); await reload(); } catch (e) { err(e); } });
+        const team = ts ? (ts.value ? +ts.value : null) : null, pid = sel.value, status = ts && !ts.value ? "reserve" : "main";
+        // сразу показываем игрока в списке, сохраняем в фоне (раньше ждали сохранение + полную перезагрузку всех данных — отсюда лаг)
+        const reg = { tournamentId: id, playerId: pid, status, paid: false, at: new Date().toISOString(), team, approval: "ok", addedBy: null };
+        state.registrations = state.registrations.filter(r => !(r.tournamentId === id && r.playerId === pid)).concat([reg]);
+        state._addQ = ""; savingN++; saveEpoch++; render();
+        const q = document.getElementById("addRegQ"); if (q && !(window.matchMedia && matchMedia("(pointer:coarse)").matches)) q.focus();
+        try { await db.addRegistration(id, pid, status, team); }
+        catch (e) { state.registrations = state.registrations.filter(r => r !== reg); render(); err(e); }
+        finally { savingN--; if (pendingLive && !savingN && !isField(document.activeElement)) liveReload(); } });
+      else if (a === "reg-q") { el.oninput = () => { state._addQ = el.value; const sel = document.getElementById("addRegSel"); if (sel) sel.innerHTML = addRegOptions(id, el.value); };
+        el.onkeydown = ev => { if (ev.key === "Enter") { ev.preventDefault(); const b = el.closest(".card") && el.closest(".card").querySelector('[data-act="reg-add"]'); if (b) b.click(); } }; }
       else if (a === "p-edit-contacts") on(() => { state._pf = null; state.view.editP = id; render(); const f = document.getElementById("pfContacts"); if (f) f.scrollIntoView({ block: "start", behavior: "smooth" }); const i = document.getElementById("pfc_phone"); if (i) i.focus({ preventScroll: true }); });
       else if (a === "lv-step") on(() => { keepPf(); const pf = state._pf; pf.level = Math.round((pf.level + +el.dataset.val) * 10) / 10; render(); });
       else if (a === "run-open") on(() => { const tt = byId(state.tournaments, id); state._run = initRun(tt); state.view.run = id; window.scrollTo(0, 0); render(); });
@@ -1600,12 +1632,17 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "rv-approve") on(async () => { const inp = document.getElementById("rv_" + id); const lv = inp && inp.value !== "" ? +inp.value : null; try { await db.reviewLevel(id, "approve", lv); await reload(); toast(t("saved")); } catch (e) { err(e); } });
       else if (a === "rv-quiz") on(async () => { try { await db.reviewLevel(id, "quiz"); await reload(); toast(t("saved")); } catch (e) { err(e); } });
       else if (a === "adm-tab") on(() => { state.view.adm = el.dataset.val; render(); });
-      else if (a === "adm-confirm") on(async () => { const p = byId(state.players, id); try { await db.updatePlayer(id, { confirmed: !p.confirmed }); await db.addLog((p.confirmed ? "Снял подтверждение: " : "Подтвердил Эло: ") + p.name); await reload(); } catch (e) { err(e); } });
-      else if (a === "adm-active") on(async () => { const p = byId(state.players, id); try { await db.updatePlayer(id, { active: !p.active }); await reload(); } catch (e) { err(e); } });
-      else if (a === "adm-level") el.onchange = async () => { const p = byId(state.players, id); const lv = el.value === "" ? null : +el.value; try { await db.updatePlayer(id, { level: lv, eloStart: levelElo(lv), levelStatus: lv == null ? p.levelStatus : "ok" }); await db.addLog(`Уровень ${p.name}: ${p.level} → ${lv}`); await reload(); } catch (e) { err(e); } };
+      else if (a === "adm-confirm") on(() => { const p = byId(state.players, id); if (!p) return; const v = !p.confirmed;
+        return optimistic(() => { p.confirmed = v; }, async () => { await db.updatePlayer(id, { confirmed: v }); db.addLog((v ? "Подтвердил Эло: " : "Снял подтверждение: ") + p.name).catch(() => {}); }, () => { p.confirmed = !v; }); });
+      else if (a === "adm-active") on(() => { const p = byId(state.players, id); if (!p) return; const v = !p.active;
+        return optimistic(() => { p.active = v; }, () => db.updatePlayer(id, { active: v }), () => { p.active = !v; }); });
+      else if (a === "adm-level") el.onchange = () => { const p = byId(state.players, id); if (!p) return; const lv = el.value === "" ? null : +el.value;
+        const patch = { level: lv, eloStart: levelElo(lv), levelStatus: lv == null ? p.levelStatus : "ok" }, was = { level: p.level, eloStart: p.eloStart, levelStatus: p.levelStatus };
+        optimistic(() => Object.assign(p, patch), async () => { await db.updatePlayer(id, patch); db.addLog(`Уровень ${p.name}: ${was.level} → ${lv}`).catch(() => {}); }, () => Object.assign(p, was)); };
       else if (a === "adm-lbl" || a === "adm-elo-now") { el.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
         el.onchange = async () => { try { const ch = a === "adm-lbl" ? await setLabel(id, el.value) : await setEloNow(id, el.value); if (!ch) return; toast(t("saved")); liveReload(); } catch (e) { err(e); } }; }
-      else if (a === "adm-elo") el.onchange = async () => { const p = byId(state.players, id); const v = +el.value; if (!v) return; try { await db.updatePlayer(id, { eloStart: v }); await db.addLog(`Стартовое Эло ${p.name}: ${p.eloStart} → ${v}`); await reload(); } catch (e) { err(e); } };
+      else if (a === "adm-elo") el.onchange = () => { const p = byId(state.players, id); const v = +el.value; if (!p || !v) return; const was = p.eloStart;
+        optimistic(() => { p.eloStart = v; }, async () => { await db.updatePlayer(id, { eloStart: v }); db.addLog(`Стартовое Эло ${p.name}: ${was} → ${v}`).catch(() => {}); }, () => { p.eloStart = was; }); };
       else if (a === "set-role") el.onchange = async () => { try { await db.setMemberRole(id, el.value); const m = state._members.find(x => x.userId === id); if (m) m.role = el.value; toast(t("saved")); } catch (e) { err(e); } };
     });
     ["ob", "pf"].forEach(pr => ["D", "M", "Y"].forEach(k => { const el = document.getElementById(pr + "Bd" + k); if (!el) return;
