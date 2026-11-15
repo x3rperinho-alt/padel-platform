@@ -496,12 +496,12 @@ setLang(detectLang(BOOT.tgLang));
         ? `<div class="card"><h3>${t("pairs_title")} <span class="tiny">· ${fullPairs}/${slots || teamNos(tt).length - 1}</span></h3><div class="pair-grid">${teamNos(tt).map(pairCard).join("")}</div></div>`
         : `<div class="card"><h3>${t("main_list")} <span class="tiny">· ${main.length}${slots ? "/" + slots : ""}</span></h3><div style="margin-top:6px;">${main.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>`}
       ${res.length || isAdmin() ? `<div class="card"><h3>${t("reserve_list")} <span class="tiny">· ${res.length}</span></h3><div style="margin-top:6px;">${res.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>` : ""}
-      ${splitCardHtml(tt, main.map(r => r.playerId))}`}
+      ${splitCardHtml(tt, main.map(r => r.playerId))}
       ${tt.s.kind === "ftour" && tt.s.created_by ? `<div class="card"><span class="tiny">${t("organizer_lbl")}:</span> ${pl(tt.s.created_by)}</div>` : ""}
       ${canEditT(tt) && tt.status !== "played" ? runCardHtml(tt) : ""}
       ${canEditT(tt) && state.group && tt.status === "scheduled" && isUpcoming(tt) ? `<button class="btn block" style="margin-bottom:12px;" data-act="t-announce" data-id="${esc(tid)}">${t("announce_btn")}</button>` : ""}
       ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><input id="addRegQ" data-act="reg-q" data-id="${tid}" type="search" autocomplete="off" placeholder="${t("search")}" value="${esc(state._addQ || "")}" style="margin-top:8px;"><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${addRegOptions(tid, state._addQ || "")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
-        <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`;
+        <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`}`;
   }
   // игроки, которых админ может добавить в турнир (без уже записанных), с фильтром по имени
   function addRegOptions(tid, q) {
