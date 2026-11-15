@@ -1,0 +1,9 @@
+-- Напоминания о днях рождения (edge-функция birthdays). ДР игрока — players.contacts.birthday ("ГГГГ-ММ-ДД" или "--ММ-ДД").
+-- Кому слать (личка через бота лиги, токен — секрет BOT_TOKEN_<ЛИГА>): все админы и владельцы лиги (league_members admin/owner), плюс:
+--   court_kv 'bd_notify' = { "048": ["<user_id>", ...] }   (заполнено вручную — Алексей, админ 048)
+-- Служебные отметки: court_kv 'bd_sent:<лига>' = { date } (раз в день), 'bd_hello:<лига>' (разовое «бот подключён»).
+-- Расписание: 06:05 и 07:05 UTC — функция пишет только после 9:00 по Киеву и один раз в день,
+-- поэтому и зимой (UTC+2), и летом (UTC+3) сообщение приходит в 9:05; второй запуск — запасной, если первый не дошёл.
+-- select cron.schedule('birthdays-daily', '5 6,7 * * *', $$
+--   select net.http_post('https://<PROJECT>.supabase.co/functions/v1/birthdays', body := '{}'::jsonb,
+--     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer <ANON_KEY>'), timeout_milliseconds := 30000) $$);
