@@ -486,3 +486,10 @@ header.top .meta:has(#homeBtn:not([hidden])) .who { display: none; }
 .btn.busy::after { content: ""; position: absolute; right: 8px; top: 50%; width: 12px; height: 12px; margin-top: -6px; border-radius: 50%;
   border: 2px solid currentColor; border-right-color: transparent; animation: busySpin .7s linear infinite; }
 @keyframes busySpin { to { transform: rotate(360deg); } }
+
+/* King of the Court: кто на каком корте */
+.kotc-court { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line, rgba(255,255,255,.08)); font-size: 14px; }
+.kotc-court:first-of-type { border-top: 0; }
+.kotc-court b { flex: none; min-width: 92px; font-weight: 700; }
+.kotc-court span.me { color: var(--accent, #FF7A1A); font-weight: 700; }
+.kotc-court.king b { color: #FFB27A; }

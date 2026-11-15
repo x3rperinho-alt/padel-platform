@@ -2,7 +2,7 @@
 import { CONFIG } from "./config.js";
 import { createDb } from "./db.js";
 import { bootstrap, saveCache } from "./auth.js";
-import { americanoSchedule, defaultAmericanoRounds, mexicanoRound, swissRound, balanceTeams, roundRobinSchedule, playerTable, teamTable, playoffFirst, playoffNext, playoffPlaces, isBracket } from "./engine.js";
+import { americanoSchedule, defaultAmericanoRounds, mexicanoRound, swissRound, kotcRound, kotcFinal, balanceTeams, roundRobinSchedule, playerTable, teamTable, playoffFirst, playoffNext, playoffPlaces, isBracket } from "./engine.js";
 import { t, setLang, getLang, detectLang, LANGS, dateFmt, quiz, quizLevel, quizElo } from "./i18n.js";
 import { createGames, timeRangeHtml, shiftEnd } from "./games.js";
 
@@ -435,7 +435,9 @@ setLang(detectLang(BOOT.tgLang));
     const row = {}; const R = id => row[id] = row[id] || { id, pts: 0, pa: 0, w: 0, l: 0, d: 0, g: 0 };
     tGames.forEach(g => { [[g.teamA, g.scoreA, g.scoreB], [g.teamB, g.scoreB, g.scoreA]].forEach(([team, own, opp]) => team.forEach(id => { const r = R(id); r.g++; r.pts += own; r.pa += opp; if (own > opp) r.w++; else if (own < opp) r.l++; else r.d++; })); });
     const eloD = id => (E.seq[id] || []).filter(x => x.g.tournamentId === tid).reduce((a, x) => a + x.d, 0);
-    const rows = Object.values(row).sort((a, b) => b.pts - a.pts || b.w - a.w || (b.pts - b.pa) - (a.pts - a.pa));
+    let rows = Object.values(row).sort((a, b) => b.pts - a.pts || b.w - a.w || (b.pts - b.pa) - (a.pts - a.pa));
+    const kq = tt.format === "kotc" ? kotcHtml(tt, tGames, true) : null;
+    if (kq) { const pos = {}; kq.I.order.forEach((o, i) => pos[o.id] = i); rows = rows.slice().sort((a, b) => (pos[a.id] ?? 999) - (pos[b.id] ?? 999)); }
     const finished = tt.status === "played" || (tt.date && tt.date < today());
     const roundsOpen = !finished || state.view.roundsOpen === tid;
     const byRound = {}; tGames.forEach(g => (byRound[g.round] = byRound[g.round] || []).push(g));
@@ -467,6 +469,7 @@ setLang(detectLang(BOOT.tgLang));
       <h2 class="t-title">${esc(tt.name)}</h2>
       <p class="tiny" style="margin:-4px 0 12px;">${dateFmt(tt.date, true)}${tt.s.time ? " · " + timeRange(tt.s) : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""} · ${esc(t(tt.format))} · ${esc(rangeLabel(tt.s))}</p>
       ${isTeamF(tt.format) && teamsOf(tt).length ? `<div class="card"><h3>${t("standings")}</h3>${standingsHtml(tt, tGames)}</div>` : ""}
+      ${kq ? kq.finCard : ""}
       <div class="card"><h3>${isTeamF(tt.format) && teamsOf(tt).length ? t("players") : t("standings")}</h3>
         <table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("players")}</th><th>${t("pts")}</th><th>W-L</th><th>${t("diff")}</th><th>Elo</th></tr>
         ${rows.map((r, i) => { const d = eloD(r.id); return `<tr class="${meCls(r.id)}"><td><span class="pos-badge ${medal(i)}">${i + 1}</span></td>
@@ -629,7 +632,7 @@ setLang(detectLang(BOOT.tgLang));
     try { await db.saveTournament(tRow(tt, { s: { ...tt.s, labels } })); tt.s = { ...tt.s, labels }; LBL = labels; toast(t("saved")); if (!isField(document.activeElement)) render(); } catch (e) { err(e); }
   }
   // ---------- проведение турнира: старт, раунды, счёт, таблица наживо ----------
-  const TEAM_F = ["team_americano", "roundrobin", "playoff"], STEP_F = ["mexicano", "swiss"];
+  const TEAM_F = ["team_americano", "roundrobin", "playoff"], STEP_F = ["mexicano", "swiss", "kotc"];
   const isTeamF = f => TEAM_F.includes(f);
   const scoredG = g => g.scoreA != null && g.scoreB != null;
   const tGamesOf = tid => state.games.filter(g => g.tournamentId === tid);
@@ -652,6 +655,43 @@ setLang(detectLang(BOOT.tgLang));
   // в базе games.court — число (по нему сортируем); если среди кортов есть названия — court = порядковый номер, а имя в court_name
   const courtOf = (nums, i) => (nums || []).some(x => typeof x === "string") ? { court: i, courtName: String((nums || [])[i - 1] ?? i) } : { court: courtNo(nums, i), courtName: null };
   const courtLbl = g => { const n = g.courtName; if (!n) return `${t("court")} ${g.court || "—"}`; return /^\d+$/.test(n) ? `${t("court")} ${n}` : n; };
+  // ---------- King of the Court ----------
+  // позиция корта в раунде (1 — главный): берём из id матча «…-rN-cK»
+  const posOf = g => { const m = /-c(\d+)$/.exec(g.id || ""); return m ? +m[1] : (g.court || 1); };
+  const kotcCfg = tt => ({ final_target: 32, carry: 1, ...((tt.s && tt.s.kotc) || {}) });
+  // всё о турнире KotC: очки первой стадии, текущие корты, короли, финал, итоговый порядок мест
+  function kotcInfo(tt, games) {
+    const R = tt.rounds || 10, cfg = kotcCfg(tt);
+    const kg = games.filter(g => g.label !== "kf" && g.round <= R), fg = games.filter(g => g.label === "kf");
+    const ids = tt.participantIds && tt.participantIds.length ? tt.participantIds : [...new Set(kg.flatMap(g => g.teamA.concat(g.teamB)))];
+    const tb = playerTable(ids, kg.filter(scoredG)), K = {}; tb.forEach(r => K[r.id] = r);
+    const lastR = kg.length ? Math.max(...kg.map(g => g.round)) : 0, last = kg.filter(g => g.round === lastR).sort((a, b) => posOf(a) - posOf(b));
+    const lastDone = last.length > 0 && last.every(scoredG);
+    // где каждый сейчас: если раунд доигран — уже с переходами (кто куда идёт), иначе — где играет
+    const courts = lastDone ? kotcRound(ids, last, last.length).map(m => m.flat()) : last.map(g => g.teamA.concat(g.teamB));
+    const courtOfP = {}; courts.forEach((q, i) => q.forEach(id => courtOfP[id] = i + 1));
+    const kings = fg.length ? [...new Set(fg.flatMap(g => g.teamA.concat(g.teamB)))] : (lastR >= R && lastDone ? courts[0] : null);
+    const F = {}; fg.filter(scoredG).forEach(g => { g.teamA.forEach(id => F[id] = (F[id] || 0) + g.scoreA); g.teamB.forEach(id => F[id] = (F[id] || 0) + g.scoreB); });
+    const kp = id => (K[id] ? K[id].pts : 0), carry = v => Math.round(v * cfg.carry * 10) / 10;
+    const fin = kings ? kings.map(id => ({ id, k: carry(kp(id)), f: F[id] || 0, tot: carry(kp(id)) + (F[id] || 0) })).sort((a, b) => b.tot - a.tot || kp(b.id) - kp(a.id)) : null;
+    const kSet = new Set(fin && fg.length ? kings : []);
+    // порядок мест: короли по сумме финала, дальше — по корту, потом по очкам и победам
+    const rest = ids.filter(id => !kSet.has(id)).sort((a, b) => (courtOfP[a] || 99) - (courtOfP[b] || 99) || kp(b) - kp(a) || ((K[b] || {}).w || 0) - ((K[a] || {}).w || 0));
+    const order = (fin && fg.length ? fin.map(x => ({ id: x.id, key: "k" + x.tot + "|" + kp(x.id) })) : [])
+      .concat(rest.map(id => ({ id, key: "c" + (courtOfP[id] || 99) + "|" + kp(id) + "|" + ((K[id] || {}).w || 0) })));
+    return { R, cfg, kg, fg, K, courts, courtOfP, lastR, lastDone, kings, fin, order };
+  }
+  function kotcHtml(tt, games, done, inner) {
+    const I = kotcInfo(tt, games), c = I.cfg;
+    // inner — внутри карточки «Таблиця»: без вложенных карточек
+    const box = (title, body) => inner ? `<div style="margin:2px 0 18px;"><h3 class="sub-h" style="margin:0 0 4px;">${title}</h3>${body}</div>` : `<div class="card"><h3>${title}</h3>${body}</div>`;
+    const finCard = I.fin && I.fg.length ? box(`👑 ${t("kotc_final")}`, `<p class="tiny" style="margin:4px 0 8px;">${t("kotc_final_hint", { n: c.final_target, p: Math.round(c.carry * 100) })}</p>
+      <table class="tbl"><tr><th></th><th>${t("players")}</th><th>KotC</th><th>${t("kotc_f")}</th><th>${t("kotc_tot")}</th></tr>
+      ${I.fin.map((r, i) => `<tr class="${meCls(r.id)}"><td><span class="pos-badge ${medalCls(i + 1)}">${i + 1}</span></td><td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span></span></td><td>${r.k}</td><td>${r.f}</td><td class="lb-elo">${r.tot}</td></tr>`).join("")}</table>`) : "";
+    const courtsCard = !done && !I.fg.length && I.courts.length ? box(I.lastDone ? t("kotc_next_courts", { n: I.lastR + 1 > I.R ? t("kotc_final") : t("round_n", { n: I.lastR + 1 }) }) : t("kotc_courts_now"),
+      I.courts.map((q, i) => `<div class="kotc-court ${i === 0 ? "king" : ""}"><b>${i === 0 ? "👑 " : ""}${esc(courtLbl({ court: i + 1, courtName: (tt.s.court_nums || [])[i] != null ? String(tt.s.court_nums[i]) : null }))}</b><span>${q.map(id => `<span class="${meCls(id)}">${esc(pname(id))}</span>`).join(" · ")}</span></div>`).join("")) : "";
+    return { I, finCard, courtsCard };
+  }
   // пары: как записались парами, остальных — «сильный + слабый»
   function buildTeams(tt, ids, shuffle) {
     const S = strengthFn(), used = new Set(), list = [];
@@ -662,6 +702,7 @@ setLang(detectLang(BOOT.tgLang));
   function runDefaultRounds(r, n) {
     if (r.format === "americano") return defaultAmericanoRounds(n, r.courts);
     if (r.format === "mexicano") return 6;
+    if (r.format === "kotc") return 10;
     if (r.format === "swiss") return 5;
     if (r.format === "playoff") return Math.round(Math.log2(Math.max(2, r.teams.list.length)));
     return (roundRobinSchedule(r.teams.list, r.courts) || []).length;
@@ -669,7 +710,7 @@ setLang(detectLang(BOOT.tgLang));
   function initRun(tt) {
     const ids = runPlayers(tt.id), sc = tt.scoring || {};
     const cn = parseCourts((tt.s.court_nums || []).join(","));
-    const r = { tid: tt.id, format: tt.format || "americano", courts: cn.length || tt.courts || 2, courtNums: cn, mode: sc.mode || "total", target: sc.target ?? 21, touched: false };
+    const r = { tid: tt.id, format: tt.format || "americano", courts: cn.length || tt.courts || 2, courtNums: cn, mode: sc.mode || "total", target: sc.target ?? 21, touched: false, kfTarget: kotcCfg(tt).final_target, kfCarry: Math.round(kotcCfg(tt).carry * 100) };
     r.teams = buildTeams(tt, ids, false); r.rounds = runDefaultRounds(r, ids.length); return r;
   }
   function readRun() {
@@ -678,6 +719,8 @@ setLang(detectLang(BOOT.tgLang));
     if (g("runCourtNums")) { const before = r.courtNums.join(); r.courtNums = parseCourts(g("runCourtNums").value); if (r.courtNums.length && r.courtNums.join() !== before) r.courts = r.courtNums.length; }
     if (g("runRounds")) { const v = Math.max(1, Math.min(40, +g("runRounds").value || 1)); if (v !== r.rounds) r.touched = true; r.rounds = v; }
     if (g("runTarget")) r.target = g("runTarget").value === "" ? null : Math.max(1, Math.min(99, +g("runTarget").value));
+    if (g("runKfTarget")) r.kfTarget = Math.max(1, Math.min(99, +g("runKfTarget").value || 32));
+    if (g("runKfCarry")) r.kfCarry = Math.max(0, Math.min(100, g("runKfCarry").value === "" ? 100 : +g("runKfCarry").value));
     return r;
   }
   function runCheck(r, ids) {
@@ -685,10 +728,12 @@ setLang(detectLang(BOOT.tgLang));
       if (r.teams.list.length < 2) return t("run_need_pairs");
       if (r.format === "playoff" && !isBracket(r.teams.list.length)) return t("run_need_bracket", { n: r.teams.list.length });
     } else if (ids.length < 4) return t("run_need_n", { n: 4 });
+    if (r.format === "kotc" && ids.length !== Math.min(Math.floor(ids.length / 4), r.courts) * 4) return t("kotc_need", { n: Math.min(Math.floor(ids.length / 4), r.courts) * 4, c: Math.min(Math.floor(ids.length / 4), r.courts) });
     return null;
   }
   function runSummary(r, ids) {
     if (r.format === "playoff") { const n = r.teams.list.length; return isBracket(n) ? t("run_sum_playoff", { n, m: n }) : ""; }
+    if (r.format === "kotc") return t("run_sum_kotc", { n: r.rounds, c: Math.floor(ids.length / 4), f: r.kfTarget ?? 32 });
     if (isTeamF(r.format)) { const full = (roundRobinSchedule(r.teams.list, r.courts) || []).length; return t("run_sum_rr", { n: Math.min(r.rounds, full), full, m: r.teams.list.length * (r.teams.list.length - 1) / 2 }); }
     const per = Math.min(Math.floor(ids.length / 4), r.courts), rest = ids.length - per * 4;
     return t("run_sum_ind", { n: r.rounds, c: per }) + (rest > 0 ? " · " + t("run_sum_rest", { n: rest }) : "");
@@ -701,7 +746,7 @@ setLang(detectLang(BOOT.tgLang));
   }
   function runSetupHtml(tt) {
     const r = state._run, ids = runPlayers(tt.id), f = r.format, team = isTeamF(f), er = runCheck(r, ids), pend = pendingOf(tt.id).length;
-    const fmts = ["americano", "mexicano", "swiss", "team_americano", ...(f === "roundrobin" ? ["roundrobin"] : []), "playoff"];
+    const fmts = ["americano", "mexicano", "swiss", "kotc", "team_americano", ...(f === "roundrobin" ? ["roundrobin"] : []), "playoff"];
     const lv = id => letter(lvNow(id));
     const fullRR = team && f !== "playoff" ? (roundRobinSchedule(r.teams.list, r.courts) || []).length : null;
     const inp = (id, label, val, extra) => `<label class="field"><span class="lbl">${label}</span><input type="number" inputmode="numeric" id="${id}" value="${val ?? ""}" ${extra || ""}></label>`;
@@ -722,16 +767,17 @@ setLang(detectLang(BOOT.tgLang));
       </div>
       <div class="card">
         <label class="field"><span class="lbl">${t("t_court_nums")}</span><input type="text" autocomplete="off" id="runCourtNums" value="${esc(r.courtNums.join(", "))}" maxlength="200" placeholder="${t("t_court_nums_ph")}"></label>
-        <p class="tiny" style="margin:-6px 0 12px;">${r.courtNums.length ? t("run_courts_used", { list: r.courtNums.slice(0, r.courts).join(", ") }) : t("t_court_nums_hint")}</p>
+        <p class="tiny" style="margin:-6px 0 12px;">${r.courtNums.length ? t("run_courts_used", { list: r.courtNums.slice(0, r.courts).join(", ") }) : t("t_court_nums_hint")}${f === "kotc" ? " " + t("kotc_courts_hint") : ""}</p>
         <div class="grid2">${inp("runCourts", t("t_courts"), r.courts, 'min="1" max="12"')}${f === "playoff" ? `<div></div>` : inp("runRounds", t("run_rounds"), r.rounds, `min="1" max="${fullRR || 40}"`)}</div>
         <div class="field"><span class="lbl">${t("run_scoring")}</span><div class="wrap-tags">
           <span class="chip ${r.mode === "total" ? "active" : ""}" data-act="run-mode" data-val="total">${t("run_total")}</span>
           <span class="chip ${r.mode === "race" ? "active" : ""}" data-act="run-mode" data-val="race">${t("run_race")}</span></div></div>
         ${inp("runTarget", t("run_target"), r.target, 'min="1" max="99"')}
         <p class="tiny" style="margin:-6px 0 12px;">${r.mode === "total" ? t("run_total_hint", { n: r.target || 21, a: Math.ceil((r.target || 21) * 0.6), b: (r.target || 21) - Math.ceil((r.target || 21) * 0.6) }) : t("run_race_hint", { n: r.target || 6 })}</p>
+        ${f === "kotc" ? `<div class="grid2">${inp("runKfTarget", t("kotc_final_target"), r.kfTarget ?? 32, 'min="1" max="99"')}${inp("runKfCarry", t("kotc_carry"), r.kfCarry ?? 100, 'min="0" max="100"')}</div><p class="tiny" style="margin:-6px 0 12px;">${t("kotc_setup_hint")}</p>` : ""}
         <p class="run-sum">${er ? `<span class="warn-t">${er}</span>` : runSummary(r, ids)}</p>
         <button class="btn primary block" data-act="run-start" ${er ? "disabled" : ""}>${t("run_start")}</button>
-        ${STEP_F.includes(f) ? `<p class="tiny" style="margin:8px 0 0;text-align:center;">${t("run_step_note")}</p>` : ""}
+        ${STEP_F.includes(f) ? `<p class="tiny" style="margin:8px 0 0;text-align:center;">${t(f === "kotc" ? "kotc_step_note" : "run_step_note")}</p>` : ""}
       </div>`;
   }
   async function startRun() {
@@ -740,6 +786,7 @@ setLang(detectLang(BOOT.tgLang));
     let rounds;
     if (r.format === "americano") rounds = (americanoSchedule(ids, r.rounds, r.courts) || []).map(rd => rd.map(M));
     else if (r.format === "mexicano") rounds = [mexicanoRound(ids, [], r.courts, S).map(M)];
+    else if (r.format === "kotc") rounds = [(kotcRound(ids, [], r.courts) || []).map(M)];
     else if (r.format === "swiss") rounds = [swissRound(ids, [], r.courts, S, 2).map(M)];
     else if (r.format === "playoff") rounds = [playoffFirst(r.teams.list.slice().sort((a, b) => S(b[0]) + S(b[1]) - S(a[0]) - S(a[1])))];
     else rounds = (roundRobinSchedule(r.teams.list, r.courts) || []).slice(0, r.rounds).map(rd => rd.map(M));
@@ -749,7 +796,7 @@ setLang(detectLang(BOOT.tgLang));
     try {
       await db.deleteGames(tGamesOf(tt.id).map(g => g.id));
       await db.saveTournament(tRow(tt, { format: r.format, courts: r.courts, status: "live", participantIds: team ? r.teams.list.flat() : ids, teams: team ? r.teams.list.map((p, i) => ({ id: "tm" + (i + 1), players: p })) : [],
-        scoring: { mode: r.mode, target: r.target }, rounds: r.format === "playoff" ? null : (STEP_F.includes(r.format) ? r.rounds : rounds.length), s: { ...tt.s, reg_open: false, reg_was: !!tt.s.reg_open, court_nums: r.courtNums } }));
+        scoring: { mode: r.mode, target: r.target }, rounds: r.format === "playoff" ? null : (STEP_F.includes(r.format) ? r.rounds : rounds.length), s: { ...tt.s, reg_open: false, reg_was: !!tt.s.reg_open, court_nums: r.courtNums, ...(r.format === "kotc" ? { kotc: { final_target: r.kfTarget ?? 32, carry: (r.kfCarry ?? 100) / 100 } } : {}) } }));
       await db.saveGames(games); await db.addLog("Старт турніру: " + tt.name).catch(() => {});
       state._run = null; state.view.run = null; state.view.liveTab = "m"; state.view.liveRound = null; window.scrollTo(0, 0); await reload(); toast(t("run_started"));
     } catch (e) { err(e); }
@@ -757,6 +804,13 @@ setLang(detectLang(BOOT.tgLang));
   // таблица: личная / по парам / места плей-офф
   function standingsHtml(tt, games) {
     const sg = games.filter(scoredG), E = computeElo(), tid = tt.id;
+    if (tt.format === "kotc") {
+      const { I, finCard, courtsCard } = kotcHtml(tt, games, false, true), eloK = id => (E.seq[id] || []).filter(x => x.g.tournamentId === tid).reduce((a, x) => a + x.d, 0);
+      return finCard + courtsCard + `<table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("players")}</th><th>${t("court")}</th><th>KotC</th><th>W-L</th><th>Elo</th></tr>
+        ${I.order.map((o, i) => { const r = I.K[o.id] || { pts: 0, w: 0, l: 0, g: 0 }, d = eloK(o.id), c = I.courtOfP[o.id]; return `<tr class="${meCls(o.id)}"><td><span class="pos-badge ${medalCls(i + 1)}">${i + 1}</span></td>
+          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${o.id}">${avatarHtml(o.id, 28)}<span class="plink">${esc(pname(o.id))}</span>${lblHtml(o.id)}</span></td>
+          <td>${c ? (c === 1 ? "👑" : c) : "—"}</td><td class="lb-elo">${r.pts}</td><td>${r.w}-${r.l}</td><td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${r.g ? (d >= 0 ? "+" : "") + Math.round(d) : "—"}</td></tr>`; }).join("")}</table>`;
+    }
     const teams = teamsOf(tt), diff = r => `${r.pts - r.pa >= 0 ? "+" : ""}${r.pts - r.pa}`;
     if (isTeamF(tt.format) && teams.length) {
       const rows = tt.format === "playoff" ? playoffPlaces(teams, sg) : teamTable(teams, sg);
@@ -779,10 +833,12 @@ setLang(detectLang(BOOT.tgLang));
     let firstOpen = maxR; for (let r = 1; r <= maxR; r++) if (!done(r)) { firstOpen = r; break; }
     const cur = state.view.liveRound && state.view.liveRound <= maxR ? state.view.liveRound : firstOpen;
     const tab = state.view.liveTab || "m";
-    const planned = STEP_F.includes(tt.format) ? Math.max(tt.rounds || 0, maxR) : tt.format === "playoff" ? Math.max(maxR, Math.round(Math.log2(Math.max(2, teamsOf(tt).length)))) : maxR;
+    const isK = tt.format === "kotc", kR = tt.rounds || 10, hasKF = isK && games.some(g => g.label === "kf");
+    const rLbl = r => isK && r > kR ? "Ф" + (r - kR) : String(r);
+    const planned = isK ? kR + 3 : STEP_F.includes(tt.format) ? Math.max(tt.rounds || 0, maxR) : tt.format === "playoff" ? Math.max(maxR, Math.round(Math.log2(Math.max(2, teamsOf(tt).length)))) : maxR;
     const nScored = games.filter(scoredG).length;
     const scLbl = sc.target ? t(sc.mode === "race" ? "sc_race" : "sc_total", { n: sc.target }) : "";
-    const lbl = g => g.label ? `<b class="po-lbl">${t("po_" + g.label)}</b> · ` : "";
+    const lbl = g => g.label === "kf" ? `<b class="po-lbl">👑 ${t("kotc_final")}</b> · ` : g.label ? `<b class="po-lbl">${t("po_" + g.label)}</b> · ` : isK && posOf(g) === 1 ? "👑 " : "";
     const match = g => { const wa = scoredG(g) && g.scoreA > g.scoreB, wb = scoredG(g) && g.scoreB > g.scoreA, mine = me && g.teamA.concat(g.teamB).includes(me.id);
       const inp = s => `<input class="sc-in" type="number" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" min="0" max="99" data-gid="${g.id}" data-side="${s}" value="${(s === "A" ? g.scoreA : g.scoreB) ?? ""}" aria-label="${t("score")}">`;
       const box = v => `<span class="sbox">${v ?? "–"}</span>`;
@@ -792,20 +848,21 @@ setLang(detectLang(BOOT.tgLang));
           <div class="score">${edit ? inp("A") : box(g.scoreA)}<span class="colon">:</span>${edit ? inp("B") : box(g.scoreB)}</div>
           <div class="pair right ${wb ? "winner" : ""}">${pl(g.teamB[0])}<small>${pl(g.teamB[1])}</small></div></div></div>`; };
     const inRound = new Set(byR(cur).flatMap(g => g.teamA.concat(g.teamB)));
-    const resting = (isTeamF(tt.format) ? teamsOf(tt).filter(tm => !inRound.has(tm[0])).map(tm => pnl(tm[0]) + " + " + pnl(tm[1])) : (tt.participantIds || []).filter(id => !inRound.has(id)).map(pnl));
+    const resting = isK ? [] : (isTeamF(tt.format) ? teamsOf(tt).filter(tm => !inRound.has(tm[0])).map(tm => pnl(tm[0]) + " + " + pnl(tm[1])) : (tt.participantIds || []).filter(id => !inRound.has(id)).map(pnl));
     const chips = Array.from({ length: Math.max(planned, maxR) }, (_, i) => i + 1).map(r => r <= maxR
-      ? `<span class="chip sm rnd-chip ${r === cur ? "active" : ""} ${done(r) ? "done" : ""}" data-act="live-round" data-val="${r}">${r}${done(r) ? " ✓" : ""}</span>`
-      : `<span class="chip sm rnd-chip future">${r}</span>`).join("");
+      ? `<span class="chip sm rnd-chip ${r === cur ? "active" : ""} ${done(r) ? "done" : ""}" data-act="live-round" data-val="${r}">${rLbl(r)}${done(r) ? " ✓" : ""}</span>`
+      : `<span class="chip sm rnd-chip future">${rLbl(r)}</span>`).join("");
     let controls = "";
     if (edit && !fix) {
-      const curDone = done(cur), nextLbl = r => { const g0 = byR(r)[0]; return g0 && g0.label ? t("po_" + g0.label) : t("round_n", { n: r }); };
+      const curDone = done(cur), nextLbl = r => { const g0 = byR(r)[0]; return g0 && g0.label === "kf" ? t("kotc_final_m", { n: r - kR }) : g0 && g0.label ? t("po_" + g0.label) : t("round_n", { n: r }); };
       if (curDone && cur < maxR) controls = `<button class="btn primary block" data-act="live-round" data-val="${cur + 1}">${t("go_next", { what: nextLbl(cur + 1) })} ▸</button>`;
+      else if (isK && hasKF && cur === maxR) controls = curDone ? `<div class="all-done">🏁 ${t("all_rounds_done")}</div>` : `<p class="tiny" style="text-align:center;margin:4px 0;">${t("fill_round_first", { n: rLbl(cur) })}</p>`;
       else if (STEP_F.includes(tt.format) && cur === maxR) controls = curDone
-        ? `<button class="btn primary block" data-act="live-next" data-id="${tid}">${maxR < planned ? t("next_round", { n: maxR + 1 }) : t("extra_round")}</button>`
+        ? `<button class="btn primary block" data-act="live-next" data-id="${tid}">${isK && maxR >= kR ? "👑 " + t("kotc_make_final") : maxR < planned ? t("next_round", { n: maxR + 1 }) : t("extra_round")}</button>`
         : `<p class="tiny" style="text-align:center;margin:4px 0;">${t("fill_round_first", { n: maxR })}${maxR < planned ? " · " + t("then_next", { n: maxR + 1 }) : ""}</p>`;
       else if (!curDone) controls = `<p class="tiny" style="text-align:center;margin:4px 0;">${tt.format === "playoff" ? t("po_auto") : t("fill_round_first", { n: cur })}</p>`;
       else if (cur === maxR) controls = `<div class="all-done">🏁 ${t("all_rounds_done")}</div>`;
-      if (STEP_F.includes(tt.format) && cur === maxR && maxR > 1 && byR(maxR).every(g => !scoredG(g))) controls += `<button class="btn ghost sm danger block" style="margin-top:8px;" data-act="live-remove" data-id="${tid}">${t("remove_round", { n: maxR })}</button>`;
+      if (STEP_F.includes(tt.format) && cur === maxR && maxR > 1 && (!hasKF || games.filter(g => g.label === "kf").every(g => !scoredG(g))) && byR(maxR).every(g => !scoredG(g))) controls += `<button class="btn ghost sm danger block" style="margin-top:8px;" data-act="live-remove" data-id="${tid}">${t("remove_round", { n: maxR })}</button>`;
     }
     const allDone = games.length && games.every(scoredG);
     const finishCard = edit ? (fix
@@ -815,11 +872,11 @@ setLang(detectLang(BOOT.tgLang));
     return `
       <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${backLbl()}</button>${edit && !fix ? `<button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button>` : ""}</div>
       <div class="live-head"><h2 class="t-title">${esc(tt.name)}</h2>${fix ? `<span class="t-status planned">✎ ${t("fix_scores_short")}</span>` : `<span class="t-status live"><i></i>${t("live")}</span>`}</div>
-      <p class="tiny" style="margin:-4px 0 12px;">${esc(t(tt.format))}${scLbl ? " · " + scLbl : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""}${tt.s.time ? " · " + timeRange(tt.s) : ""}</p>
+      <p class="tiny" style="margin:-4px 0 12px;">${esc(t(tt.format))}${scLbl ? " · " + scLbl : ""}${isK ? " · " + t("kotc_final") + " " + t("sc_total", { n: kotcCfg(tt).final_target }) : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""}${tt.s.time ? " · " + timeRange(tt.s) : ""}</p>
       <div class="seg live-tabs"><button class="${tab === "m" ? "active" : ""}" data-act="live-tab" data-val="m">${t("live_matches")}</button><button class="${tab === "t" ? "active" : ""}" data-act="live-tab" data-val="t">${t("live_table")}</button></div>
       ${tab === "t" ? `<div class="card"><h3>${t("standings")}</h3>${nScored ? "" : `<p class="tiny">${t("no_scores_yet")}</p>`}${standingsHtml(tt, games)}</div>` : `
         <div class="chips-scroll rnd-chips">${chips}</div>
-        <h3 class="sub-h" style="margin-top:6px;">${t("round_n", { n: cur })}${planned > 1 ? ` <span class="tiny">/ ${planned}</span>` : ""}</h3>
+        <h3 class="sub-h" style="margin-top:6px;">${isK && cur > kR ? "👑 " + t("kotc_final_m", { n: cur - kR }) : t("round_n", { n: cur }) + (planned > 1 ? ` <span class="tiny">/ ${isK ? kR : planned}</span>` : "")}</h3>
         ${edit && !fix && cur === firstOpen && nScored === 0 ? `<p class="tiny" style="margin:0 0 10px;">${t("live_hint_admin")}</p>` : ""}
         ${byR(cur).map(match).join("")}
         ${resting.length ? `<p class="tiny rest-line">💤 ${t("rest")}: ${resting.join(", ")}</p>` : ""}
@@ -837,7 +894,7 @@ setLang(detectLang(BOOT.tgLang));
     if ((a == null) !== (b == null)) { if (explicit) { toast(t("score_both")); (a == null ? ia : ib).focus(); } return false; } // ждём второе число
     if (a === g.scoreA && b === g.scoreB) { markOk(box, a != null); return true; }
     const tt = byId(state.tournaments, g.tournamentId);
-    if (tt.format === "playoff" && a != null && a === b) { toast(t("need_winner")); return; }
+    if ((tt.format === "playoff" || (tt.format === "kotc" && g.label !== "kf")) && a != null && a === b) { toast(t("need_winner")); return; }
     const wasDone = tGamesOf(tt.id).filter(x => x.round === g.round).every(scoredG);
     const prevA = g.scoreA, prevB = g.scoreB;
     g.scoreA = a; g.scoreB = b;
@@ -849,7 +906,7 @@ setLang(detectLang(BOOT.tgLang));
     try { if (tt.format === "playoff") { try { await playoffAdvance(tt); } catch (e) { err(e); } } } finally { savingN--; }
     const nowDone = tGamesOf(tt.id).filter(x => x.round === g.round).every(scoredG);
     state.view.liveRound = g.round;
-    if (nowDone && !wasDone) toast(t("round_done", { n: g.round }));
+    if (nowDone && !wasDone) toast(g.label === "kf" ? t("kotc_final_m", { n: g.round - (tt.rounds || 10) }) + " ✓" : t("round_done", { n: g.round }));
     if (isField(document.activeElement)) pendingLive = true; else if (pendingLive && !savingN) liveReload(); else render();
     return true;
   }
@@ -869,13 +926,24 @@ setLang(detectLang(BOOT.tgLang));
     const tt = byId(state.tournaments, tid), gs = tGamesOf(tid), maxR = gs.length ? Math.max(...gs.map(g => g.round)) : 0;
     if (gs.some(g => g.round === maxR && !scoredG(g))) { toast(t("fill_round_first", { n: maxR })); return; }
     const S = strengthFn(), ids = tt.participantIds || [], courts = tt.courts || 2;
-    const ms = tt.format === "mexicano" ? mexicanoRound(ids, gs, courts, S) : swissRound(ids, gs, courts, S, 2);
+    if (tt.format === "kotc") {
+      if (gs.some(g => g.label === "kf")) return;
+      const kR = tt.rounds || 10, last = gs.filter(g => g.round === maxR).sort((a, b) => posOf(a) - posOf(b));
+      if (maxR >= kR) { // финал: четверо на главном корте после последнего раунда
+        const kings = kotcRound(ids, last, last.length)[0].flat();
+        const rows = kotcFinal(kings).map(([a, b], i) => ({ id: gameId(tid, kR + 1 + i, 1), tournamentId: tid, round: kR + 1 + i, ...courtOf(tt.s.court_nums, 1), teamA: a, teamB: b, scoreA: null, scoreB: null, label: "kf" }));
+        try { await db.saveGames(rows); state.view.liveRound = kR + 1; window.scrollTo(0, 0); await reload(); toast(t("kotc_final_ready")); } catch (e) { err(e); }
+        return;
+      }
+    }
+    const ms = tt.format === "mexicano" ? mexicanoRound(ids, gs, courts, S) : tt.format === "kotc" ? kotcRound(ids, gs.filter(g => g.round === maxR).sort((a, b) => posOf(a) - posOf(b)), courts) : swissRound(ids, gs, courts, S, 2);
     if (!ms || !ms.length) return;
     const r = maxR + 1, rows = ms.map(([a, b], i) => ({ id: gameId(tid, r, i + 1), tournamentId: tid, round: r, ...courtOf(tt.s.court_nums, i + 1), teamA: a, teamB: b, scoreA: null, scoreB: null, label: null }));
-    try { await db.saveGames(rows); if (r > (tt.rounds || 0)) await db.saveTournament(tRow(tt, { rounds: r })); state.view.liveRound = r; window.scrollTo(0, 0); await reload(); toast(t("round_ready", { n: r })); } catch (e) { err(e); }
+    try { await db.saveGames(rows); if (tt.format !== "kotc" && r > (tt.rounds || 0)) await db.saveTournament(tRow(tt, { rounds: r })); state.view.liveRound = r; window.scrollTo(0, 0); await reload(); toast(t("round_ready", { n: r })); } catch (e) { err(e); }
   }
   async function removeLastRound(tid) {
-    const gs = tGamesOf(tid), maxR = Math.max(...gs.map(g => g.round)), last = gs.filter(g => g.round === maxR);
+    const gs = tGamesOf(tid), maxR = Math.max(...gs.map(g => g.round));
+    let last = gs.filter(g => g.round === maxR); if (last.some(g => g.label === "kf")) last = gs.filter(g => g.label === "kf");
     if (last.some(scoredG)) return;
     try { await db.deleteGames(last.map(g => g.id)); state.view.liveRound = null; await reload(); } catch (e) { err(e); }
   }
@@ -917,7 +985,8 @@ setLang(detectLang(BOOT.tgLang));
       const list = Object.values(pk), seen = {}; list.forEach(tm => tm.forEach(id => seen[id] = (seen[id] || 0) + 1));
       if (list.length && Object.values(seen).every(n => n === 1)) teams = list;
     }
-    if (isTeamF(tt.format) && teams.length) {
+    if (tt.format === "kotc") rows = kotcInfo(tt, tGamesOf(tt.id)).order.filter(o => sg.some(g => g.teamA.concat(g.teamB).includes(o.id))).map(o => ({ ids: [o.id], key: o.key }));
+    else if (isTeamF(tt.format) && teams.length) {
       unitPairs = true;
       rows = (tt.format === "playoff" ? playoffPlaces(teams, sg).map(r => ({ ids: r.players, key: [r.place || 99, -r.out, -r.pts].join() }))
         : teamTable(teams, sg).map(r => ({ ids: r.players, key: [r.pts, r.w, r.pts - r.pa].join() }))).filter(r => r.ids.length);
@@ -1033,7 +1102,7 @@ setLang(detectLang(BOOT.tgLang));
   function tournamentFormHtml(tt) {
     const f = state._tf || (state._tf = { id: tt.id, name: tt.name || "", date: tt.date || "", format: tt.format || "americano", courts: tt.courts || 2, status: tt.status || "scheduled", s: { reg_open: true, ...tt.s } });
     const s = f.s;
-    const fmts = ["americano", "team_americano", "mexicano", "swiss", "roundrobin", "playoff"];
+    const fmts = ["americano", "team_americano", "mexicano", "swiss", "kotc", "roundrobin", "playoff"];
     const inp = (id, label, val, type, extra) => `<label class="field"><span class="lbl">${label}</span><input type="${type || "text"}" id="${id}" value="${esc(val ?? "")}" ${extra || ""}></label>`;
     return `
       <div class="section-head"><button class="btn ghost sm back" data-act="tf-cancel">‹ ${t("cancel")}</button><h2 style="font-size:16px;">${f.s.kind === "ftour" && f.isNew ? t("friendly_tournament") : f.isNew ? t("new_tournament").replace("+ ", "") : t("edit")}</h2></div>
@@ -1670,8 +1739,9 @@ setLang(detectLang(BOOT.tgLang));
     v.querySelectorAll("input.sc-in").forEach(inp => {
       const box = inp.closest(".match"), other = () => box.querySelector(`input.sc-in[data-side="${inp.dataset.side === "A" ? "B" : "A"}"]`);
       inp.oninput = () => { const g = byId(state.games, inp.dataset.gid), tt = g && byId(state.tournaments, g.tournamentId), sc = (tt && tt.scoring) || {};
-        delete inp.dataset.auto; markOk(box, false, true); if (sc.mode !== "total" || !sc.target || inp.value === "") return; const o = other();
-        if (o.value === "" || o.dataset.auto) { const val = sc.target - Math.round(+inp.value); if (val >= 0) { o.value = val; o.dataset.auto = "1"; } } };
+        const tgt = g && g.label === "kf" ? kotcCfg(tt).final_target : sc.target;
+        delete inp.dataset.auto; markOk(box, false, true); if (sc.mode !== "total" || !tgt || inp.value === "") return; const o = other();
+        if (o.value === "" || o.dataset.auto) { const val = tgt - Math.round(+inp.value); if (val >= 0) { o.value = val; o.dataset.auto = "1"; } } };
       inp.onchange = () => saveScoreFrom(box);
       const ok = box.querySelector(".sc-ok");
       if (ok && !ok.dataset.bound) { ok.dataset.bound = "1"; ok.onpointerdown = e => e.preventDefault(); // фокус не уходит, пока не прочитали обе цифры

@@ -207,3 +207,24 @@ export function playoffPlaces(teams, games) {
   return tt.map(r => ({ ...r, place: place[key(r.players)] || null, out: outRound[key(r.players)] || 99 }))
     .sort((a, b) => (a.place || 99) - (b.place || 99) || b.out - a.out || b.pts - a.pts);
 }
+
+// ---------- King of the Court: переход после каждого раунда ----------
+// Корт 1 (первый в списке) — главный. Раунд 1 — случайная рассадка по 4 на корт.
+// Дальше: победители поднимаются на корт выше, проигравшие спускаются ниже; на главном корте победители остаются,
+// на последнем — проигравшие остаются. На новом корте пары разбиваются: каждый играет с новым партнёром.
+// lastRound — матчи предыдущего раунда в порядке кортов (0 — главный), со счётом.
+export function kotcRound(ids, lastRound, courts) {
+  if (!lastRound || !lastRound.length) {
+    const per = Math.min(Math.floor(ids.length / 4), Math.max(1, courts || 1)); if (per < 1) return null;
+    const sh = ids.slice(); for (let i = sh.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [sh[i], sh[j]] = [sh[j], sh[i]]; }
+    return Array.from({ length: per }, (_, c) => { const q = sh.slice(c * 4, c * 4 + 4); return [[q[0], q[1]], [q[2], q[3]]]; });
+  }
+  const N = lastRound.length, W = [], L = [];
+  lastRound.forEach((g, i) => { const aw = g.scoreA >= g.scoreB; W[i] = aw ? g.teamA : g.teamB; L[i] = aw ? g.teamB : g.teamA; });
+  return lastRound.map((_, i) => {
+    const [A, B] = N === 1 ? [W[0], L[0]] : i === 0 ? [W[0], W[1]] : i === N - 1 ? [L[N - 2], L[N - 1]] : [L[i - 1], W[i + 1]];
+    return [[A[0], B[0]], [A[1], B[1]]];
+  });
+}
+// финал королей: американо на четверых — каждый с каждым в паре (3 матча)
+export function kotcFinal(k) { const [a, b, c, d] = k; return [[[a, b], [c, d]], [[a, c], [b, d]], [[a, d], [b, c]]]; }
