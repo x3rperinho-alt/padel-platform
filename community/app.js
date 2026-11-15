@@ -36,7 +36,9 @@ setLang(detectLang(BOOT.tgLang));
   const U = BOOT.user;
   const isAdmin = () => U && (U.role === "owner" || U.role === "admin");
   const canEdit = () => isAdmin() || (U && U.role === "editor");
-  const myPlayer = () => state.players.find(p => p.userId === U.id) || null;
+  // свой игрок: сначала тот, что привязан к аккаунту в лиге (league_members.player_id), потом активный с моим userId
+  const myPlayer = () => (U.playerId && state.players.find(p => p.id === U.playerId && p.userId === U.id))
+    || state.players.find(p => p.userId === U.id && p.active) || state.players.find(p => p.userId === U.id) || null;
   const medalCls = n => n === 1 ? "gold" : n === 2 ? "silver" : n === 3 ? "bronze" : ""; // кружки мест: золото, серебро, бронза
   const meCls = id => { const m = myPlayer(); return m && m.id === id ? "me" : ""; }; // своя строка в списках — подсвечена
   // дружеский турнир из вкладки «Игры» ведёт тот, кто его создал (плюс админы)
@@ -304,7 +306,9 @@ setLang(detectLang(BOOT.tgLang));
       if (d.retest) await db.submitQuiz(d.answers.slice(), score);
       else await db.createMyPlayer(d.name.trim(), lv, d.source, extra);
       state._onb = null; await reload(); toast(isQuiz ? t("saved") : t("sent_review"));
-    } catch (e) { err(e); }
+    } catch (e) { // второе нажатие, пока первое сохранялось: игрок уже создан — просто показываем его
+      if (/already has player|players_one_per_user|duplicate key/.test(String((e && e.message) || ""))) { state._onb = null; await reload(); return; }
+      err(e); }
   }
 
   function levelBannerHtml() {
