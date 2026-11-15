@@ -5,62 +5,114 @@ const rnd = () => Math.random();
 const pkey = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
 const scored = g => g.scoreA != null && g.scoreB != null;
 
-// ---------- Американо: партнёры меняются, соперники — как можно реже, отдых по очереди ----------
-function americano8(ids) {
-  const dev = (x, i) => (x == null ? null : (x + i) % 7);
-  const lab = { [-1]: ids[0] }; for (let k = 0; k < 7; k++) lab[k] = ids[k + 1];
-  const map = n => (n == null ? lab[-1] : lab[n]);
-  const out = [];
-  for (let i = 0; i < 7; i++) {
-    const t1 = [[null, dev(0, i)], [dev(4, i), dev(6, i)]], t2 = [[dev(1, i), dev(5, i)], [dev(2, i), dev(3, i)]];
-    out.push([t1, t2].map(([a, b]) => [[map(a[0]), map(a[1])], [map(b[0]), map(b[1])]]));
-  }
-  return out;
-}
+// ---------- Американо ----------
+// Если все играют каждый раунд и игроков 8/12/16/20/24 — готовая «вист»-схема: за n−1 раундов каждый с каждым
+// ровно 1 раз в паре и ровно 2 раза друг против друга. Раундов больше — следующий круг (новая случайная расстановка).
+// Иначе (есть отдыхающие, другое число игроков, неполный круг) — оптимизация «отжигом»: партнёры не повторяются,
+// соперники распределены как можно ровнее, игры и отдых — поровну, без отдыха два раунда подряд.
 export function defaultAmericanoRounds(n, courts) {
   const per = Math.min(Math.floor(n / 4), Math.max(1, courts || 1));
   if (per < 1) return 0;
   if (n % 4 === 0 && per === n / 4) return n - 1;
   return Math.ceil((n * (n - 1) / 2) / (2 * per));
 }
+// Американо: честное расписание. Оптимизация «отжигом» по всему расписанию:
+//  партнёры — как можно реже повторяются, соперники — поровну со всеми, игры — поровну (отдых по очереди, не два раза подряд).
+// history — уже сыгранные/созданные матчи (для «+ раунд»): учитываются в счётчиках, но не меняются.
+export function americanoOpt(ids, rounds, courts, history, init) {
+  const n = ids.length, per = Math.min(Math.floor(n / 4), Math.max(1, courts || 1));
+  if (n < 4 || per < 1 || rounds < 1) return null;
+  const idx = {}; ids.forEach((id, i) => idx[id] = i);
+  const WP = 60, WO = 25, WG = 400, WC = 60;
+  const P0 = new Int32Array(n * n), O0 = new Int32Array(n * n), G0 = new Int32Array(n); let lastRest0 = null;
+  const hist = (history || []).filter(g => g.teamA.concat(g.teamB).every(x => x in idx));
+  hist.forEach(g => { const a = g.teamA.map(x => idx[x]), b = g.teamB.map(x => idx[x]);
+    P0[a[0] * n + a[1]]++; P0[a[1] * n + a[0]]++; P0[b[0] * n + b[1]]++; P0[b[1] * n + b[0]]++;
+    a.forEach(x => b.forEach(y => { O0[x * n + y]++; O0[y * n + x]++; })); a.concat(b).forEach(p => G0[p]++); });
+  if (hist.length) { const mr = Math.max(...hist.map(g => g.round)); const inLast = new Set(hist.filter(g => g.round === mr).flatMap(g => g.teamA.concat(g.teamB)).map(x => idx[x])); lastRest0 = new Uint8Array(n); for (let p = 0; p < n; p++) lastRest0[p] = inLast.has(p) ? 0 : 1; }
+  const S = per * 4;
+  let best = null, bestCost = Infinity;
+  const tries = n >= 20 ? 2 : 3, iters = Math.min(900000, 15000 * rounds * per + 40000);
+  for (let tr = 0; tr < tries; tr++) {
+    const P = P0.slice(), O = O0.slice(), G = G0.slice();
+    // начальное: отдыхают те, кто меньше всего отдыхал
+    const R = [], played = G0.slice();
+    if (init && tr === 0) init.forEach(rd => { const play = rd.flat(2).map(x => idx[x]), set = new Set(play); R.push(play.concat(Array.from({ length: n }, (_, i) => i).filter(i => !set.has(i)))); });
+    for (let r = R.length; r < rounds; r++) {
+      const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => played[a] - played[b] || rnd() - .5);
+      const play = order.slice(0, S).sort(() => rnd() - .5), rest = order.slice(S);
+      play.forEach(p => played[p]++); R.push(play.concat(rest));
+    }
+    let cost = 0;
+    const sq = (arr, k, d, w) => { const c = arr[k]; arr[k] = c + d; return w * ((c + d) * (c + d) - c * c); };
+    const pairD = (a, b, d) => { const c1 = sq(P, a * n + b, d, WP); P[b * n + a] += d; return c1; };
+    const oppD = (a, b, d) => { const c1 = sq(O, a * n + b, d, WO); O[b * n + a] += d; return c1; };
+    const matchD = (row, m, d) => { const q = 4 * m, a0 = row[q], a1 = row[q + 1], b0 = row[q + 2], b1 = row[q + 3];
+      return pairD(a0, a1, d) + pairD(b0, b1, d) + oppD(a0, b0, d) + oppD(a0, b1, d) + oppD(a1, b0, d) + oppD(a1, b1, d); };
+    const isRest = (r, p) => r < 0 ? (lastRest0 ? lastRest0[p] : 0) : (R[r].indexOf(p) >= S ? 1 : 0);
+    // базовая стоимость
+    for (let p = 0; p < n; p++) G[p] = G0[p];
+    // пересчитаем счётчики с нуля для расписания (кроме истории)
+    const base = () => { let c = 0; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { c += WP * P[i * n + j] ** 2 + WO * O[i * n + j] ** 2; } for (let p = 0; p < n; p++) c += WG * G[p] ** 2; return c; };
+    R.forEach(row => { for (let m = 0; m < per; m++) matchD(row, m, 1); for (let s = 0; s < S; s++) G[row[s]]++; });
+    cost = base();
+    const restPen = () => { let c = 0; for (let r = 0; r < rounds; r++) for (let s = S; s < n; s++) { const p = R[r][s]; if (isRest(r - 1, p)) c += WC; } return c; };
+    if (S < n) cost += restPen();
+    let T = 60; const T1 = 0.05, k = Math.pow(T1 / T, 1 / iters);
+    let curBest = cost, curBestR = R.map(x => x.slice());
+    for (let it = 0; it < iters; it++, T *= k) {
+      const r = (rnd() * rounds) | 0, row = R[r];
+      if (per > 1 && rnd() < 0.5) { // обмен целыми парами между матчами: меняет только соперников
+        const m1 = (rnd() * per) | 0; let m2 = (rnd() * (per - 1)) | 0; if (m2 >= m1) m2++;
+        const a = 4 * m1 + ((rnd() * 2) | 0) * 2, b = 4 * m2 + ((rnd() * 2) | 0) * 2;
+        let d = matchD(row, m1, -1) + matchD(row, m2, -1);
+        const sw = () => { let t = row[a]; row[a] = row[b]; row[b] = t; t = row[a + 1]; row[a + 1] = row[b + 1]; row[b + 1] = t; };
+        sw(); d += matchD(row, m1, 1) + matchD(row, m2, 1);
+        if (d <= 0 || rnd() < Math.exp(-d / T)) { cost += d; if (cost < curBest) { curBest = cost; curBestR = R.map(z => z.slice()); } }
+        else { matchD(row, m1, -1); matchD(row, m2, -1); sw(); matchD(row, m1, 1); matchD(row, m2, 1); }
+        continue;
+      }
+      const s1 = (rnd() * S) | 0; let s2 = (rnd() * n) | 0; if (s2 === s1) continue;
+      const m1 = s1 >> 2, m2 = s2 < S ? s2 >> 2 : -1;
+      if (m1 === m2 && (s1 >> 1) === (s2 >> 1)) continue; // свап внутри одной пары — ничего не меняет
+      const x = row[s1], y = row[s2];
+      let d = matchD(row, m1, -1); if (m2 >= 0 && m2 !== m1) d += matchD(row, m2, -1);
+      row[s1] = y; row[s2] = x;
+      d += matchD(row, m1, 1); if (m2 >= 0 && m2 !== m1) d += matchD(row, m2, 1);
+      if (m2 < 0) { // x уходит отдыхать, y начинает играть
+        d += WG * ((G[x] - 1) ** 2 - G[x] ** 2) + WG * ((G[y] + 1) ** 2 - G[y] ** 2);
+        // соседние раунды: отдых подряд
+        const pr = isRest(r - 1, x), pr2 = isRest(r - 1, y), nx = r + 1 < rounds ? isRest(r + 1, x) : 0, ny = r + 1 < rounds ? isRest(r + 1, y) : 0;
+        d += WC * (pr + nx) - WC * (pr2 + ny);
+      }
+      if (d <= 0 || rnd() < Math.exp(-d / T)) { cost += d; if (m2 < 0) { G[x]--; G[y]++; } if (cost < curBest) { curBest = cost; curBestR = R.map(z => z.slice()); } }
+      else { // откат
+        let u = matchD(row, m1, -1); if (m2 >= 0 && m2 !== m1) u += matchD(row, m2, -1);
+        row[s1] = x; row[s2] = y; matchD(row, m1, 1); if (m2 >= 0 && m2 !== m1) matchD(row, m2, 1);
+      }
+    }
+    if (curBest < bestCost) { bestCost = curBest; best = curBestR; }
+  }
+  return best.map(row => Array.from({ length: per }, (_, m) => [[ids[row[4 * m]], ids[row[4 * m + 1]]], [ids[row[4 * m + 2]], ids[row[4 * m + 3]]]]));
+}
+const WHIST = {"8":[4,0,1,2,6,7,3,5],"12":[7,1,6,10,3,2,0,9,11,4,5,8],"16":[7,2,4,13,1,8,0,3,15,12,11,9,10,14,6,5],"20":[14,8,2,17,13,3,1,19,7,6,9,11,12,15,4,16,18,10,0,5],"24":[17,20,23,19,15,22,2,11,0,5,16,4,1,14,8,6,21,13,7,3,9,10,18,12]};
+function whistCycle(ids) { const n = ids.length, m = n - 1, b = WHIST[n], perm = ids.slice().sort(() => rnd() - .5);
+  const rounds = Array.from({ length: m }, (_, r) => Array.from({ length: n / 4 }, (_, k) => { const q = b.slice(4 * k, 4 * k + 4).map(x => perm[x === m ? m : (x + r) % m]); return [[q[0], q[1]], [q[2], q[3]]]; }));
+  return rounds.sort(() => rnd() - .5); }
 export function americanoSchedule(ids, rounds, courts) {
   const n = ids.length, per = Math.min(Math.floor(n / 4), Math.max(1, courts || 1));
   if (n < 4 || per < 1 || rounds < 1) return null;
-  if (n === 8 && per === 2 && rounds === 7) return americano8(ids.slice().sort(() => rnd() - 0.5));
-  let best = null, bestScore = Infinity;
-  for (let attempt = 0; attempt < 120; attempt++) {
-    const partner = {}, opp = {}, played = {}; ids.forEach(p => (played[p] = 0));
-    const pc = (a, b) => partner[pkey(a, b)] || 0, oc = (a, b) => opp[pkey(a, b)] || 0;
-    const sched = [];
-    for (let r = 0; r < rounds; r++) {
-      const active = ids.slice().sort((a, b) => played[a] - played[b] || rnd() - 0.5).slice(0, per * 4);
-      let bestRound = null, bestCost = Infinity;
-      for (let k = 0; k < 40; k++) {
-        const sh = active.slice().sort(() => rnd() - 0.5); const ms = []; let cost = 0;
-        for (let m = 0; m < per; m++) {
-          const q = sh.slice(m * 4, m * 4 + 4);
-          const splits = [[[q[0], q[1]], [q[2], q[3]]], [[q[0], q[2]], [q[1], q[3]]], [[q[0], q[3]], [q[1], q[2]]]];
-          let bs = null, bc = Infinity;
-          splits.forEach(s => { const c = (pc(s[0][0], s[0][1]) + pc(s[1][0], s[1][1])) * 10 + [[0, 0], [0, 1], [1, 0], [1, 1]].reduce((acc, [i, j]) => acc + Math.pow(oc(s[0][i], s[1][j]), 2), 0); if (c < bc) { bc = c; bs = s; } });
-          ms.push(bs); cost += bc;
-        }
-        if (cost < bestCost) { bestCost = cost; bestRound = ms; }
-      }
-      bestRound.forEach(([a, b]) => {
-        partner[pkey(a[0], a[1])] = pc(a[0], a[1]) + 1; partner[pkey(b[0], b[1])] = pc(b[0], b[1]) + 1;
-        a.forEach(x => b.forEach(y => { opp[pkey(x, y)] = oc(x, y) + 1; })); a.concat(b).forEach(p => played[p]++);
-      });
-      sched.push(bestRound);
-    }
-    let score = 0;
-    Object.values(partner).forEach(c => { if (c > 1) score += (c - 1) * (c - 1) * 10; });
-    const ov = Object.values(opp), mean = ov.reduce((a, b) => a + b, 0) / Math.max(1, ov.length);
-    ov.forEach(c => (score += (c - mean) * (c - mean)));
-    const pv = Object.values(played); score += (Math.max(...pv) - Math.min(...pv)) * 5;
-    if (score < bestScore) { bestScore = score; best = sched; }
+  if (WHIST[n] && per === n / 4) {
+    const out = []; while (out.length + n - 1 <= rounds) out.push(...whistCycle(ids));
+    const left = rounds - out.length; if (!left) return out;
+    const hist = out.flatMap((rd, r) => rd.map(([a, b]) => ({ round: r + 1, teamA: a, teamB: b })));
+    return out.concat(americanoOpt(ids, left, courts, hist, whistCycle(ids).slice(0, left)));
   }
-  return best;
+  return americanoOpt(ids, rounds, courts, null);
 }
+
+// следующий раунд американо с учётом уже созданных матчей (кнопка «+ раунд»)
+export function americanoNext(ids, games, courts) { const r = americanoOpt(ids, 1, courts, games || []); return r ? r[0] : null; }
 
 // ---------- кто отдыхает в раунде: меньше всего отдыхал → играет ----------
 function pickActive(ids, games, need) {
@@ -143,26 +195,51 @@ export function balanceTeams(ids, strength, shuffle) {
   const out = []; while (s.length >= 2) out.push([s.shift(), s.pop()]);
   return out;
 }
-// круговой: каждая пара с каждой; матчи раунда, которые не влезли на корты, уходят в следующий подраунд
-export function roundRobinSchedule(teams, courts) {
-  const list = teams.slice(); if (list.length < 2) return null;
-  if (list.length % 2) list.push(null);
-  const m = list.length, arr = list.slice(), c = Math.max(1, courts || 1), queue = [];
-  for (let r = 0; r < m - 1; r++) {
-    for (let i = 0; i < m / 2; i++) { const a = arr[i], b = arr[m - 1 - i]; if (a && b) queue.push([a, b]); }
-    arr.splice(1, 0, arr.pop());
-  }
-  // раскладываем по раундам плотно: в раунд берём первые по очереди матчи, где обе пары свободны, пока есть корты
-  const out = [];
-  while (queue.length) {
+// круговой: каждая пара с каждой; раундов больше полного круга — следующий круг (каждый с каждым ещё раз, новый порядок).
+// Матчи, которые не влезли на корты, уходят в следующий подраунд. rounds — сколько раундов нужно (по умолчанию один круг).
+function rrCycle(list0) {
+  const list = list0.slice(); if (list.length % 2) list.push(null);
+  const m = list.length, arr = list.slice(), out = [];
+  for (let r = 0; r < m - 1; r++) { for (let i = 0; i < m / 2; i++) { const a = arr[i], b = arr[m - 1 - i]; if (a && b) out.push(r % 2 ? [b, a] : [a, b]); } arr.splice(1, 0, arr.pop()); }
+  return out;
+}
+export function roundRobinSchedule(teams, courts, rounds) {
+  if (teams.length < 2) return null;
+  const c = Math.max(1, courts || 1), out = [], queue = [];
+  const pack = () => { // раскладываем по раундам плотно: в раунд берём первые по очереди матчи, где обе пары свободны, пока есть корты
     const busy = new Set(), rd = [];
-    for (let i = 0; i < queue.length && rd.length < c; ) {
-      const [a, b] = queue[i], ka = a.join("|"), kb = b.join("|");
-      if (!busy.has(ka) && !busy.has(kb)) { rd.push(queue.splice(i, 1)[0]); busy.add(ka); busy.add(kb); } else i++;
-    }
-    out.push(rd);
+    for (let i = 0; i < queue.length && rd.length < c; ) { const [a, b] = queue[i], ka = a.join("|"), kb = b.join("|");
+      if (!busy.has(ka) && !busy.has(kb)) { rd.push(queue.splice(i, 1)[0]); busy.add(ka); busy.add(kb); } else i++; }
+    return rd; };
+  let cycle = 0;
+  const need = rounds || 0;
+  queue.push(...rrCycle(teams));
+  while (queue.length) {
+    out.push(pack());
+    if (need && out.length >= need) break;
+    if (!queue.length && need && out.length < need) { cycle++; queue.push(...rrCycle(teams.slice().sort(() => rnd() - 0.5)).map(([a, b]) => cycle % 2 ? [b, a] : [a, b])); }
   }
   return out;
+}
+// следующий раунд для пар (кнопка «+ раунд»): сначала те, кто встречался реже всего, потом — кто меньше играл
+export function teamNextRound(teams, games, courts) {
+  const key = tm => tm.slice().sort().join("|"), met = {}, played = {};
+  teams.forEach(tm => (played[key(tm)] = 0));
+  (games || []).forEach(g => { const a = key(g.teamA), b = key(g.teamB); if (a in played) played[a]++; if (b in played) played[b]++; const k = a < b ? a + "~" + b : b + "~" + a; met[k] = (met[k] || 0) + 1; });
+  const maxM = Math.min(Math.floor(teams.length / 2), Math.max(1, courts || 1));
+  let best = null, bestCost = Infinity;
+  for (let it = 0; it < 300; it++) {
+    const cand = [];
+    for (let i = 0; i < teams.length; i++) for (let j = i + 1; j < teams.length; j++) { const a = key(teams[i]), b = key(teams[j]), k = a < b ? a + "~" + b : b + "~" + a;
+      cand.push({ a: teams[i], b: teams[j], ka: a, kb: b, met: met[k] || 0, load: played[a] + played[b], r: rnd() }); }
+    cand.sort((x, y) => x.met - y.met || x.load - y.load || x.r - y.r);
+    const used = new Set(), pick = []; let cost = 0;
+    for (const c of cand) { if (pick.length >= maxM) break; if (used.has(c.ka) || used.has(c.kb)) continue; if (it && rnd() < 0.15) continue;
+      used.add(c.ka); used.add(c.kb); pick.push([c.a, c.b]); cost += c.met * 100 + c.load; }
+    cost += (maxM - pick.length) * 10000;
+    if (cost < bestCost) { bestCost = cost; best = pick; }
+  }
+  return best;
 }
 export function teamTable(teams, games) {
   const key = tm => tm.slice().sort().join("|");
