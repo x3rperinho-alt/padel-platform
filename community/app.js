@@ -472,14 +472,14 @@ setLang(detectLang(BOOT.tgLang));
         <div style="margin-top:14px;">${regBtn}</div>
         ${tt.s.contact ? `<button class="btn block ghost-b" style="margin-top:8px;" data-act="open-link" data-url="${esc(tt.s.contact)}">${t("write_organizer")} ↗</button>` : ""}
       </div>
+      ${prizesHtml(tt)}
       ${tt.s.note ? (() => { const long = tt.s.note.length > 220 || tt.s.note.split("\n").length > 5, open = state.view.noteOpen === tid;
         return `<div class="card t-note"><h3>${t("about_t")}</h3><p class="${long && !open ? "clamp" : ""}">${esc(tt.s.note)}</p>${long ? `<button class="btn ghost sm" data-act="note-toggle" data-id="${tid}">${open ? t("less") : t("more")}</button>` : ""}</div>`; })() : ""}
-      ${prizesHtml(tt)}
-      ${splitCardHtml(tt, main.map(r => r.playerId))}
       ${pairs
         ? `<div class="card"><h3>${t("pairs_title")} <span class="tiny">· ${fullPairs}/${slots || teamNos(tt).length - 1}</span></h3><div class="pair-grid">${teamNos(tt).map(pairCard).join("")}</div></div>`
         : `<div class="card"><h3>${t("main_list")} <span class="tiny">· ${main.length}${slots ? "/" + slots : ""}</span></h3><div style="margin-top:6px;">${main.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>`}
-      ${res.length || isAdmin() ? `<div class="card"><h3>${t("reserve_list")} <span class="tiny">· ${res.length}</span></h3><div style="margin-top:6px;">${res.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>` : ""}`}
+      ${res.length || isAdmin() ? `<div class="card"><h3>${t("reserve_list")} <span class="tiny">· ${res.length}</span></h3><div style="margin-top:6px;">${res.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>` : ""}
+      ${splitCardHtml(tt, main.map(r => r.playerId))}`}
       ${tt.s.kind === "ftour" && tt.s.created_by ? `<div class="card"><span class="tiny">${t("organizer_lbl")}:</span> ${pl(tt.s.created_by)}</div>` : ""}
       ${canEditT(tt) && tt.status !== "played" ? runCardHtml(tt) : ""}
       ${canEditT(tt) && state.group && tt.status === "scheduled" && isUpcoming(tt) ? `<button class="btn block" style="margin-bottom:12px;" data-act="t-announce" data-id="${esc(tid)}">${t("announce_btn")}</button>` : ""}
