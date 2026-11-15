@@ -33,7 +33,6 @@ setLang(detectLang(BOOT.tgLang));
   const uid = () => "t_" + Math.random().toString(36).slice(2, 10);
   const state = { players: [], tournaments: [], games: [], registrations: [], league: {}, tab: "tournaments", view: {} };
   Object.assign(state, BOOT.data);
-  if (state.league && Array.isArray(state.league.clubs) && state.league.clubs.length) CLUBS.splice(0, CLUBS.length, ...state.league.clubs.map(c => c.name).filter(Boolean));
   const U = BOOT.user;
   const isAdmin = () => U && (U.role === "owner" || U.role === "admin");
   const canEdit = () => isAdmin() || (U && U.role === "editor");
@@ -120,6 +119,7 @@ setLang(detectLang(BOOT.tgLang));
   const CLUBS = CLUBS_DEF.slice(); // массив меняем на месте — games.js держит ссылку на него
   const clubsCfg = () => { const c = (state.league || {}).clubs; return Array.isArray(c) && c.length ? c : CLUBS_DEF.map(name => ({ name, geo: "" })); };
   const syncClubs = () => { const n = clubsCfg().map(c => c.name).filter(Boolean); CLUBS.splice(0, CLUBS.length, ...n); };
+  syncClubs(); // клубы из настроек лиги — сразу при запуске (раньше обращение шло до объявления CLUBS и роняло приложение)
   // координаты: «46.43, 30.75» или ссылка Google Maps (из неё вытаскиваем @lat,lng / q=lat,lng)
   const parseGeo = v => { const x = String(v || "").trim(); if (!x) return "";
     const m = /(-?\d{1,2}\.\d+)\s*[, ]\s*(-?\d{1,3}\.\d+)/.exec(decodeURIComponent(x)); if (m) return `${(+m[1]).toFixed(6)},${(+m[2]).toFixed(6)}`;
