@@ -62,7 +62,8 @@ export function createDb(cfg) {
   async function loadAll() {
     await ensureSession();
     const q = t => sb.from(t).select("*").eq("league_id", L);
-    const [players, tournaments, games, regs, lg] = await Promise.all([q("players"), q("tournaments_public"), q("games"), q("registrations"), sb.from("leagues").select("settings").eq("id", L).maybeSingle()]);
+    const [players, tournaments, games, regs, lg, adm] = await Promise.all([q("players"), q("tournaments_public"), q("games"), q("registrations"), sb.from("leagues").select("settings").eq("id", L).maybeSingle(),
+      sb.from("league_members").select("user_id, player_id").eq("league_id", L).in("role", ["owner", "admin"])]);
     for (const r of [players, tournaments, games, regs]) if (r.error) throw r.error;
     return {
       league: (lg && !lg.error && lg.data && lg.data.settings) || {},
@@ -70,6 +71,8 @@ export function createDb(cfg) {
       tournaments: tournaments.data.map(toTournament).sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.seq - b.seq),
       games: games.data.map(toGame),
       registrations: regs.data.map(toReg),
+      // игроки-админы лиги (для плашки «admin» в рейтинге и профиле): привязанный игрок или игрок с тем же аккаунтом
+      admins: adm && !adm.error ? [...new Set((adm.data || []).map(m => m.player_id || ((players.data || []).find(p => p.user_id === m.user_id && p.active !== false) || {}).id).filter(Boolean))] : [],
     };
   }
 

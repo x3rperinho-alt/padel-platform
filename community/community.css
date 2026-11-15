@@ -758,6 +758,11 @@ html[data-theme="light"] .theme-sw .sun { color: #fff; } html[data-theme="light"
 /* ---- управление раундами (админ) ---- */
 .rnd-admin { display: flex; gap: 8px; justify-content: space-between; flex-wrap: wrap; margin: 12px 0 4px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,.12); }
 
+
+/* ---- плашка admin ---- */
+.adm-tag { display: inline-block; vertical-align: 2px; margin-left: 4px; padding: 1px 6px; border-radius: 6px; font: 800 9.5px/1.5 var(--mono, ui-monospace, monospace); letter-spacing: .08em; text-transform: uppercase; color: #FF9A4A; background: rgba(255,122,26,.12); border: 1px solid rgba(255,122,26,.4); white-space: nowrap; }
+.hero-adm { margin: 3px 0 2px; } .hero-adm .adm-tag { margin-left: 0; font-size: 10px; }
+
 /* ===== светлая тема ===== */
 /* сгенерировано из тёмных правил + ручные правки ниже */
 html[data-theme="light"] .lvb { border-radius: 8px; color: var(--ink); background: rgba(255,255,255,0.87); border: 1px solid rgba(40,30,20,0.156); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); }
@@ -928,6 +933,7 @@ html[data-theme="light"] .tf-pt-b.on { border-color: #FF7A1A; background: rgba(2
 html[data-theme="light"] .pw-row { border-radius: 14px; background: rgba(255,255,255,0.71); border: 1px solid rgba(40,30,20,0.102); }
 html[data-theme="light"] .pw-row.first { background: linear-gradient(135deg, rgba(255,122,26,.16), rgba(255,122,26,.04)); border-color: rgba(255,122,26,.35); }
 html[data-theme="light"] .rnd-admin { border-top: 1px dashed rgba(40,30,20,0.138); }
+html[data-theme="light"] .adm-tag { border-radius: 6px; color: #FF9A4A; background: rgba(255,122,26,.12); border: 1px solid rgba(255,122,26,.4); }
 /* --- ручные правки светлой темы (сообщество) --- */
 html[data-theme="light"] .rf-ticket { background: linear-gradient(180deg, rgba(47,170,140,.14), rgba(242,106,12,.08)); border-color: rgba(30,140,115,.45); }
 html[data-theme="light"] .rf-ticket::before, html[data-theme="light"] .rf-ticket::after { background: #FBF7F2; border-color: rgba(30,140,115,.45); }
@@ -963,3 +969,4 @@ html[data-theme="light"] .lg-skay { background: none !important; padding: 0 !imp
 html[data-theme="light"] .tf-pt-b .lg-lupadel, html[data-theme="light"] .prz-pt .lg-lupadel, html[data-theme="light"] .rf-t-by .lg-lupadel { background: #17171B; padding: 3px 6px; border-radius: 6px; box-sizing: content-box; }
 html[data-theme="light"] .tf-pt-b { border-color: rgba(0,0,0,.14); background: rgba(0,0,0,.03); }
 html[data-theme="light"] .tf-pt-b.on { border-color: #E8650A; background: rgba(255,122,26,.12); box-shadow: 0 0 0 1px #E8650A inset; }
+html[data-theme="light"] .adm-tag { color: #B8510A; background: rgba(255,122,26,.12); border-color: rgba(184,81,10,.45); }

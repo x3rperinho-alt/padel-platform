@@ -222,6 +222,7 @@ setLang(detectLang(BOOT.tgLang));
   const plab = pid => { const p = byId(state.players, pid); return (p && p.label) || ""; };
   const lblOf = pid => LBL[pid] || plab(pid);
   const lblHtml = pid => lblOf(pid) ? ` <span class="nm-lbl">(${esc(lblOf(pid))})</span>` : "";
+  const admTag = pid => (state.admins || []).includes(pid) ? ` <span class="adm-tag">admin</span>` : "";
   const pnl = pid => esc(pname(pid)) + lblHtml(pid);           // имя + подпись, без ссылки
   const pnt = pid => pname(pid) + (lblOf(pid) ? " (" + lblOf(pid) + ")" : ""); // то же простым текстом
   const pl = pid => `<span class="plink" data-act="open-profile" data-id="${esc(pid)}">${esc(pname(pid))}</span>${lblHtml(pid)}`;
@@ -246,7 +247,7 @@ setLang(detectLang(BOOT.tgLang));
   async function reload() { try { const ep = saveEpoch; const d = await db.loadAll();
       if (savingN || ep !== saveEpoch) { pendingLive = true; return; } // пока грузили, ушёл новый счёт — эти данные уже устарели
       Object.assign(state, d); syncClubs(); render(); cacheSoon(); } catch (e) { console.error(e); } }
-  let cacheT; const cacheSoon = () => { clearTimeout(cacheT); cacheT = setTimeout(() => saveCache(BOOT.tgId, U, { league: state.league, players: state.players, tournaments: state.tournaments, games: state.games, registrations: state.registrations }), 1500); };
+  let cacheT; const cacheSoon = () => { clearTimeout(cacheT); cacheT = setTimeout(() => saveCache(BOOT.tgId, U, { league: state.league, players: state.players, tournaments: state.tournaments, games: state.games, registrations: state.registrations, admins: state.admins }), 1500); };
   // открылись из кэша — подменяем на свежие данные, как только они придут
   if (BOOT.fresh) BOOT.fresh.then(r => { if (!r) return; Object.assign(U, r.user);
     if (savingN) { pendingLive = true; return; } Object.assign(state, r.data); if (isField(document.activeElement)) { pendingLive = true; return; } render(); });
@@ -1445,7 +1446,7 @@ setLang(detectLang(BOOT.tgLang));
         <table class="tbl"><tr><th></th><th>${t("players")}</th><th></th><th>Elo</th><th>${t("games")}</th><th>W-L</th></tr>
         ${rows.map((p, i) => { const s = E.stats[p.id]; return `<tr class="${meCls(p.id)}">
           <td><span class="pos-badge ${medalCls(i + 1)}">${i+1}</span></td>
-          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 30)}<span class="plink">${esc(p.name)}</span>${lblHtml(p.id)}</span></td>
+          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 30)}<span class="plink">${esc(p.name)}</span>${lblHtml(p.id)}${admTag(p.id)}</span></td>
           <td>${levelBadge(E.ratings[p.id] / 1000)}</td>
           <td class="lb-elo ${E.unconfirmed[p.id]?'unc':''}">${Math.round(E.ratings[p.id])}</td>
           <td>${s.g}</td><td>${s.g ? s.w + "-" + s.l : "—"}</td></tr>`; }).join("")}
@@ -1604,7 +1605,7 @@ setLang(detectLang(BOOT.tgLang));
     return `${head}${mine ? levelBannerHtml() : ""}${bdCard}
       <div class="card hero">
         <div class="hero-top">
-          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}</div>${p.label ? `<div class="hero-lbl">(${esc(p.label)})</div>` : ""}<div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${p.levelStatus === "ok" ? `${levelBadge(E.ratings[pid] / 1000)} ${fmtLv(Math.round(E.ratings[pid]) / 1000)}` : ""}</div>${bdOf(p) ? `<div class="tiny bd-line ${bdToday(bdOf(p)) ? "today" : ""}">🎂 ${bdToday(bdOf(p)) ? t("bd_today") : esc(bdLabel(bdOf(p)))}</div>` : ""}${mine || canEdit() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}${mine && needBd() ? `<i class="need-dot"></i>` : ""}</button>` : ""}</div></div>
+          <div class="hero-id">${avatarHtml(pid, 64)}<div><div class="hero-name">${esc(p.name)}</div>${p.label ? `<div class="hero-lbl">(${esc(p.label)})</div>` : ""}${(state.admins || []).includes(pid) ? `<div class="hero-adm"><span class="adm-tag">admin</span></div>` : ""}<div class="tiny">${rank >= 0 ? `#${rank+1} / ${list.length}` : ""} · ${p.levelStatus === "ok" ? `${levelBadge(E.ratings[pid] / 1000)} ${fmtLv(Math.round(E.ratings[pid]) / 1000)}` : ""}</div>${bdOf(p) ? `<div class="tiny bd-line ${bdToday(bdOf(p)) ? "today" : ""}">🎂 ${bdToday(bdOf(p)) ? t("bd_today") : esc(bdLabel(bdOf(p)))}</div>` : ""}${mine || canEdit() ? `<button class="btn ghost sm" style="margin-top:6px;" data-act="p-edit" data-id="${pid}">✎ ${t("edit")}${mine && needBd() ? `<i class="need-dot"></i>` : ""}</button>` : ""}</div></div>
           ${p.levelStatus === "ok" ? `<div class="hero-elo"><span class="${E.unconfirmed[pid]?'unc':''}">${Math.round(E.ratings[pid])}</span><small>${E.unconfirmed[pid] ? t("unconfirmed") : t("confirmed")}</small></div>` : `<div class="hero-elo"><span class="pend">⏳</span><small>${p.levelStatus === "pending" ? t("pending_short") : t("need_quiz_short")}</small></div>`}
         </div>
         ${p.levelStatus === "ok" && E.unconfirmed[pid] ? `<p class="tiny" style="margin:8px 0 0;">${t("unconfirmed_hint", { n: CONFIRM_N - E.tcount[pid] })}</p>` : ""}
