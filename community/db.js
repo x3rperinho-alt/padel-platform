@@ -150,6 +150,13 @@ export function createDb(cfg) {
   function kick() { try { sb.functions.invoke("games-notify", { body: {} }).catch(() => {}); } catch (e) {} }
 
   // ---------- живые обновления ----------
+  // фото приза → Storage (бакет prizes, публичный на чтение); в турнире храним только ссылку
+  async function uploadPrizePhoto(tid, blob) {
+    await ensureSession();
+    const path = `${L}/${tid}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`;
+    const { error } = await sb.storage.from("prizes").upload(path, blob, { contentType: "image/jpeg", upsert: false }); if (error) throw error;
+    return sb.storage.from("prizes").getPublicUrl(path).data.publicUrl;
+  }
   function subscribe(onChange) {
     const ch = sb.channel("league-" + L);
     for (const t of ["players", "tournaments", "games", "registrations"]) ch.on("postgres_changes", { event: "*", schema: "public", table: t, filter: "league_id=eq." + L }, () => onChange(t));
@@ -159,5 +166,5 @@ export function createDb(cfg) {
   return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinOpen, loadAll,
     createMyPlayer, updateMyCard, adjustMyLevel, reviewLevel, submitQuiz, register, unregister, reviewRegistration, resetPlayer, adminMembers, promoteReserve, setDisplayName,
     createGame, gameTeams, gameScore, gameDispute, gameResolve, gameCancel, leagueGroup, announceTournament, connectGroup, kick,
-    saveTournament, deleteTournament, saveGames, saveScore, deleteGames, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, saveLeagueSettings, trackClick, partnerClicks, listMembers, setMemberRole, profileNames, subscribe };
+    uploadPrizePhoto, saveTournament, deleteTournament, saveGames, saveScore, deleteGames, setRegistration, removeRegistration, addRegistration, updatePlayer, addLog, saveLeagueSettings, trackClick, partnerClicks, listMembers, setMemberRole, profileNames, subscribe };
 }
