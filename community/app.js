@@ -192,6 +192,24 @@ setLang(detectLang(BOOT.tgLang));
   const PARTNER_DEF = { name: "LuPadel", shop: "https://lupadel.olx.ua/uk/home/", consult: "", season: true };
   const partner = () => ({ ...PARTNER_DEF, ...(((state.league || {}).partner) || {}) });
   const httpsOk = u => /^https:\/\/[^\s"'<>]+$/.test(u || "");
+  // партнёры призов: кто дал приз — у каждого приза свой (by), у розыгрыша — raffle_by. Старые турниры: partner_prizes → всё от LuPadel
+  const PT_KEYS = ["lupadel", "skay"];
+  const ptOf = k => k === "lupadel" ? { key: k, ...partner(), logo: "lupadel.svg" } : k === "skay" ? { key: k, name: "Skay.ua", shop: "https://skay.ua/", ...((((state.league || {}).partners) || {}).skay || {}), logo: "skay.png" } : null;
+  const lgImg = (k, cls) => { const P = ptOf(k); return P ? `<img class="lg lg-${k} ${cls || ""}" src="${P.logo}" alt="${esc(P.name)}">` : ""; };
+  const przBy = (tt, x) => x && x.by !== undefined ? (x.by || "") : (tt.s.partner_prizes ? "lupadel" : "");
+  const rfBy = tt => tt.s.raffle_by !== undefined ? (tt.s.raffle_by || "") : (tt.s.partner_prizes ? "lupadel" : "");
+  function tPartners(tt) { const out = [], add = k => { if (k && !out.includes(k)) out.push(k); };
+    (tt.s.prizes || []).filter(x => x && (x.text || x.photo)).forEach(x => add(przBy(tt, x)));
+    if ((tt.s.raffle_items || []).length || tt.s.raffle_text) add(rfBy(tt));
+    if (!out.length && tt.s.partner_prizes && !(tt.s.prizes || []).some(x => x && (x.text || x.photo))) add("lupadel");
+    return out; }
+  // ссылки партнёра: у LuPadel счётчик кликов (shop/consult), у остальных — просто ссылка
+  const ptLinks = (k, where, tid, named) => { const P = ptOf(k); if (!P) return "";
+    const b = (u, l, kind) => httpsOk(u) ? `<button class="btn sm" data-act="open-link" data-url="${esc(u)}"${k === "lupadel" ? ` data-pt="${kind}" data-ptw="${where}" data-ptt="${esc(tid || "")}"` : ""}>${l}${named ? " " + esc(P.name) : ""} ↗</button>` : "";
+    return b(P.shop, t("p_shop"), "shop") + (k === "lupadel" ? b(P.consult, t("p_consult"), "consult") : ""); };
+  // квадратик «призы от …» на карточках
+  const ptSquare = (tt, where) => { const ks = tPartners(tt); if (!ks.length) return ""; const P0 = ptOf(ks[0]);
+    return `<button type="button" class="t-row-pt" data-act="open-link" data-url="${esc(httpsOk(P0.shop) ? P0.shop : "")}"${ks[0] === "lupadel" ? ` data-pt="shop" data-ptw="${where}" data-ptt="${esc(tt.id)}"` : ""}><span>${t("prizes_by_short")}</span>${ks.map(k => lgImg(k)).join("")}</button>`; };
   function partnerHtml(kind, tid) {
     const P = partner(), btn = (u, l, k) => httpsOk(u) ? `<button class="btn sm" data-act="open-link" data-url="${esc(u)}" data-pt="${k}" data-ptw="${kind}" data-ptt="${esc(tid || "")}">${l} ↗</button>` : "";
     const links = btn(P.shop, t("p_shop"), "shop") + btn(P.consult, t("p_consult"), "consult");
@@ -344,7 +362,7 @@ setLang(detectLang(BOOT.tgLang));
       <div class="ct-top"><span class="lvb ${letterClass(rangeLabel(tt.s)[0]==="≤"?rangeLabel(tt.s).slice(2):rangeLabel(tt.s))}">${esc(rangeLabel(tt.s))}</span><span class="t-status ${st[0]}"><i></i>${st[1]}</span></div>
       <div class="t-tile-name">${esc(tt.name)}</div>
       <div class="tiny">${dateFmt(tt.date, true)}${tt.s.time ? " · " + timeRange(tt.s) : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""}${pairs ? " · " + fmtName(tt) : ""}</div>
-      ${tt.s.partner_prizes ? `<div class="pt-tag">🎁 ${t("p_prizes")}</div>` : ""}
+      ${tPartners(tt).length ? `<div class="pt-tag">🎁 ${t("prizes_by_short")} ${tPartners(tt).map(k => esc(ptOf(k).name)).join(" + ")}</div>` : ""}
       ${pend ? `<div class="ct-pend">⏳ ${t("pending_n", { n: pend })}</div>` : ""}
       <div class="ct-bottom">
         <span class="ct-slots">${tt.status === "played" ? `<b>${new Set(state.games.filter(g => g.tournamentId === tt.id).flatMap(g => g.teamA.concat(g.teamB))).size}</b> ${t("players").toLowerCase()}` : pairs ? `<b>${main}</b>/${cap || "∞"} ${t("slots")} · ${slots || "∞"} ${t("pairs_n")}${res ? ` · ${t("reserve")} ${res}` : ""}` : slots ? `<b>${main}</b>/${slots} ${t("slots")}${res ? ` · ${t("reserve")} ${res}` : ""}` : `${main} ${t("players").toLowerCase()}`}</span>
@@ -363,7 +381,7 @@ setLang(detectLang(BOOT.tgLang));
       <div class="t-row-main"><div class="t-row-name">${esc(tt.name)}</div>
         <div class="t-row-meta">${[tt.s.place && esc(tt.s.place), esc(fmtName(tt)), n ? n + " " + t("players").toLowerCase() : ""].filter(Boolean).join(" · ")}</div>
         ${podium.length ? `<div class="t-row-win">${podium.join("")}</div>` : ""}</div>
-      ${tt.s.partner_prizes ? (P0 => `<button type="button" class="t-row-pt" data-act="open-link" data-url="${esc(httpsOk(P0.shop) ? P0.shop : "")}" data-pt="shop" data-ptw="past" data-ptt="${esc(tt.id)}"><span>${t("prizes_by_short")}</span><img src="lupadel.svg" alt="${esc(P0.name)}"></button>`)(partner()) : `<span class="t-row-go">›</span>`}</div>`;
+      ${ptSquare(tt, "past") || `<span class="t-row-go">›</span>`}</div>`;
   }
   // актуальный турнир: прежняя плитка, компактнее — уровень цветом справа, дата полностью, соло/парами, статус внизу
   function tCard(tt) {
@@ -384,7 +402,7 @@ setLang(detectLang(BOOT.tgLang));
         <div class="ct2-when">${when}${tt.s.time ? " · " + timeRange(tt.s) : ""}</div>
         <div class="ct2-meta">${[tt.s.place && "📍 " + esc(tt.s.place), esc(fmtName(tt)), t(pairs ? "entry_pairs" : "entry_solo")].filter(Boolean).join(" · ")}</div>
         ${nPr || tt.s.raffle_text ? `<div class="pt-tag">${nPr ? `🏆 ${t("prize_places_short", { n: nPr })}` : ""}${nPr && tt.s.raffle_text ? " · " : ""}${tt.s.raffle_text ? `🎲 ${t("raffle_short")}` : ""}</div>` : ""}</div>
-        <div class="ct2-side">${tt.s.partner_prizes ? `<button type="button" class="t-row-pt" data-act="open-link" data-url="${esc(httpsOk(P0.shop) ? P0.shop : "")}" data-pt="shop" data-ptw="upcoming" data-ptt="${esc(tt.id)}"><span>${t("prizes_by_short")}</span><img src="lupadel.svg" alt="${esc(P0.name)}"></button>` : ""}</div></div>
+        <div class="ct2-side">${ptSquare(tt, "upcoming")}</div></div>
       ${pend ? `<div class="ct-pend">⏳ ${t("pending_n", { n: pend })}</div>` : ""}
       <div class="ct-bottom"><span class="ct-slots">${slots ? `<b>${taken}</b>/${slots} ${t(pairs ? "pairs_n" : "slots")}` : `<b>${taken}</b> ${t(pairs ? "pairs_n" : "slots")}`}${res ? ` · ${t("reserve")} ${res}` : ""}${tt.s.price ? ` · ${esc(tt.s.price)} ₴` : ""}</span>${st}</div>
     </div>`;
@@ -423,7 +441,7 @@ setLang(detectLang(BOOT.tgLang));
       ? `<button class="btn sm ok" data-act="reg-approve" data-tid="${tid}" data-pid="${r.playerId}" title="${t("approve")}" aria-label="${t("approve")}">✓</button><button class="btn sm ghost danger" data-act="reg-reject" data-tid="${tid}" data-pid="${r.playerId}" title="${t("reject")}" aria-label="${t("reject")}">✕</button>`
       : `<button class="btn sm ${r.paid?'primary':''}" data-act="reg-paid" data-tid="${tid}" data-pid="${r.playerId}">₴</button><button class="btn sm ghost" data-act="reg-move" data-tid="${tid}" data-pid="${r.playerId}" data-to="${r.status==='main'?'reserve':'main'}" title="${r.status==='main'?t('move_reserve'):t('move_main')}">${r.status==='main'?'↓':'↑'}</button><button class="btn sm ghost danger" data-act="reg-remove" data-tid="${tid}" data-pid="${r.playerId}">✕</button>`;
     const sub = r => `${letter(lvNow(r.playerId))}${r.approval === "pending" ? ` · <span class="pend-tag">${t("pending_approval")}</span>` : ""}${isAdmin() && r.approval !== "pending" ? " · " + (r.paid ? "✓ " + t("paid") : t("not_paid")) : ""}`;
-    const row = (r, i) => `<div class="link-row p-row ${r.approval === "pending" ? "is-pending" : ""}"><span class="p-row-main" data-act="open-profile" data-id="${r.playerId}">${avatarHtml(r.playerId, 34)}<span><span class="p-row-name">${pnl(r.playerId)}</span><br><span class="tiny">${sub(r)}</span></span></span>
+    const row = (r, i) => `<div class="link-row p-row ${r.approval === "pending" ? "is-pending" : ""}"><span class="p-row-main" data-act="open-profile" data-id="${r.playerId}">${avatarHtml(r.playerId, 34)}<span><span class="p-row-name">${pnl(r.playerId)}${discOpen(r.playerId) ? ` <span class="disc-tag" title="${t("disc_tag_t")}">−50%</span>` : ""}</span><br><span class="tiny">${sub(r)}</span></span></span>
       <span class="p-row-side">${isAdmin() ? adminBtns(r) : i != null ? `<span class="tiny">${i+1}</span>` : ""}</span></div>`;
     const approvalNote = tt.s.approval && canReg ? `<p class="tiny" style="margin:8px 0 0;">${t("approval_note")}</p>` : "";
     const rejNote = rej ? `<div class="rej-note">${t("rejected_note")}</div>` : "";
@@ -553,7 +571,7 @@ setLang(detectLang(BOOT.tgLang));
         </table></div>
       ${facts.length ? `<div class="card"><h3>${t("t_stats")}</h3><div class="facts">${facts.map(([k, who, sub]) => `<div class="fact"><div class="tiny">${k}</div><div class="fact-who">${who}</div><div class="fact-sub">${sub}</div></div>`).join("")}</div></div>` : ""}
       ${isAdmin() && finished ? announceCardHtml(tt, tGames) : ""}
-      ${tt.s.partner_prizes && !hasRaffle(tt) ? partnerHtml("prizes", tt.id) : ""}
+      ${tPartners(tt).includes("lupadel") && !hasRaffle(tt) ? partnerHtml("prizes", tt.id) : ""}
       ${splitCardHtml(tt, rows.map(r => r.id))}
       ${labelsCardHtml(tt, rows.map(r => r.id))}`}`;
   }
@@ -650,18 +668,20 @@ setLang(detectLang(BOOT.tgLang));
   // блок «Призи»: места по шаблону (текст + фото), справа — вертикальный «билет» розыгрыша среди всех участников
   function prizesHtml(tt) {
     const pr = (tt.s.prizes || []).filter(x => x && (x.text || x.photo)), rfi = rfItems(tt), rf = rfi.length ? (rfi[0].text || "🎁") + (rfi.length > 1 ? " +" + (rfi.length - 1) : "") : "", won = tt.s.raffles || [];
-    if (!pr.length && !rf && !won.length) return tt.s.partner_prizes ? partnerHtml("prizes", tt.id) : "";
-    const P = partner(), links = tt.s.partner_prizes ? [[P.shop, t("p_shop"), "shop"], [P.consult, t("p_consult"), "consult"]].filter(x => httpsOk(x[0])) : [];
+    if (!pr.length && !rf && !won.length) return tPartners(tt).includes("lupadel") ? partnerHtml("prizes", tt.id) : "";
+    const by = pr.map(x => przBy(tt, x)), head = pr.length && by.every(b => b && b === by[0]) ? by[0] : "", rb = rfBy(tt), pts = tPartners(tt);
     const items = pr.map((x, i) => `<div class="prz-item ${i === 0 ? "first" : ""}">
         <span class="prz-place">${placeLbl(i)}</span>
         ${imgOk(x.photo) ? `<img class="prz-ph" src="${esc(x.photo)}" alt="" data-act="prz-zoom" data-url="${esc(x.photo)}">` : ""}
-        <span class="prz-txt"><span class="tiny">${t("place_n", { n: i + 1 })}</span>${esc(x.text || "")}</span></div>`).join("");
+        <span class="prz-txt"><span class="tiny">${t("place_n", { n: i + 1 })}</span>${esc(x.text || "")}</span>
+        ${!head && by[i] ? `<span class="prz-pt"><span>${t("prizes_by")}</span>${lgImg(by[i])}</span>` : ""}</div>`).join("");
+    const links = pts.map(k => ptLinks(k, "prizes", tt.id, pts.length > 1)).join("");
     const ticket = rf || won.length ? `<div class="rf-ticket" data-act="tt-tab" data-id="${tt.id}" data-val="r"><div class="rf-t-ic">🎲</div><div class="rf-t-k">${t("rf_ticket")}</div>
         ${rf ? `<div class="rf-t-prize">${esc(rf)}</div>` : ""}<div class="rf-t-sub">${t("rf_ticket_sub")}</div>
-        <div class="rf-t-more">${t("rf_open_tab")} ›</div></div>` : "";
-    return `<div class="card prz-card"><div class="prz-head"><h3>🏆 ${t("prizes")}</h3>${tt.s.partner_prizes ? `<span class="prz-by">${t("prizes_by")} <img src="lupadel.svg" alt="${esc(P.name)}"></span>` : ""}</div>
+        ${rb && rb !== head ? `<div class="rf-t-by">${lgImg(rb)}</div>` : ""}<div class="rf-t-more">${t("rf_open_tab")} ›</div></div>` : "";
+    return `<div class="card prz-card"><div class="prz-head"><h3>🏆 ${t("prizes")}</h3>${head ? `<span class="prz-by">${t("prizes_by")} ${lgImg(head)}</span>` : ""}</div>
       <div class="prz-wrap ${ticket ? "with-rf" : ""} ${pr.length ? "" : "only-rf"}">${pr.length ? `<div class="prz-list">${items}</div>` : ""}${ticket}</div>
-      ${links.length ? `<div class="pt-links">${links.map(([u, l, k]) => `<button class="btn sm" data-act="open-link" data-url="${esc(u)}" data-pt="${k}" data-ptw="prizes" data-ptt="${esc(tt.id)}">${l} ↗</button>`).join("")}</div>` : ""}</div>`;
+      ${links ? `<div class="pt-links">${links}</div>` : ""}</div>`;
   }
   // всплывающее окно снизу (описание формата и т.п.)
   function sheet(title, html) {
@@ -701,9 +721,9 @@ setLang(detectLang(BOOT.tgLang));
   function raffleTabHtml(tt) {
     const items = rfItems(tt), list = tt.s.raffles || [], won = new Set(list.map(r => r.winner)), pool = raffleIds(tt).filter(id => !won.has(id)), adm = canEdit();
     const winOf = i => list.find(r => r.item === i) || (items[i] && list.find(r => r.item == null && r.prize && r.prize === items[i].text));
-    const P = partner(), links = tt.s.partner_prizes ? [[P.shop, t("p_shop"), "shop"], [P.consult, t("p_consult"), "consult"]].filter(x => httpsOk(x[0])) : [];
-    const ptCard = tt.s.partner_prizes ? `<div class="card pt-card prizes rf-pt"><div class="pt-top"><span class="pt-kick">${t("rf_partner")}</span><img class="pt-logo" src="lupadel.svg" alt="${esc(P.name)}"></div>
-      ${links.length ? `<div class="pt-links">${links.map(([u, l, k]) => `<button class="btn sm" data-act="open-link" data-url="${esc(u)}" data-pt="${k}" data-ptw="raffle" data-ptt="${esc(tt.id)}">${l} ↗</button>`).join("")}</div>` : ""}</div>` : "";
+    const rk = rfBy(tt) || (items.length ? "" : tPartners(tt)[0] || ""), rl = rk ? ptLinks(rk, "raffle", tt.id) : "";
+    const ptCard = rk ? `<div class="card pt-card prizes rf-pt"><div class="pt-top"><span class="pt-kick">${t("rf_partner")}</span>${lgImg(rk, "pt-logo")}</div>
+      ${rl ? `<div class="pt-links">${rl}</div>` : ""}</div>` : "";
     const rows = items.map((x, i) => { const w = winOf(i), wi = w ? list.indexOf(w) : -1;
       return `<div class="rfi ${w ? "won" : ""}">
         ${imgOk(x.photo) ? `<img class="rfi-ph" src="${esc(x.photo)}" alt="" data-act="prz-zoom" data-url="${esc(x.photo)}">` : `<span class="rfi-ph rfi-ic">🎁</span>`}
@@ -1262,9 +1282,14 @@ setLang(detectLang(BOOT.tgLang));
       ${nom("🤝", t("nom_pair"), bp.length ? bp.map(p => `<div class="nom-row"><span>${esc(pname(p.ids[0]))} + ${esc(pname(p.ids[1]))}</span><b>${p.df >= 0 ? "+" : ""}${(p.df / p.n).toFixed(1)}</b></div>`).join("") : `<div class="tiny">—</div>`)}
       <p class="tiny" style="margin:10px 0 0;">${t("nom_fair")}</p></div>`;
   }
+  // режим партнёра призов в форме: "" — без партнёра, lupadel/skay — все призы от него, mixed — у каждого приза свой
+  const przMode = s => { if (s._prz_mode) return s._prz_mode; const b = (s.prizes || []).map(x => x.by || ""); return !b.length || b.every(x => !x) ? "" : b.every(x => x === b[0]) ? b[0] : "mixed"; };
+  const ptPick = (act, cur, mixed) => `<div class="tf-pt"><span class="tiny">${t("pt_from")}</span><div class="tf-pt-opts">${["", ...PT_KEYS, ...(mixed ? ["mixed"] : [])].map(k =>
+    `<button type="button" class="tf-pt-b ${cur === k ? "on" : ""}" data-act="${act}" data-val="${k}">${k === "" ? t("pt_none") : k === "mixed" ? t("pt_mixed") : lgImg(k)}</button>`).join("")}</div></div>`;
   function tournamentFormHtml(tt) {
     const f = state._tf || (state._tf = { id: tt.id, name: tt.name || "", date: tt.date || "", format: tt.format ? fmtKey(tt) : "americano", courts: tt.courts || 2, status: tt.status || "scheduled", s: { reg_open: true, ...tt.s } });
     if (!f.s.raffle_items && f.s.raffle_text) f.s.raffle_items = [{ text: f.s.raffle_text, photo: "" }];
+    if (!f._ptNorm) { f._ptNorm = true; const old = f.s.partner_prizes ? "lupadel" : ""; (f.s.prizes || []).forEach(x => { if (x.by === undefined) x.by = old; }); if (f.s.raffle_by === undefined) f.s.raffle_by = old; }
     const s = f.s;
     const fmts = ["americano", "team_americano", "mexicano", "swiss", "kotc_am", "kotc", "roundrobin", "playoff"];
     const kc = { rounds: 10, target: 21, final_target: 32, carry: 1, ...(s.kotc || {}) };
@@ -1297,17 +1322,19 @@ setLang(detectLang(BOOT.tgLang));
         <label class="field"><span class="lbl">${t("t_fmt_note")}</span><textarea id="tfFmtNote" rows="2" placeholder="${t("t_fmt_note_ph")}">${esc(s.format_note || "")}</textarea></label>
         <label class="row" style="cursor:pointer;"><span>${t("t_reg_open")}</span><input type="checkbox" id="tfOpen" ${s.reg_open ? "checked" : ""} style="width:22px;height:22px;"></label>
         ${s.kind ? "" : `<label class="field"><span class="lbl">${t("t_season")}</span><select id="tfSeason">${[["auto", t("t_season_auto", { lg: ((l) => l === "split" ? "D + C" : l || "—")(tLeague({ s: { ...s, season_league: "auto" } })) })], ["D", t("s_league", { lg: "D" })], ["C", t("s_league", { lg: "C" })], ["split", t("t_season_split")], ["none", t("t_season_none")]].map(([v, l]) => `<option value="${v}" ${(s.season_league || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-        <label class="row tf-toggle"><span>🎁 ${t("p_prizes")}<br><span class="tiny">${t("p_prizes_hint")}</span></span><input type="checkbox" id="tfPartner" ${s.partner_prizes ? "checked" : ""}></label>
         <div class="tf-prz"><div class="row" style="align-items:center;gap:10px;"><span class="lbl" style="flex:1;margin:0;">🏆 ${t("prizes")}</span>
           <select id="tfPrzN" data-act="tf-prz-n" style="width:auto;">${[0, 1, 2, 3, 4, 5].map(n => `<option value="${n}" ${(s.prizes || []).length === n ? "selected" : ""}>${n ? t("prize_places_n", { n }) : t("no_prizes")}</option>`).join("")}</select></div>
+          ${(s.prizes || []).length ? ptPick("tf-prz-mode", przMode(s), true) : ""}
           ${(s.prizes || []).map((x, i) => `<div class="tf-prz-row"><span class="prz-place">${placeLbl(i)}</span>
             <input type="text" id="tfPrz${i}" maxlength="80" autocomplete="off" placeholder="${t("prize_ph", { n: i + 1 })}" value="${esc(x.text || "")}">
             ${imgOk(x.photo) ? `<span class="tf-prz-ph"><img src="${esc(x.photo)}" alt=""><button type="button" class="icon-btn" data-act="tf-prz-del" data-val="${i}" title="${t("delete")}">✕</button></span>`
-              : `<label class="tf-prz-add" title="${t("prize_photo")}">📷<input type="file" accept="image/*" data-act="tf-prz-ph" data-val="${i}" hidden></label>`}</div>`).join("")}
+              : `<label class="tf-prz-add" title="${t("prize_photo")}">📷<input type="file" accept="image/*" data-act="tf-prz-ph" data-val="${i}" hidden></label>`}</div>
+            ${przMode(s) === "mixed" ? `<div class="tf-pt-one">${["", ...PT_KEYS].map(k => `<button type="button" class="tf-pt-b ${(x.by || "") === k ? "on" : ""}" data-act="tf-prz-by" data-val="${i}:${k}">${k ? lgImg(k) : t("pt_none_short")}</button>`).join("")}</div>` : ""}`).join("")}
           ${(s.prizes || []).length ? `<p class="tiny" style="margin:6px 0 0;">${t("prize_photo_hint")}</p>` : ""}
         </div>
         <div class="tf-prz"><div class="row" style="align-items:center;gap:10px;"><span class="lbl" style="flex:1;margin:0;">🎲 ${t("rf_open_tab")}</span>
           <select data-act="tf-rf-n" style="width:auto;">${[0, 1, 2, 3, 4, 5, 6, 8, 10].map(n => `<option value="${n}" ${(s.raffle_items || []).length === n ? "selected" : ""}>${n ? t("rf_items_n", { n }) : t("rf_no_items")}</option>`).join("")}</select></div>
+          ${(s.raffle_items || []).length ? ptPick("tf-rf-by", s.raffle_by || "", false) : ""}
           ${(s.raffle_items || []).map((x, i) => `<div class="tf-prz-row"><span class="prz-place">🎁</span>
             <input type="text" id="tfRf${i}" maxlength="80" autocomplete="off" placeholder="${t("rf_ph", { n: i + 1 })}" value="${esc(x.text || "")}">
             ${imgOk(x.photo) ? `<span class="tf-prz-ph"><img src="${esc(x.photo)}" alt=""><button type="button" class="icon-btn" data-act="tf-rf-del" data-val="${i}" title="${t("delete")}">✕</button></span>`
@@ -1328,7 +1355,6 @@ setLang(detectLang(BOOT.tgLang));
     f.name = g("tfName").value.trim(); f.date = g("tfDate").value; f.courts = +g("tfCourts").value || 1;
     if (g("tfSeason")) f.s.season_league = g("tfSeason").value;
     if (g("tfAnnounce")) f.announce = g("tfAnnounce").checked;
-    if (g("tfPartner")) f.s.partner_prizes = g("tfPartner").checked;
     (f.s.prizes || []).forEach((x, i) => { const el = g("tfPrz" + i); if (el) x.text = el.value.replace(/\s+/g, " ").trim(); });
     if (g("tfFmtNote")) f.s.format_note = g("tfFmtNote").value.trim();
     if (g("tfKRounds")) { const n = (id, d, lo, hi) => { const v = +g(id).value; return v ? Math.max(lo, Math.min(hi, v)) : d; };
@@ -1349,6 +1375,7 @@ setLang(detectLang(BOOT.tgLang));
     if (f.s.kind && !f.date) { toast(t("t_date") + "?"); return; }
     if (f.s.prizes) f.s.prizes = f.s.prizes.filter(x => x && (x.text || x.photo));
     if (f.s.raffle_items) { f.s.raffle_items = f.s.raffle_items.filter(x => x && (x.text || x.photo)); delete f.s.raffle_text; }
+    delete f.s._prz_mode; f.s.partner_prizes = (f.s.prizes || []).some(x => x.by) || (!!f.s.raffle_by && (f.s.raffle_items || []).length > 0);
     const fmt = isKf(f.format) ? "kotc" : f.format; if (fmt === "kotc") f.s.kotc = { ...(f.s.kotc || {}), final: f.format === "kotc_am" };
     try { const old = byId(state.tournaments, f.id) || {};
       await db.saveTournament({ id: f.id, seq: f.seq || old.seq || Date.now() % 1e9, name: f.name, date: f.date, status: f.status, format: fmt, courts: f.courts, s: f.s, participantIds: old.participantIds, teams: old.teams, scoring: old.scoring, rounds: old.rounds }); state._tf = null; state.view.editT = null; state.view.t = f.id;
@@ -1633,12 +1660,61 @@ setLang(detectLang(BOOT.tgLang));
   }
 
   // ---------- админ ----------
+  // ---------- учёт скидок −50% (приз «−50% на следующий турнир») ----------
+  // Кто выиграл: призы по местам (структурные или строки 🥇🥈🥉 / «3 место» в описании) и розыгрыш, где в тексте приза есть «50%».
+  // Отметки — в настройках лиги: disc_used { "<tid>:<pid>": "ГГГГ-ММ-ДД" }, disc_hidden [ключи], disc_manual [{ k, pid, note, at }].
+  const DISC_RE = /50\s*%/;
+  function discPlacePrizes(tt) {
+    const out = {}; (tt.s.prizes || []).forEach((x, i) => { if (x && DISC_RE.test(x.text || "")) out[i + 1] = x.text; });
+    if (Object.keys(out).length || (tt.s.prizes || []).some(x => x && x.text)) return out;
+    String(tt.s.note || "").split("\n").forEach(ln => { if (!DISC_RE.test(ln)) return;
+      const m = /🥇/.test(ln) ? 1 : /🥈/.test(ln) ? 2 : /🥉/.test(ln) ? 3 : +((/^\D{0,4}(\d)\s*(?:-?е|-?є|-?те|-?ге)?\s*(?:место|місце|place)/i.exec(ln) || [])[1] || 0);
+      if (m) out[m] = ln.replace(/^[\s🥇🥈🥉•\-—]+/, "").trim(); });
+    return out;
+  }
+  let _DISC = null; // кэш на один render
+  function discList() { if (_DISC) return _DISC; return (_DISC = discListRaw()); }
+  function discListRaw() {
+    const L = state.league || {}, used = L.disc_used || {}, hidden = new Set(L.disc_hidden || []), list = [];
+    state.tournaments.filter(tt => !isGameT(tt) && (tt.status === "played" || tt.status === "live")).forEach(tt => {
+      const pp = discPlacePrizes(tt);
+      if (Object.keys(pp).length) { const P = tournamentPlaces(tt); if (P) Object.entries(P).forEach(([pid, r]) => { if (pp[r.place]) list.push({ k: tt.id + ":" + pid, pid, tt, why: r.place, prize: pp[r.place] }); }); }
+      (tt.s.raffles || []).forEach(r => { if (r.winner && DISC_RE.test(r.prize || "")) list.push({ k: tt.id + ":" + r.winner + ":rf", pid: r.winner, tt, why: "rf", prize: r.prize }); });
+    });
+    (L.disc_manual || []).forEach(m => list.push({ k: m.k, pid: m.pid, tt: m.tid ? byId(state.tournaments, m.tid) : null, why: "manual", prize: m.note || "", manual: true, at: m.at }));
+    return list.filter(x => !hidden.has(x.k) && byId(state.players, x.pid)).map(x => ({ ...x, used: used[x.k] || null }))
+      .sort((a, b) => (!!a.used - !!b.used) || ((b.tt && b.tt.date) || b.at || "").localeCompare((a.tt && a.tt.date) || a.at || ""));
+  }
+  const discOpen = pid => isAdmin() && discList().some(x => x.pid === pid && !x.used);
+  function discountsHtml() {
+    const all = discList(), open = all.filter(x => !x.used), show = state.view.discAll ? all : open, add = state.view.discAdd;
+    const why = x => x.why === "rf" ? "🎲 " + t("tt_tab_raffle") : x.why === "manual" ? "✍️ " + t("disc_manual") : (["", "🥇", "🥈", "🥉"][x.why] || "") + " " + t("place_n", { n: x.why });
+    const row = x => `<div class="disc-row ${x.used ? "used" : ""}">
+        <span class="p-row-main" data-act="open-profile" data-id="${x.pid}">${avatarHtml(x.pid, 34)}<span style="min-width:0;"><b>${pnl(x.pid)}</b>
+          <br><span class="tiny">${why(x)}${x.tt ? " · " + esc(x.tt.name) + (x.tt.date ? " · " + dateFmt(x.tt.date) : "") : ""}</span>
+          ${x.prize ? `<br><span class="tiny disc-prize">${esc(x.prize)}</span>` : ""}</span></span>
+        <div class="disc-ctl"><label class="disc-chk"><input type="checkbox" data-act="disc-used" data-val="${esc(x.k)}" ${x.used ? "checked" : ""}><span>${x.used ? t("disc_used_on", { d: dateFmt(x.used) }) : t("disc_used")}</span></label>
+          <button class="icon-btn" data-act="disc-del" data-val="${esc(x.k)}" title="${t("delete")}">✕</button></div></div>`;
+    const players = state.players.filter(p => p.active).sort((a, b) => a.name.localeCompare(b.name));
+    const ts = state.tournaments.filter(tt => !isGameT(tt) && tt.status === "played").sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    return `<div class="card"><h3>🎟 ${t("disc_title")}</h3><p class="tiny" style="margin:4px 0 10px;">${t("disc_hint")}</p>
+      <div class="seg" style="margin-bottom:10px;"><button class="${state.view.discAll ? "" : "active"}" data-act="disc-filter" data-val="">${t("disc_open")} <span class="seg-n">${open.length}</span></button><button class="${state.view.discAll ? "active" : ""}" data-act="disc-filter" data-val="1">${t("disc_all")} <span class="seg-n">${all.length}</span></button></div>
+      ${show.map(row).join("") || `<div class="empty">${t(state.view.discAll ? "disc_none" : "disc_none_open")}</div>`}
+      ${add ? `<div class="disc-add"><label class="field"><span class="lbl">${t("disc_player")}</span><select id="discP"><option value="">—</option>${players.map(p => `<option value="${p.id}">${esc(pnt(p.id))}</option>`).join("")}</select></label>
+          <label class="field"><span class="lbl">${t("disc_for_t")}</span><select id="discT"><option value="">—</option>${ts.map(tt => `<option value="${tt.id}">${esc(tt.name)}${tt.date ? " · " + dateFmt(tt.date) : ""}</option>`).join("")}</select></label>
+          <label class="field"><span class="lbl">${t("disc_note")}</span><input type="text" id="discN" maxlength="80" autocomplete="off" value="−50% на наступний турнір"></label>
+          <div class="row" style="gap:8px;justify-content:flex-end;"><button class="btn sm ghost" data-act="disc-add" data-val="">${t("cancel")}</button><button class="btn sm primary" data-act="disc-add-save">${t("save")}</button></div></div>`
+        : `<button class="btn sm" style="margin-top:12px;" data-act="disc-add" data-val="1">+ ${t("disc_add")}</button>`}
+    </div>`;
+  }
+  async function discSave(patch) { const prev = state.league; state.league = { ...(state.league || {}), ...patch }; render();
+    try { state.league = await db.saveLeagueSettings(patch); render(); } catch (e) { state.league = prev; render(); err(e); } }
   function viewAdmin() {
     if (!canEdit()) return "";
     const queue = state.players.filter(p => p.levelStatus !== "ok");
     const pendingN = queue.filter(p => p.levelStatus === "pending").length;
     const sub = state.view.adm || (pendingN ? "review" : "ratings");
-    const tabs = [["review", t("review_tab"), pendingN], ["ratings", t("ratings_admin")], ...(isAdmin() ? [["visits", t("visits_tab")], ["nom", "🔒 " + t("nom_tab")], ["partner", "🤝 " + t("p_tab")], ["clubs", "📍 " + t("clubs_tab")], ["group", "📣 " + t("grp_tab")]] : []), ["roles", t("roles")]];
+    const tabs = [["review", t("review_tab"), pendingN], ["ratings", t("ratings_admin")], ...(isAdmin() ? [["visits", t("visits_tab")], ["nom", "🔒 " + t("nom_tab")], ["partner", "🤝 " + t("p_tab")], ["clubs", "📍 " + t("clubs_tab")], ["disc", "🎟 " + t("disc_tab"), discList().filter(x => !x.used).length], ["group", "📣 " + t("grp_tab")]] : []), ["roles", t("roles")]];
     let body = "";
     if (sub === "ratings") {
       const q = (state.view.q || "").toLowerCase(); const E = computeElo();
@@ -1665,6 +1741,7 @@ setLang(detectLang(BOOT.tgLang));
         <div class="row" style="gap:8px;justify-content:flex-end;margin-top:10px;">${state.group ? `<button class="btn sm ghost danger" data-act="grp-off">${t("grp_off")}</button>` : ""}<button class="btn sm primary" data-act="grp-connect">${state.group ? t("grp_change") : t("grp_connect")}</button></div>
         <p class="tiny" style="margin:12px 0 0;">${t("grp_hint")}</p></div>`; }
     else if (sub === "nom" && isAdmin()) body = nominationsHtml();
+    else if (sub === "disc" && isAdmin()) body = discountsHtml();
     else if (sub === "clubs" && isAdmin()) {
       const list = state._clubs || (state._clubs = clubsCfg().map(c => ({ ...c })));
       body = `<div class="card"><h3>📍 ${t("clubs_tab")}</h3><p class="tiny" style="margin:4px 0 10px;">${t("clubs_hint")}</p>
@@ -1740,7 +1817,7 @@ setLang(detectLang(BOOT.tgLang));
   const G = createGames({ state, db, esc, isField, toast, err, render: () => render(), reload: () => reload(), myPlayer, isAdmin, computeElo, eloExpect, ELO, letter, levelBadge, letterClass, avatarHtml, pname, pl,
     lvNow, fmtLv, today, uid, CLUBS, LV_G, lvLetters, setLvLetters, rangeLabel, regsOf, ask, byId, gameId, newFtour, regErrMsg });
 
-  function render() { _EC = null;
+  function render() { _EC = null; _DISC = null;
     const v = document.getElementById("view");
     const me = myPlayer(); LBL = {};
     if (me && state._onb && state._onb.retest && state._onb.step != null) v.innerHTML = viewQuiz(state._onb);
@@ -1807,7 +1884,10 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "t-tab") on(() => { state.view.tTab = el.dataset.val; render(); });
       else if (a === "note-toggle") on(() => { state.view.noteOpen = state.view.noteOpen === id ? null : id; render(); });
       else if (a === "prz-zoom") on(() => { const u = el.dataset.url; if (!imgOk(u)) return; const d = document.createElement("div"); d.className = "img-zoom"; d.innerHTML = `<img src="${esc(u)}" alt="">`; d.onclick = () => d.remove(); document.body.appendChild(d); });
-      else if (a === "tf-prz-n") el.onchange = () => { readTf(); const n = +el.value; const f = state._tf; f.s.prizes = Array.from({ length: n }, (_, i) => (f.s.prizes || [])[i] || { text: "", photo: "" }); render(); };
+      else if (a === "tf-prz-n") el.onchange = () => { readTf(); const n = +el.value; const f = state._tf, m = przMode(f.s); f.s.prizes = Array.from({ length: n }, (_, i) => (f.s.prizes || [])[i] || { text: "", photo: "", by: m === "mixed" ? "" : m }); render(); };
+      else if (a === "tf-prz-mode") on(() => { readTf(); const f = state._tf, m = el.dataset.val; if (m === "mixed") f.s._prz_mode = "mixed"; else { delete f.s._prz_mode; (f.s.prizes || []).forEach(x => x.by = m); } render(); });
+      else if (a === "tf-prz-by") on(() => { readTf(); const [i, k] = el.dataset.val.split(":"), x = (state._tf.s.prizes || [])[+i]; if (x) x.by = k; state._tf.s._prz_mode = "mixed"; render(); });
+      else if (a === "tf-rf-by") on(() => { readTf(); state._tf.s.raffle_by = el.dataset.val; render(); });
       else if (a === "tf-rf-n") el.onchange = () => { readTf(); const n = +el.value, f = state._tf; f.s.raffle_items = Array.from({ length: n }, (_, i) => (f.s.raffle_items || [])[i] || { text: "", photo: "" }); render(); };
       else if (a === "tf-rf-del") on(() => { readTf(); const i = +el.dataset.val; if (state._tf.s.raffle_items[i]) state._tf.s.raffle_items[i].photo = ""; render(); });
       else if (a === "tf-rf-ph") el.onchange = async () => { const fl = el.files && el.files[0]; if (!fl) return; readTf(); const i = +el.dataset.val, f = state._tf;
@@ -1938,6 +2018,15 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "rv-approve") on(async () => { const inp = document.getElementById("rv_" + id); const lv = inp && inp.value !== "" ? +inp.value : null; try { await db.reviewLevel(id, "approve", lv); await reload(); toast(t("saved")); } catch (e) { err(e); } });
       else if (a === "rv-quiz") on(async () => { try { await db.reviewLevel(id, "quiz"); await reload(); toast(t("saved")); } catch (e) { err(e); } });
       else if (a === "adm-tab") on(() => { state.view.adm = el.dataset.val; render(); });
+      else if (a === "disc-filter") on(() => { state.view.discAll = !!el.dataset.val; render(); });
+      else if (a === "disc-used") el.onchange = () => { const k = el.dataset.val, u = { ...((state.league || {}).disc_used || {}) }; if (el.checked) u[k] = today(); else delete u[k]; discSave({ disc_used: u }); };
+      else if (a === "disc-del") on(async () => { const k = el.dataset.val, L = state.league || {}; if (!(await ask(t("disc_del_q")))) return;
+        const man = (L.disc_manual || []).filter(m => m.k !== k), u = { ...(L.disc_used || {}) }; delete u[k];
+        await discSave(man.length !== (L.disc_manual || []).length ? { disc_manual: man, disc_used: u } : { disc_hidden: [...new Set([...(L.disc_hidden || []), k])], disc_used: u }); });
+      else if (a === "disc-add") on(() => { state.view.discAdd = !!el.dataset.val; render(); });
+      else if (a === "disc-add-save") on(async () => { const g = id => document.getElementById(id), pid = g("discP").value; if (!pid) return toast(t("disc_pick_p"));
+        const m = { k: "m_" + Math.random().toString(36).slice(2, 9), pid, tid: g("discT").value || null, note: g("discN").value.replace(/\s+/g, " ").trim().slice(0, 80), at: today() };
+        state.view.discAdd = false; await discSave({ disc_manual: [...((state.league || {}).disc_manual || []), m] }); });
       else if (a === "adm-confirm") on(() => { const p = byId(state.players, id); if (!p) return; const v = !p.confirmed;
         return optimistic(() => { p.confirmed = v; }, async () => { await db.updatePlayer(id, { confirmed: v }); db.addLog((v ? "Подтвердил Эло: " : "Снял подтверждение: ") + p.name).catch(() => {}); }, () => { p.confirmed = !v; }); });
       else if (a === "adm-active") on(() => { const p = byId(state.players, id); if (!p) return; const v = !p.active;

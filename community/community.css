@@ -711,6 +711,40 @@ html[data-theme="light"] .theme-sw .sun { color: #fff; } html[data-theme="light"
 .rfi .rf-stage:empty { display: none; }
 .sub-h { font-size: 13px; color: var(--ink-3); }
 
+
+/* ---- учёт скидок −50% ---- */
+.disc-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid rgba(255,255,255,.06); }
+.disc-row:first-of-type { border-top: 0; }
+.disc-row .p-row-main { flex: 1; min-width: 0; display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.disc-row.used .p-row-main { opacity: .55; }
+.disc-prize { color: var(--ink-2); }
+.disc-ctl { display: flex; align-items: center; gap: 4px; flex: none; }
+.disc-chk { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; cursor: pointer; padding: 6px 8px; border-radius: 10px; background: rgba(255,255,255,.05); max-width: 128px; }
+.disc-chk input { width: 18px; height: 18px; flex: none; accent-color: #61D2B7; }
+.disc-row.used .disc-chk { color: #61D2B7; }
+.disc-add { margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.08); }
+.disc-tag { display: inline-block; font-size: 10.5px; font-weight: 800; padding: 1px 6px; border-radius: 6px; background: rgba(97,210,183,.16); color: #61D2B7; vertical-align: 1px; }
+
+
+/* ---- партнёры призов (LuPadel / Skay.ua) ---- */
+.lg { display: block; width: auto; }
+.prz-by .lg-skay { height: 20px; }
+.prz-pt { margin-left: auto; flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); }
+.prz-pt .lg { height: 15px; }
+.prz-pt .lg-skay { height: 17px; }
+.t-row-pt .lg-skay { height: 15px; }
+.rf-t-by { display: flex; justify-content: center; margin-top: 8px; }
+.rf-t-by .lg { height: 15px; }
+.pt-top .lg-skay.pt-logo { height: 30px; }
+.tf-pt { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.tf-pt-opts { display: flex; gap: 6px; flex-wrap: wrap; }
+.tf-pt-b { height: 34px; padding: 0 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04); color: inherit; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; cursor: pointer; }
+.tf-pt-b.on { border-color: #FF7A1A; background: rgba(255,122,26,.16); box-shadow: 0 0 0 1px #FF7A1A inset; }
+.tf-pt-b .lg { height: 16px; }
+.tf-pt-one { display: flex; gap: 6px; margin: 6px 0 0 36px; flex-wrap: wrap; }
+.tf-pt-one .tf-pt-b { height: 28px; padding: 0 8px; font-size: 11.5px; }
+.tf-pt-one .tf-pt-b .lg { height: 13px; }
+
 /* ===== светлая тема ===== */
 /* сгенерировано из тёмных правил + ручные правки ниже */
 html[data-theme="light"] .lvb { border-radius: 8px; color: var(--ink); background: rgba(255,255,255,0.87); border: 1px solid rgba(40,30,20,0.156); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); }
@@ -872,6 +906,12 @@ html[data-theme="light"] .rfi { border-radius: 14px; background: rgba(255,255,25
 html[data-theme="light"] .rfi.won { border-color: rgba(97,210,183,.45); background: linear-gradient(135deg, rgba(97,210,183,.12), rgba(97,210,183,.02)); }
 html[data-theme="light"] .rfi-ph { border-radius: 12px; background: #1C1C20; }
 html[data-theme="light"] .rfi-ic { background: rgba(255,122,26,.10); }
+html[data-theme="light"] .disc-row { border-top: 1px solid rgba(40,30,20,0.084); }
+html[data-theme="light"] .disc-chk { border-radius: 10px; background: rgba(255,255,255,0.75); }
+html[data-theme="light"] .disc-add { border-top: 1px solid rgba(40,30,20,0.102); }
+html[data-theme="light"] .disc-tag { border-radius: 6px; background: rgba(97,210,183,.16); color: #61D2B7; }
+html[data-theme="light"] .tf-pt-b { border-radius: 10px; border: 1px solid rgba(40,30,20,0.156); background: rgba(255,255,255,0.71); color: inherit; }
+html[data-theme="light"] .tf-pt-b.on { border-color: #FF7A1A; background: rgba(255,122,26,.16); box-shadow: 0 0 0 1px #FF7A1A inset; }
 /* --- ручные правки светлой темы (сообщество) --- */
 html[data-theme="light"] .rf-ticket { background: linear-gradient(180deg, rgba(47,170,140,.14), rgba(242,106,12,.08)); border-color: rgba(30,140,115,.45); }
 html[data-theme="light"] .rf-ticket::before, html[data-theme="light"] .rf-ticket::after { background: #FBF7F2; border-color: rgba(30,140,115,.45); }
@@ -902,3 +942,8 @@ html[data-theme="light"] .t-row-pt { background: rgba(15,138,110,.06); border-co
 html[data-theme="light"] .t-row-pt img { background: #17171B; padding: 2px 5px; border-radius: 5px; }
 html[data-theme="light"] .ct2 .ct-bottom { border-top-color: rgba(40,30,20,.08); }
 html[data-theme="light"] .t-status.res { color: #B45309; border-color: rgba(180,83,9,.3); background: rgba(245,177,76,.12); }
+/* Skay.ua — свой фон в логотипе, тёмная подложка не нужна; LuPadel в кнопках выбора — на тёмной подложке */
+html[data-theme="light"] .lg-skay { background: none !important; padding: 0 !important; }
+html[data-theme="light"] .tf-pt-b .lg-lupadel, html[data-theme="light"] .prz-pt .lg-lupadel, html[data-theme="light"] .rf-t-by .lg-lupadel { background: #17171B; padding: 3px 6px; border-radius: 6px; box-sizing: content-box; }
+html[data-theme="light"] .tf-pt-b { border-color: rgba(0,0,0,.14); background: rgba(0,0,0,.03); }
+html[data-theme="light"] .tf-pt-b.on { border-color: #E8650A; background: rgba(255,122,26,.12); box-shadow: 0 0 0 1px #E8650A inset; }
