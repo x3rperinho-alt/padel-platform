@@ -216,7 +216,7 @@ setLang(detectLang(BOOT.tgLang));
     return `<div class="card pt-card ${kind}"><div class="pt-top"><span class="pt-kick">${t(kind === "season" ? "p_season" : "p_prizes")}</span><img class="pt-logo" src="lupadel.svg" alt="${esc(P.name)}"></div>
       ${kind === "prizes" ? `<p class="tiny" style="margin:8px 0 0;">${t("p_prizes_sub")}</p>` : ""}${links ? `<div class="pt-links">${links}</div>` : ""}</div>`;
   }
-  // подпись игрока в текущем турнире (ставит админ): «Имя (подпись)» — видят все; LBL заполняется при показе турнира
+  // подписи внутри турнира убраны — остаётся общая подпись игрока (players.label) из админки; LBL всегда пуст
   let LBL = {};
   // постоянная подпись игрока (players.label, ставит админ) — показывается везде; подпись турнира важнее
   const plab = pid => { const p = byId(state.players, pid); return (p && p.label) || ""; };
@@ -425,7 +425,6 @@ setLang(detectLang(BOOT.tgLang));
   function viewTournamentDetail(tid) {
     if (state.view.editT === tid && state._tf) return tournamentFormHtml(state._tf);
     const tt = byId(state.tournaments, tid); if (!tt) { state.view.t = null; return viewTournaments(); }
-    LBL = (tt.s && tt.s.labels) || {};
     if (state.view.editT === tid) return tournamentFormHtml(tt);
     if (state.view.run === tid && state._run && canEditT(tt)) return runSetupHtml(tt);
     if (tt.status === "live" || (state.view.fix === tid && canEditT(tt))) return liveHtml(tt, tt.status !== "live");
@@ -501,7 +500,6 @@ setLang(detectLang(BOOT.tgLang));
       ${tt.s.kind === "ftour" && tt.s.created_by ? `<div class="card"><span class="tiny">${t("organizer_lbl")}:</span> ${pl(tt.s.created_by)}</div>` : ""}
       ${canEditT(tt) && tt.status !== "played" ? runCardHtml(tt) : ""}
       ${canEditT(tt) && state.group && tt.status === "scheduled" && isUpcoming(tt) ? `<button class="btn block" style="margin-bottom:12px;" data-act="t-announce" data-id="${esc(tid)}">${t("announce_btn")}</button>` : ""}
-      ${labelsCardHtml(tt, main.map(r => r.playerId))}
       ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><input id="addRegQ" data-act="reg-q" data-id="${tid}" type="search" autocomplete="off" placeholder="${t("search")}" value="${esc(state._addQ || "")}" style="margin-top:8px;"><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${addRegOptions(tid, state._addQ || "")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
         <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`;
   }
@@ -575,8 +573,7 @@ setLang(detectLang(BOOT.tgLang));
       ${facts.length ? `<div class="card"><h3>${t("t_stats")}</h3><div class="facts">${facts.map(([k, who, sub]) => `<div class="fact"><div class="tiny">${k}</div><div class="fact-who">${who}</div><div class="fact-sub">${sub}</div></div>`).join("")}</div></div>` : ""}
       ${isAdmin() && finished ? announceCardHtml(tt, tGames) : ""}
       ${tPartners(tt).includes("lupadel") && !hasRaffle(tt) ? partnerHtml("prizes", tt.id) : ""}
-      ${splitCardHtml(tt, rows.map(r => r.id))}
-      ${labelsCardHtml(tt, rows.map(r => r.id))}`}`;
+      ${splitCardHtml(tt, rows.map(r => r.id))}`}`;
   }
   // ---------- факты для объявления после турнира (видит только админ, текст можно зачитать) ----------
   function announceFacts(tt, tGames) {
@@ -1073,7 +1070,6 @@ setLang(detectLang(BOOT.tgLang));
         ${resting.length ? `<p class="tiny rest-line">💤 ${t("rest")}: ${resting.join(", ")}</p>` : ""}
         ${controls ? `<div style="margin:12px 0;">${controls}</div>` : ""}
         ${roundAdmin}`}
-      ${labelsCardHtml(tt, tt.participantIds && tt.participantIds.length ? tt.participantIds : [...new Set(games.flatMap(g => g.teamA.concat(g.teamB)))])}
       ${finishCard}`;
   }
   // сохранение счёта матча (читаем оба поля карточки)
