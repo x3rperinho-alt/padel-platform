@@ -229,7 +229,7 @@ setLang(detectLang(BOOT.tgLang));
   const pnl = pid => esc(pname(pid)) + lblHtml(pid);           // имя + подпись, без ссылки
   const pnt = pid => pname(pid) + (lblOf(pid) ? " (" + lblOf(pid) + ")" : ""); // то же простым текстом
   const pl = pid => `<span class="plink" data-act="open-profile" data-id="${esc(pid)}">${esc(pname(pid))}</span>${lblHtml(pid)}`;
-  let toastTimer; function toast(m) { const el = document.getElementById("toast"); el.textContent = m; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2200); }
+  let toastTimer; function toast(m, ms) { const el = document.getElementById("toast"); el.textContent = m; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), ms || 2200); }
   const err = e => toast(t("error", { msg: (e && e.message) || e }));
   // поле ввода с кнопкой ✓ справа: прячет клавиатуру и сохраняет (scope: ob — анкета, pf:<id> — профиль)
   const okWrap = (inner, scope) => `<span class="ok-wrap">${inner}<button type="button" class="ok-btn" data-act="field-ok" data-scope="${scope}" aria-label="${t("save")}">✓</button></span>`;
@@ -829,7 +829,8 @@ setLang(detectLang(BOOT.tgLang));
   const teamsOf = tt => (tt.teams || []).map(x => x.players || x).filter(x => Array.isArray(x) && x.length === 2);
   const pairName = tm => `${pl(tm[0])} + ${pl(tm[1])}`;
   const gameId = (tid, r, c) => `${tid}-r${r}-c${c}`;
-  const freshGameId = (tid, r, c) => { const id = gameId(tid, r, c); return state.games.some(g => g.id === id) ? id + "-" + Math.random().toString(36).slice(2, 6) : id; };
+  // id матча должен заканчиваться на «-c<позиция корта>» — по нему KotC и сортировки понимают порядок кортов (posOf)
+  const freshGameId = (tid, r, c) => { const id = gameId(tid, r, c); return state.games.some(g => g.id === id) ? `${tid}-x${Math.random().toString(36).slice(2, 6)}-r${r}-c${c}` : id; };
   // корты турнира: номера («2, 3, 5», «2.3.5», «2 3 5») или названия через запятую («Центральний, Скляний, 3»); пусто — корты 1, 2, 3…
   const parseCourts = v => {
     const out = [];
@@ -1064,6 +1065,7 @@ setLang(detectLang(BOOT.tgLang));
     // админ: добавить раунд в конец (американо и пары — в любой момент, даже после финиша) и удалить любой раунд вместе со счётом
     const canAdd = edit && cur === maxR && (tt.format === "americano" || (isTeamF(tt.format) && tt.format !== "playoff"));
     const roundAdmin = edit && maxR ? `<div class="rnd-admin">${canAdd ? `<button class="btn sm" data-act="round-add" data-id="${tid}">+ ${t("round_add")}</button>` : ""}
+        ${!fix && games.some(g => !scoredG(g)) ? `<button class="btn sm ghost" data-act="sub-open" data-id="${tid}">⇄ ${t("sub_btn")}</button>` : ""}
         <button class="btn sm ghost danger" data-act="round-del" data-id="${tid}" data-val="${cur}">🗑 ${t("round_del", { n: rLbl(cur) })}</button></div>` : "";
     const allDone = games.length && games.every(scoredG);
     const finishCard = edit ? (fix
@@ -1094,7 +1096,16 @@ setLang(detectLang(BOOT.tgLang));
     if ((a == null) !== (b == null)) { if (explicit) { toast(t("score_both")); (a == null ? ia : ib).focus(); } return false; } // ждём второе число
     if (a === g.scoreA && b === g.scoreB) { markOk(box, a != null); return true; }
     const tt = byId(state.tournaments, g.tournamentId);
-    if ((tt.format === "playoff" || (tt.format === "kotc" && g.label !== "kf")) && a != null && a === b) { toast(t("need_winner")); return; }
+    if ((tt.format === "playoff" || (tt.format === "kotc" && g.label !== "kf")) && a != null && a === b) { markOk(box, false, true); if (explicit) toast(t("need_winner")); return false; } // ничья: молча ждём правки второго поля, на ✓ — подсказка
+    const tgt = g.label === "kf" ? kotcCfg(tt).final_target : (tt.scoring && tt.scoring.mode === "total" ? tt.scoring.target : null);
+    if (a != null && tgt && a + b !== tgt && box.dataset.sumOk !== a + ":" + b) {
+      if (!explicit) { markOk(box, false, true); return false; } // человек ещё правит второе число — спросим, когда нажмёт ✓
+      if (box.dataset.asking) return false; // вопрос уже открыт
+      box.dataset.asking = "1"; const yes = await ask(t("sum_check_q", { a, b, s: a + b, n: tgt })); delete box.dataset.asking;
+      if (!yes) { markOk(box, false, true); ib.focus(); return false; }
+      box.dataset.sumOk = a + ":" + b; if (g.scoreA === a && g.scoreB === b) return true;
+    }
+    const prevWin = g.scoreA == null ? 0 : Math.sign(g.scoreA - g.scoreB);
     const wasDone = tGamesOf(tt.id).filter(x => x.round === g.round).every(scoredG);
     const prevA = g.scoreA, prevB = g.scoreB;
     g.scoreA = a; g.scoreB = b;
@@ -1107,6 +1118,17 @@ setLang(detectLang(BOOT.tgLang));
     const nowDone = tGamesOf(tt.id).filter(x => x.round === g.round).every(scoredG);
     state.view.liveRound = g.round;
     if (nowDone && !wasDone) toast(g.label === "kf" ? t("kotc_final_m", { n: g.round - (tt.rounds || 10) }) + " ✓" : t("round_done", { n: g.round }));
+    // KotC: поменялся победитель в раунде, после которого уже составлены следующие — расстановка зависела от старого результата
+    if (tt.format === "kotc" && g.label !== "kf" && prevWin && a != null && Math.sign(a - b) !== prevWin) {
+      const later = tGamesOf(tt.id).filter(x => x.round > g.round);
+      if (later.length) {
+        if (later.some(scoredG)) toast(t("kotc_win_changed_played", { n: g.round }), 6000);
+        else if (nowDone && await ask(t("kotc_win_changed_q", { n: g.round, m: g.round + 1 }))) {
+          try { await db.deleteGames(later.map(x => x.id)); state.games = state.games.filter(x => !later.includes(x)); await nextRound(tt.id); } catch (e) { err(e); }
+          return true;
+        }
+      }
+    }
     if (isBusy(document.activeElement)) pendingLive = true; else if (pendingLive && !savingN) liveReload(); else render();
     return true;
   }
@@ -1149,6 +1171,27 @@ setLang(detectLang(BOOT.tgLang));
     if (!ms || !ms.length) { toast(t("round_add_fail")); return; }
     const r = maxR + 1, rows = ms.map(([a, b], i) => ({ id: freshGameId(tid, r, i + 1), tournamentId: tid, round: r, ...courtOf(tt.s.court_nums, i + 1), teamA: a, teamB: b, scoreA: null, scoreB: null, label: null }));
     try { await db.saveGames(rows); if (r > (tt.rounds || 0)) await db.saveTournament(tRow(tt, { rounds: r })); state.view.liveRound = r; await reload(); toast(t("round_ready", { n: r })); } catch (e) { err(e); }
+  }
+  // замена игрока по ходу турнира: новый игрок занимает место выбывшего во всех ещё не сыгранных матчах.
+  // Очки за уже сыгранные матчи остаются у того, кто их играл.
+  function subSheet(tid) {
+    const tt = byId(state.tournaments, tid); if (!tt) return; const gs = tGamesOf(tid), open = gs.filter(g => !scoredG(g));
+    const inPlay = [...new Set(open.flatMap(g => g.teamA.concat(g.teamB)))].sort((a, b) => pname(a).localeCompare(pname(b)));
+    const used = new Set(gs.flatMap(g => g.teamA.concat(g.teamB)).concat(tt.participantIds || []));
+    const regs = regsOf(tid).filter(r => !used.has(r.playerId)).map(r => r.playerId);
+    const others = state.players.filter(p => p.active && !used.has(p.id) && !regs.includes(p.id)).sort((a, b) => a.name.localeCompare(b.name)).map(p => p.id);
+    const opt = id => `<option value="${id}">${esc(pnt(id))}</option>`;
+    const d = sheet("⇄ " + t("sub_btn"), `<p class="tiny" style="margin:0 0 10px;">${t("sub_hint")}</p>
+      <label class="field"><span class="lbl">${t("sub_out")}</span><select id="subOut"><option value="">—</option>${inPlay.map(opt).join("")}</select></label>
+      <label class="field"><span class="lbl">${t("sub_in")}</span><select id="subIn"><option value="">—</option>${regs.length ? `<optgroup label="${t("sub_reg")}">${regs.map(opt).join("")}</optgroup>` : ""}<optgroup label="${t("sub_all")}">${others.map(opt).join("")}</optgroup></select></label>
+      <button type="button" class="btn primary block" data-x="go">${t("sub_go")}</button>`);
+    d.querySelector('[data-x="go"]').onclick = async ev => { const o = d.querySelector("#subOut").value, n = d.querySelector("#subIn").value; if (!o || !n) { toast(t("sub_pick")); return; }
+      const btn = ev.currentTarget; btn.classList.add("busy");
+      const sw = arr => arr.map(x => x === o ? n : x);
+      const rows = open.filter(g => g.teamA.concat(g.teamB).includes(o)).map(g => ({ ...g, teamA: sw(g.teamA), teamB: sw(g.teamB) }));
+      const pids = (tt.participantIds || []).map(x => x === o ? n : x);
+      try { await db.saveGames(rows); await db.saveTournament(tRow(tt, { participantIds: pids.includes(n) ? pids : pids.concat(n) })); d.remove(); await reload(); toast(t("sub_done", { a: pname(o), b: pname(n) })); }
+      catch (e) { btn.classList.remove("busy"); err(e); } };
   }
   // удалить любой раунд со счётом; следующие раунды сдвигаются на номер вниз
   async function deleteRound(tid, r) {
@@ -2006,6 +2049,7 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "live-next") on(async () => { el.disabled = true; await nextRound(id); });
       else if (a === "live-remove") on(() => removeLastRound(id));
       else if (a === "round-add") on(() => addRound(id));
+      else if (a === "sub-open") on(() => subSheet(id));
       else if (a === "round-del") on(() => deleteRound(id, +el.dataset.val));
       else if (a === "live-finish") on(() => finishRun(id));
       else if (a === "live-cancel") on(() => cancelRun(id));
@@ -2126,11 +2170,18 @@ setLang(detectLang(BOOT.tgLang));
         const tgt = g && g.label === "kf" ? kotcCfg(tt).final_target : sc.target;
         delete inp.dataset.auto; markOk(box, false, true); if (sc.mode !== "total" || !tgt || inp.value === "") return; const o = other();
         if (o.value === "" || o.dataset.auto) { const val = tgt - Math.round(+inp.value); if (val >= 0) { o.value = val; o.dataset.auto = "1"; } } };
-      inp.onchange = () => saveScoreFrom(box);
+      // переход между полями одного матча ничего не сохраняет (иначе уходит промежуточный счёт вроде автоподставленного 12:7);
+      // ушли из матча — проверка в focusout ниже, ✓/Enter — явное сохранение
+      inp.onchange = () => setTimeout(() => { if (document.activeElement === inp) saveScoreFrom(box); }, 0);
       const ok = box.querySelector(".sc-ok");
+      if (!box.dataset.foBound) { box.dataset.foBound = "1"; // ушли из матча совсем (другое поле, Enter, тап мимо) — проверяем счёт как по ✓
+        box.addEventListener("focusout", e => { if (e.relatedTarget && box.contains(e.relatedTarget)) return;
+          setTimeout(() => { if (!box.isConnected || box.contains(document.activeElement)) return; const k = box.querySelector(".sc-ok"), ins = [...box.querySelectorAll("input.sc-in")]; if (k && k.classList.contains("dirty") && ins.every(x => x.value !== "")) saveScoreFrom(box, true); }, 0); }); }
       if (ok && !ok.dataset.bound) { ok.dataset.bound = "1"; ok.onpointerdown = e => e.preventDefault(); // фокус не уходит, пока не прочитали обе цифры
         ok.onclick = async () => { if (!(await saveScoreFrom(box, true))) return; const ae = document.activeElement; if (ae && box.contains(ae) && ae.blur) ae.blur(); }; }
-      inp.onkeydown = e => { if (e.key !== "Enter") return; e.preventDefault(); const all = [...v.querySelectorAll("input.sc-in")], i = all.indexOf(inp);
+      inp.onkeydown = async e => { if (e.key !== "Enter") return; e.preventDefault();
+        if ([...box.querySelectorAll("input.sc-in")].every(x => x.value !== "") && !(await saveScoreFrom(box, true))) return;
+        const all = [...v.querySelectorAll("input.sc-in")].filter(x => x.isConnected), i = all.indexOf(inp);
         const nx = all.slice(i + 1).find(x => x.value === "" && x.dataset.side === "A") || all.slice(i + 1).find(x => x.value === ""); if (nx) nx.focus(); else inp.blur(); };
     });
     ["runCourtNums", "runCourts", "runRounds", "runTarget"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = () => { const r = readRun(); if ((id === "runCourts" || id === "runCourtNums") && !r.touched) { const tt = byId(state.tournaments, r.tid); r.rounds = runDefaultRounds(r, runPlayers(tt.id).length); } render(); }; });
