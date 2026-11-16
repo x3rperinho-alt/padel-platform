@@ -236,6 +236,9 @@ setLang(detectLang(BOOT.tgLang));
   const decFix = inp => { const cur = inp.value; let x = cur.replace(/,/g, ".").replace(/[^0-9.]/g, ""); const i = x.indexOf("."); if (i >= 0) x = x.slice(0, i + 1) + x.slice(i + 1).replace(/\./g, "");
     if (x !== cur) { const pos = inp.selectionStart; inp.value = x; try { inp.setSelectionRange(Math.min(pos, x.length), Math.min(pos, x.length)); } catch (e) {} } };
   const isField = el => !!el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !["checkbox", "radio", "file", "button", "submit"].includes(el.type)));
+  // пока человек что-то вводит или выбирает в списке — фоновые обновления не перерисовывают экран (иначе список закрывается сам)
+  const isBusy = el => isField(el) || (!!el && el.tagName === "SELECT");
+  let pendingRender = false;
   // подтверждение: в Telegram — родное окно; иначе — своё окно в приложении (системный confirm() в некоторых встроенных браузерах заблокирован и молча отвечает «нет»)
   const ask = msg => new Promise(res => {
     const tg = window.Telegram && window.Telegram.WebApp;
@@ -249,19 +252,19 @@ setLang(detectLang(BOOT.tgLang));
   let savingN = 0, saveEpoch = 0; // сколько счетов сейчас сохраняется; номер «поколения» сохранений
   async function reload() { try { const ep = saveEpoch; const d = await db.loadAll();
       if (savingN || ep !== saveEpoch) { pendingLive = true; return; } // пока грузили, ушёл новый счёт — эти данные уже устарели
-      Object.assign(state, d); syncClubs(); render(); cacheSoon(); } catch (e) { console.error(e); } }
+      Object.assign(state, d); syncClubs(); cacheSoon(); if (isBusy(document.activeElement)) { pendingRender = true; return; } render(); } catch (e) { console.error(e); } }
   let cacheT; const cacheSoon = () => { clearTimeout(cacheT); cacheT = setTimeout(() => saveCache(BOOT.tgId, U, { league: state.league, players: state.players, tournaments: state.tournaments, games: state.games, registrations: state.registrations, admins: state.admins }), 1500); };
   // открылись из кэша — подменяем на свежие данные, как только они придут
   if (BOOT.fresh) BOOT.fresh.then(r => { if (!r) return; Object.assign(U, r.user);
-    if (savingN) { pendingLive = true; return; } Object.assign(state, r.data); if (isField(document.activeElement)) { pendingLive = true; return; } render(); });
+    if (savingN) { pendingLive = true; return; } Object.assign(state, r.data); if (isBusy(document.activeElement)) { pendingRender = true; return; } render(); });
   // мгновенная правка в интерфейсе: меняем сразу, сохраняем в фоне, при ошибке откатываем
   async function optimistic(apply, save, revert) {
     apply(); savingN++; saveEpoch++; render();
     try { await save(); } catch (e) { revert(); render(); err(e); }
-    finally { savingN--; if (pendingLive && !savingN && !isField(document.activeElement)) liveReload(); else cacheSoon(); }
+    finally { savingN--; if (pendingLive && !savingN && !isBusy(document.activeElement)) liveReload(); else cacheSoon(); }
   }
   let reloadTimer, pendingLive = false;
-  const liveReload = () => { if (isField(document.activeElement) || savingN) { pendingLive = true; return; } pendingLive = false; reload(); };
+  const liveReload = () => { if (isBusy(document.activeElement) || savingN) { pendingLive = true; return; } pendingLive = false; reload(); };
   db.subscribe(() => { clearTimeout(reloadTimer); reloadTimer = setTimeout(liveReload, 600); });
   const timeRange = s => s.time ? esc(s.time) + (s.time_end ? "–" + esc(s.time_end) : "") : "";
   const regsOf = tid => state.registrations.filter(r => r.tournamentId === tid && r.status !== "cancelled").sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
@@ -813,7 +816,7 @@ setLang(detectLang(BOOT.tgLang));
     const val = String(inp.value || "").replace(/\s+/g, " ").trim().slice(0, 30), cur = (tt.s.labels || {})[pid] || "";
     if (val === cur) return;
     const labels = { ...(tt.s.labels || {}) }; if (val) labels[pid] = val; else delete labels[pid];
-    try { await db.saveTournament(tRow(tt, { s: { ...tt.s, labels } })); tt.s = { ...tt.s, labels }; LBL = labels; toast(t("saved")); if (!isField(document.activeElement)) render(); } catch (e) { err(e); }
+    try { await db.saveTournament(tRow(tt, { s: { ...tt.s, labels } })); tt.s = { ...tt.s, labels }; LBL = labels; toast(t("saved")); if (!isBusy(document.activeElement)) render(); } catch (e) { err(e); }
   }
   // ---------- проведение турнира: старт, раунды, счёт, таблица наживо ----------
   const TEAM_F = ["team_americano", "roundrobin", "playoff"], STEP_F = ["mexicano", "swiss", "kotc"];
@@ -1104,7 +1107,7 @@ setLang(detectLang(BOOT.tgLang));
     const nowDone = tGamesOf(tt.id).filter(x => x.round === g.round).every(scoredG);
     state.view.liveRound = g.round;
     if (nowDone && !wasDone) toast(g.label === "kf" ? t("kotc_final_m", { n: g.round - (tt.rounds || 10) }) + " ✓" : t("round_done", { n: g.round }));
-    if (isField(document.activeElement)) pendingLive = true; else if (pendingLive && !savingN) liveReload(); else render();
+    if (isBusy(document.activeElement)) pendingLive = true; else if (pendingLive && !savingN) liveReload(); else render();
     return true;
   }
   // кнопка ✓ матча: оранжевая — есть несохранённые цифры, зелёная — сохранено
@@ -1735,7 +1738,8 @@ setLang(detectLang(BOOT.tgLang));
     return list.filter(x => !hidden.has(x.k) && byId(state.players, x.pid)).map(x => ({ ...x, used: used[x.k] || null }))
       .sort((a, b) => (!!a.used - !!b.used) || ((b.tt && b.tt.date) || b.at || "").localeCompare((a.tt && a.tt.date) || a.at || ""));
   }
-  const discOpen = pid => isAdmin() && discList().some(x => x.pid === pid && !x.used);
+  // метка «−50%» у игрока в списках турнира — по желанию админа (настройка лиги disc_tag, по умолчанию выключена)
+  const discOpen = pid => isAdmin() && !!(state.league || {}).disc_tag && discList().some(x => x.pid === pid && !x.used);
   function discountsHtml() {
     const all = discList(), open = all.filter(x => !x.used), show = state.view.discAll ? all : open, add = state.view.discAdd;
     const why = x => x.why === "rf" ? "🎲 " + t("tt_tab_raffle") : x.why === "manual" ? "✍️ " + t("disc_manual") : (["", "🥇", "🥈", "🥉"][x.why] || "") + " " + t("place_n", { n: x.why });
@@ -1748,6 +1752,7 @@ setLang(detectLang(BOOT.tgLang));
     const players = state.players.filter(p => p.active).sort((a, b) => a.name.localeCompare(b.name));
     const ts = state.tournaments.filter(tt => !isGameT(tt) && tt.status === "played").sort((a, b) => (b.date || "").localeCompare(a.date || ""));
     return `<div class="card"><h3>🎟 ${t("disc_title")}</h3><p class="tiny" style="margin:4px 0 10px;">${t("disc_hint")}</p>
+      <label class="row tf-toggle" style="margin:0 0 12px;"><span>${t("disc_tag_opt")}<br><span class="tiny">${t("disc_tag_opt_hint")}</span></span><input type="checkbox" data-act="disc-tag" ${(state.league || {}).disc_tag ? "checked" : ""}></label>
       <div class="seg" style="margin-bottom:10px;"><button class="${state.view.discAll ? "" : "active"}" data-act="disc-filter" data-val="">${t("disc_open")} <span class="seg-n">${open.length}</span></button><button class="${state.view.discAll ? "active" : ""}" data-act="disc-filter" data-val="1">${t("disc_all")} <span class="seg-n">${all.length}</span></button></div>
       ${show.map(row).join("") || `<div class="empty">${t(state.view.discAll ? "disc_none" : "disc_none_open")}</div>`}
       ${add ? `<div class="disc-add"><label class="field"><span class="lbl">${t("disc_player")}</span><select id="discP"><option value="">—</option>${players.map(p => `<option value="${p.id}">${esc(pnt(p.id))}</option>`).join("")}</select></label>
@@ -1867,7 +1872,7 @@ setLang(detectLang(BOOT.tgLang));
   const G = createGames({ state, db, esc, isField, toast, err, render: () => render(), reload: () => reload(), myPlayer, isAdmin, computeElo, eloExpect, ELO, letter, levelBadge, letterClass, avatarHtml, pname, pl,
     lvNow, fmtLv, today, uid, CLUBS, LV_G, lvLetters, setLvLetters, rangeLabel, regsOf, ask, byId, gameId, newFtour, regErrMsg });
 
-  function render() { _EC = null; _DISC = null;
+  function render() { _EC = null; _DISC = null; pendingRender = false;
     const v = document.getElementById("view");
     const me = myPlayer(); LBL = {};
     if (me && state._onb && state._onb.retest && state._onb.step != null) v.innerHTML = viewQuiz(state._onb);
@@ -1985,7 +1990,7 @@ setLang(detectLang(BOOT.tgLang));
         const q = document.getElementById("addRegQ"); if (q && !(window.matchMedia && matchMedia("(pointer:coarse)").matches)) q.focus();
         try { await db.addRegistration(id, pid, status, team); }
         catch (e) { state.registrations = state.registrations.filter(r => r !== reg); render(); err(e); }
-        finally { savingN--; if (pendingLive && !savingN && !isField(document.activeElement)) liveReload(); } });
+        finally { savingN--; if (pendingLive && !savingN && !isBusy(document.activeElement)) liveReload(); } });
       else if (a === "reg-q") { el.oninput = () => { state._addQ = el.value; const sel = document.getElementById("addRegSel"); if (sel) sel.innerHTML = addRegOptions(id, el.value); };
         el.onkeydown = ev => { if (ev.key === "Enter") { ev.preventDefault(); const b = el.closest(".card") && el.closest(".card").querySelector('[data-act="reg-add"]'); if (b) b.click(); } }; }
       else if (a === "p-edit-contacts") on(() => { state._pf = null; state.view.editP = id; render(); const f = document.getElementById("pfContacts"); if (f) f.scrollIntoView({ block: "start", behavior: "smooth" }); const i = document.getElementById("pfc_phone"); if (i) i.focus({ preventScroll: true }); });
@@ -2070,6 +2075,7 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "rv-approve") on(async () => { const inp = document.getElementById("rv_" + id); const lv = inp && inp.value !== "" ? +inp.value : null; try { await db.reviewLevel(id, "approve", lv); await reload(); toast(t("saved")); } catch (e) { err(e); } });
       else if (a === "rv-quiz") on(async () => { try { await db.reviewLevel(id, "quiz"); await reload(); toast(t("saved")); } catch (e) { err(e); } });
       else if (a === "adm-tab") on(() => { state.view.adm = el.dataset.val; render(); });
+      else if (a === "disc-tag") el.onchange = () => discSave({ disc_tag: el.checked });
       else if (a === "disc-filter") on(() => { state.view.discAll = !!el.dataset.val; render(); });
       else if (a === "disc-used") el.onchange = () => { const k = el.dataset.val, u = { ...((state.league || {}).disc_used || {}) }; if (el.checked) u[k] = today(); else delete u[k]; discSave({ disc_used: u }); };
       else if (a === "disc-del") on(async () => { const k = el.dataset.val, L = state.league || {}; if (!(await ask(t("disc_del_q")))) return;
@@ -2146,10 +2152,12 @@ setLang(detectLang(BOOT.tgLang));
     if (r.bottom > h - 24 || r.top < 70) window.scrollBy({ top: r.top - h * 0.3, behavior: "smooth" }); };
   let kbTimer;
   document.addEventListener("focusin", e => { if (!isField(e.target)) return; document.body.classList.add("kb"); clearTimeout(kbTimer); kbTimer = setTimeout(() => scrollField(e.target), 320); });
-  document.addEventListener("focusout", () => setTimeout(() => { if (isField(document.activeElement)) return; document.body.classList.remove("kb"); if (pendingLive) liveReload(); }, 150));
+  document.addEventListener("focusout", () => setTimeout(() => { const ae = document.activeElement; if (!isField(ae)) document.body.classList.remove("kb");
+    if (isBusy(ae)) return; // фокус перешёл в другое поле или список — ждём дальше
+    if (pendingLive) liveReload(); else if (pendingRender) { pendingRender = false; render(); } }, 150));
   if (window.visualViewport) window.visualViewport.addEventListener("resize", () => { clearTimeout(kbTimer); kbTimer = setTimeout(() => scrollField(document.activeElement), 120); });
   // группа для анонсов (название — для переключателя «анонс у групу»)
-  state.group = null; db.leagueGroup().then(v => { if (v !== state.group) { state.group = v || null; if (!isField(document.activeElement)) render(); } });
+  state.group = null; db.leagueGroup().then(v => { if (v !== state.group) { state.group = v || null; if (!isBusy(document.activeElement)) render(); else pendingRender = true; } });
   // ссылка из бота: ?g=<id> (личка, кнопка web_app) или startapp=g_<id> (кнопка в группе) — сразу открыть игру
   try { const sp = tgApp && tgApp.initDataUnsafe && tgApp.initDataUnsafe.start_param, gq = new URLSearchParams(location.search).get("g") || (sp && /^g_/.test(sp) ? sp.slice(2) : null); const gt = gq && byId(state.tournaments, gq);
     if (gt && isGameT(gt)) { state.tab = "games"; if (gt.s.kind === "ftour") state.view.t = gt.id; else state.view.g = gt.id; } } catch (e) {}
