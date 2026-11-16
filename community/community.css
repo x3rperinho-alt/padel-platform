@@ -763,6 +763,15 @@ html[data-theme="light"] .theme-sw .sun { color: #fff; } html[data-theme="light"
 .adm-tag { display: inline-block; vertical-align: 2px; margin-left: 4px; padding: 1px 6px; border-radius: 6px; font: 800 9.5px/1.5 var(--mono, ui-monospace, monospace); letter-spacing: .08em; text-transform: uppercase; color: #FF9A4A; background: rgba(255,122,26,.12); border: 1px solid rgba(255,122,26,.4); white-space: nowrap; }
 .hero-adm { margin: 3px 0 2px; } .hero-adm .adm-tag { margin-left: 0; font-size: 10px; }
 
+
+/* ---- призы: места и розыгрыш одной лентой ---- */
+.prz-card .prz-list { margin-top: 2px; }
+.prz-item .prz-txt { flex: 1; }
+.prz-ic { display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: default; background: rgba(255,122,26,.10); }
+.prz-item.rf { cursor: pointer; border-style: dashed; border-color: rgba(97,210,183,.35); background: linear-gradient(135deg, rgba(97,210,183,.08), rgba(97,210,183,.02)); }
+.prz-win { display: block; margin-top: 3px; font-size: 12.5px; color: #61D2B7; }
+.prz-more { display: block; width: 100%; margin-top: 8px; padding: 6px 0; background: none; border: 0; color: var(--ink-3); font: inherit; font-size: 12px; font-weight: 700; text-align: left; cursor: pointer; }
+
 /* ===== светлая тема ===== */
 /* сгенерировано из тёмных правил + ручные правки ниже */
 html[data-theme="light"] .lvb { border-radius: 8px; color: var(--ink); background: rgba(255,255,255,0.87); border: 1px solid rgba(40,30,20,0.156); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); }
@@ -934,6 +943,9 @@ html[data-theme="light"] .pw-row { border-radius: 14px; background: rgba(255,255
 html[data-theme="light"] .pw-row.first { background: linear-gradient(135deg, rgba(255,122,26,.16), rgba(255,122,26,.04)); border-color: rgba(255,122,26,.35); }
 html[data-theme="light"] .rnd-admin { border-top: 1px dashed rgba(40,30,20,0.138); }
 html[data-theme="light"] .adm-tag { border-radius: 6px; color: #FF9A4A; background: rgba(255,122,26,.12); border: 1px solid rgba(255,122,26,.4); }
+html[data-theme="light"] .prz-ic { background: rgba(255,122,26,.10); }
+html[data-theme="light"] .prz-item.rf { border-style: dashed; border-color: rgba(97,210,183,.35); background: linear-gradient(135deg, rgba(97,210,183,.08), rgba(97,210,183,.02)); }
+html[data-theme="light"] .prz-more { background: none; border: 0; color: var(--ink-3); }
 /* --- ручные правки светлой темы (сообщество) --- */
 html[data-theme="light"] .rf-ticket { background: linear-gradient(180deg, rgba(47,170,140,.14), rgba(242,106,12,.08)); border-color: rgba(30,140,115,.45); }
 html[data-theme="light"] .rf-ticket::before, html[data-theme="light"] .rf-ticket::after { background: #FBF7F2; border-color: rgba(30,140,115,.45); }

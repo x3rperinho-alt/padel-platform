@@ -128,6 +128,9 @@ setLang(detectLang(BOOT.tgLang));
     if (/^https:/.test(g)) return g; if (g) return `https://www.google.com/maps/search/?api=1&query=${g}`;
     return place ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place + " padel Одеса")}` : ""; };
   // уровень турнира для плашек: вся буква целиком — «D Unlim»
+  // «1 призове місце / 2 призові місця / 5 призових місць» (en: 1 prize place / 2 prize places)
+  const plForm = n => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? "one" : a >= 2 && a <= 4 && (b < 12 || b > 14) ? "few" : "many"; };
+  const prizePlaces = n => t("prize_pl_" + plForm(n), { n });
   const lvTag = s => { const r = rangeLabel(s); return /^[A-D]$/.test(r) ? r + " Unlim" : r; };
   const rangeLabel = s => { const ex = lvExact(s); if (ex) return ex; const a = s.level_min != null ? letter(+s.level_min) : null, b = s.level_max != null ? letter(+s.level_max) : null; return !a && !b ? t("all_levels") : a && b ? (a === b ? a : a + " – " + b) : a ? t("lv_from", { l: a }) : t("lv_upto", { l: b }); }; // «від D», а не «D+» — чтобы не путать с подуровнем D+
 
@@ -402,7 +405,7 @@ setLang(detectLang(BOOT.tgLang));
         <div class="ct2-title"><span class="lvb ${letterClass(rl.replace(/^[≤≥] ?/, ""))} ct2-lv">${esc(rl)}</span><span class="t-tile-name">${esc(tt.name)}</span></div>
         <div class="ct2-when">${when}${tt.s.time ? " · " + timeRange(tt.s) : ""}</div>
         <div class="ct2-meta">${[tt.s.place && "📍 " + esc(tt.s.place), esc(fmtName(tt)), t(pairs ? "entry_pairs" : "entry_solo")].filter(Boolean).join(" · ")}</div>
-        ${nPr || tt.s.raffle_text ? `<div class="pt-tag">${nPr ? `🏆 ${t("prize_places_short", { n: nPr })}` : ""}${nPr && tt.s.raffle_text ? " · " : ""}${tt.s.raffle_text ? `🎲 ${t("raffle_short")}` : ""}</div>` : ""}</div>
+        ${nPr || rfItems(tt).length ? `<div class="pt-tag">${nPr ? `🏆 ${prizePlaces(nPr)}` : ""}${nPr && rfItems(tt).length ? " · " : ""}${rfItems(tt).length ? `🎲 ${t("raffle_short")}` : ""}</div>` : ""}</div>
         <div class="ct2-side">${ptSquare(tt, "upcoming")}</div></div>
       ${pend ? `<div class="ct-pend">⏳ ${t("pending_n", { n: pend })}</div>` : ""}
       <div class="ct-bottom"><span class="ct-slots">${slots ? `<b>${taken}</b>/${slots} ${t(pairs ? "pairs_n" : "slots")}` : `<b>${taken}</b> ${t(pairs ? "pairs_n" : "slots")}`}${res ? ` · ${t("reserve")} ${res}` : ""}${tt.s.price ? ` · ${esc(tt.s.price)} ₴` : ""}</span>${st}</div>
@@ -668,20 +671,26 @@ setLang(detectLang(BOOT.tgLang));
   const imgOk = u => /^(https:\/\/|data:image\/)/.test(String(u || ""));
   // блок «Призи»: места по шаблону (текст + фото), справа — вертикальный «билет» розыгрыша среди всех участников
   function prizesHtml(tt) {
-    const pr = (tt.s.prizes || []).filter(x => x && (x.text || x.photo)), rfi = rfItems(tt), rf = rfi.length ? (rfi[0].text || "🎁") + (rfi.length > 1 ? " +" + (rfi.length - 1) : "") : "", won = tt.s.raffles || [];
-    if (!pr.length && !rf && !won.length) return tPartners(tt).includes("lupadel") ? partnerHtml("prizes", tt.id) : "";
-    const by = pr.map(x => przBy(tt, x)), head = pr.length && by.every(b => b && b === by[0]) ? by[0] : "", rb = rfBy(tt), pts = tPartners(tt);
+    const pr = (tt.s.prizes || []).filter(x => x && (x.text || x.photo)), rfi = rfItems(tt), won = tt.s.raffles || [];
+    if (!pr.length && !rfi.length && !won.length) return tPartners(tt).includes("lupadel") ? partnerHtml("prizes", tt.id) : "";
+    const by = pr.map(x => przBy(tt, x)), rb = rfBy(tt), pts = tPartners(tt);
+    const all = by.concat(rfi.length ? [rb] : []), head = all.length && all.every(b => b && b === all[0]) ? all[0] : "";
+    const pt = k => !head && k ? `<span class="prz-pt"><span>${t("prizes_by")}</span>${lgImg(k)}</span>` : "";
+    const ph = (x, ic) => imgOk(x.photo) ? `<img class="prz-ph" src="${esc(x.photo)}" alt="" data-act="prz-zoom" data-url="${esc(x.photo)}">` : `<span class="prz-ph prz-ic">${ic}</span>`;
     const items = pr.map((x, i) => `<div class="prz-item ${i === 0 ? "first" : ""}">
-        <span class="prz-place">${placeLbl(i)}</span>
-        ${imgOk(x.photo) ? `<img class="prz-ph" src="${esc(x.photo)}" alt="" data-act="prz-zoom" data-url="${esc(x.photo)}">` : ""}
-        <span class="prz-txt"><span class="tiny">${t("place_n", { n: i + 1 })}</span>${esc(x.text || "")}</span>
-        ${!head && by[i] ? `<span class="prz-pt"><span>${t("prizes_by")}</span>${lgImg(by[i])}</span>` : ""}</div>`).join("");
+        <span class="prz-place">${placeLbl(i)}</span>${imgOk(x.photo) ? ph(x) : ""}
+        <span class="prz-txt"><span class="tiny">${t("place_n", { n: i + 1 })}</span>${esc(x.text || "")}</span>${pt(by[i])}</div>`).join("");
+    // розыгрыш: те же строки; кто выиграл — сразу под призом
+    const winOf = i => won.find(r => r.item === i) || won.find(r => r.item == null && rfi[i] && r.prize && r.prize === rfi[i].text);
+    const rfRows = rfi.map((x, i) => { const w = winOf(i);
+      return `<div class="prz-item rf" data-act="tt-tab" data-id="${tt.id}" data-val="r"><span class="prz-place">🎲</span>${ph(x, "🎁")}
+        <span class="prz-txt"><span class="tiny">${t("rf_ticket")}</span>${esc(x.text || "")}${w ? `<span class="prz-win">🎉 ${esc(pname(w.winner))}</span>` : ""}</span>${pt(rb)}</div>`; }).join("")
+      + (!rfi.length && won.length ? won.map(r => `<div class="prz-item rf" data-act="tt-tab" data-id="${tt.id}" data-val="r"><span class="prz-place">🎲</span><span class="prz-ph prz-ic">🎁</span>
+        <span class="prz-txt"><span class="tiny">${t("rf_ticket")}</span>${esc(r.prize || "")}<span class="prz-win">🎉 ${esc(pname(r.winner))}</span></span></div>`).join("") : "");
     const links = pts.map(k => ptLinks(k, "prizes", tt.id, pts.length > 1)).join("");
-    const ticket = rf || won.length ? `<div class="rf-ticket" data-act="tt-tab" data-id="${tt.id}" data-val="r"><div class="rf-t-ic">🎲</div><div class="rf-t-k">${t("rf_ticket")}</div>
-        ${rf ? `<div class="rf-t-prize">${esc(rf)}</div>` : ""}<div class="rf-t-sub">${t("rf_ticket_sub")}</div>
-        ${rb && rb !== head ? `<div class="rf-t-by">${lgImg(rb)}</div>` : ""}<div class="rf-t-more">${t("rf_open_tab")} ›</div></div>` : "";
     return `<div class="card prz-card"><div class="prz-head"><h3>🏆 ${t("prizes")}</h3>${head ? `<span class="prz-by">${t("prizes_by")} ${lgImg(head)}</span>` : ""}</div>
-      <div class="prz-wrap ${ticket ? "with-rf" : ""} ${pr.length ? "" : "only-rf"}">${pr.length ? `<div class="prz-list">${items}</div>` : ""}${ticket}</div>
+      <div class="prz-list">${items}${rfRows}</div>
+      ${rfRows ? `<button type="button" class="prz-more" data-act="tt-tab" data-id="${tt.id}" data-val="r">${t("rf_ticket_sub").replace(/^./, c => c.toUpperCase())} · ${t("rf_open_tab")} ›</button>` : ""}
       ${links ? `<div class="pt-links">${links}</div>` : ""}</div>`;
   }
   // всплывающее окно снизу (описание формата и т.п.)
