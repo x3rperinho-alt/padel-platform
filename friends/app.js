@@ -1088,6 +1088,30 @@ const DATA = BOOT.data;
     const chips = active.map(p => `<span class="chip ${st.participants.includes(p.id)?'active':''}" data-act="toggle-participant" data-id="${p.id}">${esc(p.name)}</span>`).join("");
 
     let teamsBlock = "";
+    const swissManual = st.format === "swiss" && !st.linkedTo && st.swissStart === "manual";
+    if (swissManual) {
+      // SwissCourt, 1-й раунд вручную: пары по порядку сводятся в матчи — пары 1 и 2 на корте 1, 3 и 4 на корте 2…
+      const unassigned = st.participants.filter(pid => !st.teams.some(t=>t.players.includes(pid)));
+      const { ratings } = computeElo(); const sum = t => Math.round((ratings[t.players[0]]||1500)+(ratings[t.players[1]]||1500));
+      const nm = t => esc(playerName(t.players[0])) + " + " + esc(playerName(t.players[1]));
+      const courts = []; for (let i = 0; i < st.teams.length; i += 2) courts.push(i);
+      teamsBlock = `
+        <div class="card" style="background:var(--surface-2);">
+          <div class="row"><h3>Пары 1-го раунда</h3>${st.participants.length>=4 && st.participants.length%4===0 && unassigned.length>=2 ? `<button class="btn sm" data-act="balance-teams">⚖️ ${st.teams.length ? "Добрать по Эло" : "По Эло"}</button>` : ""}</div>
+          <p class="tiny">Соберите пары сами — по порядку: первые две пары играют на корте 1, следующие две на корте 2 и т.д. Можно задать часть пар и нажать «Добрать по Эло». Со 2-го раунда пары снова подбирает SwissCourt по таблице.</p>
+          ${courts.map(i => { const a = st.teams[i], b = st.teams[i+1];
+            return `<div style="padding:8px 0;border-top:1px solid var(--line);">
+              <div class="tiny" style="margin-bottom:4px;">Корт ${i/2+1}${b ? ` · разница Эло ${Math.abs(sum(a)-sum(b))}` : " · ждёт соперников"}</div>
+              ${[a, b].map((t, k) => t ? `<div class="row" style="padding:3px 0;"><span>${nm(t)} <span class="tiny">Σ ${sum(t)}</span></span><button class="btn sm danger" data-act="remove-team" data-idx="${i+k}">✕</button></div>` : "").join("")}
+            </div>`; }).join("")}
+          ${unassigned.length>=2 ? `
+            <div class="row" style="gap:8px;margin-top:8px;">
+              <select id="teamP1">${unassigned.map(id=>`<option value="${id}">${esc(playerName(id))}</option>`).join("")}</select>
+              <select id="teamP2">${unassigned.slice().reverse().map(id=>`<option value="${id}">${esc(playerName(id))}</option>`).join("")}</select>
+              <button class="btn sm" data-act="add-team">+</button>
+            </div>` : (unassigned.length===1 ? `<p class="tiny">Остался без пары: ${esc(playerName(unassigned[0]))}</p>` : st.participants.length%4 ? "" : `<p class="tiny">✓ Все в парах — ${plural(st.teams.length/2, "корт", "корта", "кортов")}</p>`)}
+        </div>`;
+    }
     if (st.format === "roundrobin" || st.format === "playoff") {
       const unassigned = st.participants.filter(pid => !st.teams.some(t=>t.players.includes(pid)));
       teamsBlock = `
@@ -1181,6 +1205,8 @@ const DATA = BOOT.data;
               <div class="seg" id="swissCap">${[1,2,3].map(k => `<button type="button" data-val="${k}" class="${(st.swissCap||2)===k?'active':''}">${k}</button>`).join("")}</div>
             </div>
           </div>
+          ${!st.linkedTo ? `<div style="margin-top:10px;"><span class="lbl" style="display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:6px;">Пары 1-го раунда</span>
+            <div class="seg" id="swissStart"><button type="button" data-val="elo" class="${st.swissStart!=="manual"?'active':''}">По Эло</button><button type="button" data-val="manual" class="${st.swissStart==="manual"?'active':''}">Вручную</button></div></div>` : ""}
           <p class="tiny" style="margin:8px 0 0;">${st.participants.length>=4 && st.participants.length%4===0
             ? `${st.participants.length/4} ${st.participants.length/4===1?"корт":st.participants.length/4<5?"корта":"кортов"}, по 4 игрока на корт. ${st.linkedTo ? "Раунды собираются внутри турнира кнопкой — 1-й по таблице этапа 1, следующие по общей таблице." : "Сейчас создастся только 1-й раунд — следующие собираются по таблице после ввода всех счётов."}`
             : `Нужно число участников, кратное 4 (сейчас ${st.participants.length}).`}</p>
@@ -1222,9 +1248,10 @@ const DATA = BOOT.data;
     `;
   }
 
+  function swissManualReady(st) { const inT = (st.teams||[]).flatMap(t => t.players); return inT.length === st.participants.length && st.participants.every(p => inT.includes(p)); }
   function canGenerateDraft(st) {
     return !!(st.name && st.date && st.participants.length>=4 && st.format &&
-      (st.format==="americano" ? st.participants.length>=4 : (isStep(st.format) || st.format==="two") ? st.participants.length%4===0 : st.teams.length*2===st.participants.length && st.teams.length>=2) &&
+      (st.format==="americano" ? st.participants.length>=4 : (st.format==="swiss" && !st.linkedTo && st.swissStart==="manual") ? st.participants.length%4===0 && swissManualReady(st) : (isStep(st.format) || st.format==="two") ? st.participants.length%4===0 : st.teams.length*2===st.participants.length && st.teams.length>=2) &&
       st.scoringType && (st.scoringType==="time" || st.scoringMode==="tennis" || (st.scoringMode && st.scoringTarget)));
   }
   function refreshGenerateBtn() {
@@ -2892,6 +2919,8 @@ const DATA = BOOT.data;
       }
       render();
     };
+    const swStart = document.getElementById("swissStart");
+    if (swStart) swStart.querySelectorAll("button").forEach(b => b.onclick = () => { getDraft().swissStart = b.dataset.val; render(); });
     const swCap = document.getElementById("swissCap");
     if (swCap) swCap.querySelectorAll("button").forEach(b => b.onclick = () => { getDraft().swissCap = +b.dataset.val; render(); });
     v.querySelectorAll('[data-act="format-info"]').forEach(b => b.onclick = (ev) => { ev.stopPropagation(); state.view.formatInfo = (b.dataset.val && state.view.formatInfo !== b.dataset.val) ? b.dataset.val : null; render(); });
@@ -3134,7 +3163,11 @@ const DATA = BOOT.data;
         // этап 2: 1-й раунд не собираем сразу — его собирает кнопка «Сгенерировать на основе этапа 1», когда счета этапа 1 внесены
       } else {
         const draftT = { participantIds: d.participants, swissCap: d.swissCap || 2, linkedTo: null };
-        const matches = generateSwissRound(draftT, []);
+        let matches;
+        if (d.swissStart === "manual") {
+          if (!swissManualReady(d)) { toast("Соберите пары для всех участников"); return; }
+          matches = []; for (let i = 0; i < d.teams.length; i += 2) matches.push([d.teams[i].players.slice(), d.teams[i+1].players.slice()]);
+        } else matches = generateSwissRound(draftT, []);
         if (!matches) { toast("Не удалось собрать 1-й раунд"); return; }
         matches.forEach((m, i) => scheduleGames.push({ id: id+"-r1-c"+(i+1), tournamentId:id, round:1, court:i+1, teamA:m[0], teamB:m[1], scoreA:null, scoreB:null, decided:false }));
       }
@@ -3157,7 +3190,8 @@ const DATA = BOOT.data;
       format: d.format, courts: d.courts, participantIds: d.participants,
       scoringType: d.scoringType, scoringMode: d.scoringMode, scoringTarget: d.scoringMode==="tennis" ? 6 : (d.scoringTarget? +d.scoringTarget : null),
       scoringMinutes: d.scoringType==="time"? d.scoringMinutes : null,
-      teams: d.teams,
+      teams: isStep(d.format) ? [] : d.teams, // у SwissCourt/Мексикано пары 1-го раунда живут только в матчах
+      swissStart: d.format==="swiss" && !d.linkedTo && d.swissStart==="manual" ? "manual" : undefined,
       rounds: isStep(d.format) ? (+d.rounds || 5) : undefined,
       swissCap: d.format==="swiss" ? (d.swissCap || 2) : undefined,
       linkedTo: d.format==="swiss" && d.linkedTo ? d.linkedTo : undefined,
