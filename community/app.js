@@ -239,7 +239,11 @@ setLang(detectLang(BOOT.tgLang));
   // пока человек что-то вводит или выбирает в списке — фоновые обновления не перерисовывают экран (иначе список закрывается сам)
   const isBusy = el => isField(el) || (!!el && el.tagName === "SELECT");
   // для живых обновлений поле счёта не помеха: render() возвращает курсор и введённые цифры (см. keep в render)
-  const isBusyBg = el => isBusy(el) && !(el.classList && el.classList.contains("sc-in"));
+  // …но не в разгар ввода: пока человек печатает или жмёт ✓ (последние 1,5 с), экран не перерисовываем, чтобы не потерять нажатие
+  let typedAt = 0; const typing = () => Date.now() - typedAt < 1500;
+  ["input", "keydown", "pointerdown"].forEach(ev => document.addEventListener(ev, e => { const x = e.target; if (x && x.closest && x.closest(".match.live-m")) typedAt = Date.now(); }, true));
+  const isBusyBg = el => isBusy(el) && !(el.classList && el.classList.contains("sc-in") && !typing());
+  let bgRetry; const retryBg = () => { clearTimeout(bgRetry); bgRetry = setTimeout(() => { if (!pendingRender && !pendingLive) return; if (isBusyBg(document.activeElement)) { retryBg(); return; } if (pendingLive) liveReload(); else render(); }, 1600); };
   let pendingRender = false;
   // подтверждение: в Telegram — родное окно; иначе — своё окно в приложении (системный confirm() в некоторых встроенных браузерах заблокирован и молча отвечает «нет»)
   const ask = msg => new Promise(res => {
@@ -254,7 +258,7 @@ setLang(detectLang(BOOT.tgLang));
   let savingN = 0, saveEpoch = 0; // сколько счетов сейчас сохраняется; номер «поколения» сохранений
   async function reload() { try { const ep = saveEpoch; const d = await db.loadAll();
       if (savingN || ep !== saveEpoch) { pendingLive = true; return; } // пока грузили, ушёл новый счёт — эти данные уже устарели
-      Object.assign(state, d); syncClubs(); cacheSoon(); lastSync = Date.now(); if (isBusyBg(document.activeElement)) { pendingRender = true; return; } render(); } catch (e) { console.error(e); } }
+      Object.assign(state, d); syncClubs(); cacheSoon(); lastSync = Date.now(); if (isBusyBg(document.activeElement)) { pendingRender = true; retryBg(); return; } render(); } catch (e) { console.error(e); } }
   let cacheT; const cacheSoon = () => { clearTimeout(cacheT); cacheT = setTimeout(() => saveCache(BOOT.tgId, U, { league: state.league, players: state.players, tournaments: state.tournaments, games: state.games, registrations: state.registrations, admins: state.admins }), 1500); };
   // открылись из кэша — подменяем на свежие данные, как только они придут
   if (BOOT.fresh) BOOT.fresh.then(r => { if (!r) return; Object.assign(U, r.user);
@@ -266,7 +270,7 @@ setLang(detectLang(BOOT.tgLang));
     finally { savingN--; if (pendingLive && !savingN && !isBusy(document.activeElement)) liveReload(); else cacheSoon(); }
   }
   let reloadTimer, pendingLive = false, lastSync = Date.now(), rtUp = null;
-  const liveReload = () => { if (isBusyBg(document.activeElement) || savingN) { pendingLive = true; return; } pendingLive = false; reload(); };
+  const liveReload = () => { if (isBusyBg(document.activeElement) || savingN) { pendingLive = true; if (!savingN) retryBg(); return; } pendingLive = false; reload(); };
   // живые обновления: событие из базы → перечитать; канал упал и поднялся → перечитать (пропущенное не теряется)
   const RT = db.subscribe(() => { lastSync = Date.now(); clearTimeout(reloadTimer); reloadTimer = setTimeout(liveReload, 500); },
     (up, reconnected) => { const was = rtUp; rtUp = up; if (up && reconnected) liveReload(); if (was !== null && was !== up) setTimeout(() => { if (!isBusyBg(document.activeElement)) render(); }, 0); }); // показать/убрать плашку «нет связи»
@@ -493,7 +497,7 @@ setLang(detectLang(BOOT.tgLang));
       <div class="t-head"><h2 class="t-title">${esc(tt.name)}</h2>
         <div class="t-chips"><span class="lvb ${letterClass(rangeLabel(tt.s).replace(/^[≤≥] ?/, ""))}">${esc(lvTag(tt.s))}</span><span class="t-chip">${esc(fmtName(tt))}</span>${tt.s.reg_open ? `<span class="t-status live"><i></i>${t("reg_open")}</span>` : `<span class="t-status planned"><i></i>${t("reg_closed")}</span>`}</div></div>
       ${hasRaffle(tt) || canEditT(tt) ? tTabs(tid, [["i", t("tt_tab_info")], ["r", "🎲 " + t("tt_tab_raffle")]], ttTab(tid, "i", ["i", "r"])) : ""}
-      ${ttTab(tid, "i", ["i", "r"]) === "r" && (hasRaffle(tt) || canEditT(tt)) ? raffleTabHtml(tt) : `
+      ${ttTab(tid, "i", ["i", "r"]) === "r" && (hasRaffle(tt) || canEditT(tt)) ? raffleTabHtml(tt) : `<div class="t-cols"><div class="t-col">
       <div class="card t-info">
         <div class="ti-grid">
           <div class="ti wide"><span class="ti-ic">📅</span><span class="ti-tx"><small>${t("t_date")}</small><b class="ti-date">${tt.date ? (d => d.charAt(0).toUpperCase() + d.slice(1))(new Date(tt.date + "T12:00:00").toLocaleDateString(LOC(), { weekday: "long", day: "numeric", month: "long" })) : "—"}</b>${timeRange(tt.s) ? `<span class="ti-time">🕖 ${timeRange(tt.s)}</span>` : ""}</span></div>
@@ -510,6 +514,7 @@ setLang(detectLang(BOOT.tgLang));
       ${prizesHtml(tt)}
       ${tt.s.note ? (() => { const long = tt.s.note.length > 220 || tt.s.note.split("\n").length > 5, open = state.view.noteOpen === tid;
         return `<div class="card t-note"><h3>${t("about_t")}</h3><p class="${long && !open ? "clamp" : ""}">${esc(tt.s.note)}</p>${long ? `<button class="btn ghost sm" data-act="note-toggle" data-id="${tid}">${open ? t("less") : t("more")}</button>` : ""}</div>`; })() : ""}
+      </div><div class="t-col">
       ${pairs
         ? `<div class="card"><h3>${t("pairs_title")} <span class="tiny">· ${fullPairs}/${slots || teamNos(tt).length - 1}</span></h3><div class="pair-grid">${teamNos(tt).map(pairCard).join("")}</div></div>`
         : `<div class="card"><h3>${t("main_list")} <span class="tiny">· ${main.length}${slots ? "/" + slots : ""}</span></h3><div style="margin-top:6px;">${main.map(row).join("") || `<div class="tiny">${t("nobody_yet")}</div>`}</div></div>`}
@@ -519,7 +524,7 @@ setLang(detectLang(BOOT.tgLang));
       ${canEditT(tt) && tt.status !== "played" ? runCardHtml(tt) : ""}
       ${canEditT(tt) && state.group && tt.status === "scheduled" && isUpcoming(tt) ? `<button class="btn block" style="margin-bottom:12px;" data-act="t-announce" data-id="${esc(tid)}">${t("announce_btn")}</button>` : ""}
       ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><input id="addRegQ" data-act="reg-q" data-id="${tid}" type="search" autocomplete="off" placeholder="${t("search")}" value="${esc(state._addQ || "")}" style="margin-top:8px;"><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${addRegOptions(tid, state._addQ || "")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
-        <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}`}`;
+        <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}</div></div>`}`;
   }
   // игроки, которых админ может добавить в турнир (без уже записанных), с фильтром по имени
   function addRegOptions(tid, q) {
@@ -863,6 +868,15 @@ setLang(detectLang(BOOT.tgLang));
   const posOf = g => { const m = /-c(\d+)$/.exec(g.id || ""); return m ? +m[1] : (g.court || 1); };
   // final: true — King of the Court + финал американо на 4 (старые турниры KotC — с финалом), false — чистый King of the Court
   const kotcCfg = tt => ({ final: true, final_target: 32, carry: 1, ...((tt.s && tt.s.kotc) || {}) });
+  // своё число очков для отдельного раунда (s.rt = { "5": 15 }), иначе общее для турнира / финала
+  const rTarget = (tt, g) => { const o = tt.s && tt.s.rt && tt.s.rt[g.round]; return o ? +o : g.label === "kf" ? kotcCfg(tt).final_target : ((tt.scoring && tt.scoring.target) || null); };
+  const sumMode = (tt, g) => g.label === "kf" || !!(tt.scoring && tt.scoring.mode === "total");
+  // замены по ходу турнира: s.subs = [{ o, n, why: "inj" | "dq" | "oth", from, prize }]
+  const subsOf = tt => (tt && tt.s && Array.isArray(tt.s.subs)) ? tt.s.subs : [];
+  const subExcl = tt => new Set(subsOf(tt).filter(x => x.why === "dq" || x.prize === false).map(x => x.o)); // без места и приза
+  const subTag = (tt, id) => { const o = subsOf(tt).filter(x => x.o === id).pop(), n = subsOf(tt).find(x => x.n === id);
+    return o ? ` <span class="sub-tag ${o.why}" title="${esc(t("sub_why_" + o.why))}">${o.why === "inj" ? "🚑" : o.why === "dq" ? "⛔" : "⇄"}</span>` : n ? ` <span class="sub-tag in" title="${esc(t("sub_in_tag"))}">⇄</span>` : ""; };
+  const subMap = (tt, r) => { const m = {}; subsOf(tt).filter(x => (x.from || 0) <= r).forEach(x => { m[x.o] = x.n; }); return id => { let k = id, i = 0; while (m[k] && i++ < 9) k = m[k]; return k; }; };
   // всё о турнире KotC: очки первой стадии, текущие корты, короли, финал, итоговый порядок мест
   function kotcInfo(tt, games) {
     const R = tt.rounds || 10, cfg = kotcCfg(tt);
@@ -1014,11 +1028,12 @@ setLang(detectLang(BOOT.tgLang));
   // таблица: личная / по парам / места плей-офф
   function standingsHtml(tt, games) {
     const sg = games.filter(scoredG), E = computeElo(), tid = tt.id;
+    const EX = subExcl(tt), exSort = (arr, key) => arr.filter(x => !EX.has(key(x))).concat(arr.filter(x => EX.has(key(x)))); // без места — в конец таблицы
     if (tt.format === "kotc") {
       const { I, finCard, courtsCard } = kotcHtml(tt, games, false, true), eloK = id => (E.seq[id] || []).filter(x => x.g.tournamentId === tid).reduce((a, x) => a + x.d, 0);
       return finCard + courtsCard + `<table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("players")}</th><th>${t("court")}</th><th>KotC</th><th>W-L</th><th>Elo</th></tr>
-        ${I.order.map((o, i) => { const r = I.K[o.id] || { pts: 0, w: 0, l: 0, g: 0 }, d = eloK(o.id), c = I.courtOfP[o.id]; return `<tr class="${meCls(o.id)}"><td><span class="pos-badge ${medalCls(i + 1)}">${i + 1}</span></td>
-          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${o.id}">${avatarHtml(o.id, 28)}<span class="plink">${esc(pname(o.id))}</span>${lblHtml(o.id)}</span></td>
+        ${exSort(I.order, o => o.id).map((o, i, arr) => { const r = I.K[o.id] || { pts: 0, w: 0, l: 0, g: 0 }, d = eloK(o.id), c = I.courtOfP[o.id], x = EX.has(o.id), pos = x ? 0 : arr.filter((q, k) => k <= i && !EX.has(q.id)).length; return `<tr class="${meCls(o.id)} ${x ? "sub-out" : ""}"><td><span class="pos-badge ${x ? "" : medalCls(pos)}">${x ? "—" : pos}</span></td>
+          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${o.id}">${avatarHtml(o.id, 28)}<span class="plink">${esc(pname(o.id))}</span>${lblHtml(o.id)}${subTag(tt, o.id)}</span></td>
           <td>${c ? (c === 1 ? "👑" : c) : "—"}</td><td class="lb-elo">${r.pts}</td><td>${r.w}-${r.l}</td><td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${r.g ? (d >= 0 ? "+" : "") + Math.round(d) : "—"}</td></tr>`; }).join("")}</table>`;
     }
     const teams = teamsFor(tt, sg), diff = r => `${r.pts - r.pa >= 0 ? "+" : ""}${r.pts - r.pa}`;
@@ -1030,13 +1045,13 @@ setLang(detectLang(BOOT.tgLang));
     const ids = tt.participantIds && tt.participantIds.length ? tt.participantIds : [...new Set(games.flatMap(g => g.teamA.concat(g.teamB)))];
     const eloD = id => (E.seq[id] || []).filter(x => x.g.tournamentId === tid).reduce((a, x) => a + x.d, 0);
     return `<table class="tbl" style="margin-top:6px;"><tr><th></th><th>${t("players")}</th><th>${t("pts")}</th><th>W-L</th><th>${t("diff")}</th><th>Elo</th></tr>
-      ${playerTable(ids, sg).map((r, i) => { const d = eloD(r.id); return `<tr class="${meCls(r.id)}"><td><span class="pos-badge ${r.pts ? medalCls(i + 1) : ""}">${i + 1}</span></td>
-        <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span>${lblHtml(r.id)}</span></td>
+      ${exSort(playerTable(ids, sg), r => r.id).map((r, i, arr) => { const d = eloD(r.id), x = EX.has(r.id), pos = x ? 0 : arr.filter((q, k) => k <= i && !EX.has(q.id)).length; return `<tr class="${meCls(r.id)} ${x ? "sub-out" : ""}"><td><span class="pos-badge ${r.pts && !x ? medalCls(pos) : ""}">${x ? "—" : pos}</span></td>
+        <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${r.id}">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span>${lblHtml(r.id)}${subTag(tt, r.id)}</span></td>
         <td class="lb-elo">${r.pts}</td><td>${r.w}-${r.l}${r.d ? "-" + r.d : ""}</td><td>${diff(r)}</td>
         <td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${r.g ? (d >= 0 ? "+" : "") + Math.round(d) : "—"}</td></tr>`; }).join("")}</table>`;
   }
   // широкий экран с мышкой (Mac/ПК): матчи сеткой + таблица сбоку, ввод с клавиатуры
-  const DESK_MQ = window.matchMedia ? matchMedia("(min-width: 1100px) and (hover: hover) and (pointer: fine)") : null;
+  const DESK_MQ = window.matchMedia ? matchMedia("(min-width: 900px) and (hover: hover) and (pointer: fine)") : null;
   const isDesk = () => !!(DESK_MQ && DESK_MQ.matches);
   function liveHtml(tt, fix) {
     const tid = tt.id, games = tGamesOf(tid), edit = canEditT(tt), me = myPlayer(), sc = tt.scoring || {};
@@ -1057,7 +1072,7 @@ setLang(detectLang(BOOT.tgLang));
       const inp = s => `<input class="sc-in" type="number" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" min="0" max="99" data-gid="${g.id}" data-side="${s}" value="${(s === "A" ? g.scoreA : g.scoreB) ?? ""}" aria-label="${t("score")}">`;
       const box = v => `<span class="sbox">${v ?? "–"}</span>`;
       return `<div class="match live-m ${mine ? "mine" : ""} ${scoredG(g) ? "is-done" : ""}" data-gid="${g.id}">
-        <div class="court-lbl"><span>${lbl(g)}${esc(courtLbl(g))}${mine ? ` · <b class="your-m">${t("your_match")}</b>` : ""}</span>${edit ? `<button type="button" class="sc-ok ${scoredG(g) ? "saved" : ""}" tabindex="-1" aria-label="${t("save")}">✓</button>` : ""}</div>
+        <div class="court-lbl"><span>${lbl(g)}${esc(courtLbl(g))}${mine ? ` · <b class="your-m">${t("your_match")}</b>` : ""}</span>${edit ? `<span class="m-tools"><button type="button" class="m-edit" tabindex="-1" data-act="game-edit" data-gid="${g.id}" title="${esc(t("ge_title"))}" aria-label="${esc(t("ge_title"))}">✎</button><button type="button" class="sc-ok ${scoredG(g) ? "saved" : ""}" tabindex="-1" aria-label="${t("save")}">✓</button></span>` : ""}</div>
         <div class="mrow"><div class="pair ${wa ? "winner" : ""}">${pl(g.teamA[0])}<small>${pl(g.teamA[1])}</small></div>
           <div class="score">${edit ? inp("A") : box(g.scoreA)}<span class="colon">:</span>${edit ? inp("B") : box(g.scoreB)}</div>
           <div class="pair right ${wb ? "winner" : ""}">${pl(g.teamB[0])}<small>${pl(g.teamB[1])}</small></div></div></div>`; };
@@ -1078,8 +1093,15 @@ setLang(detectLang(BOOT.tgLang));
       else if (cur === maxR) controls = `<div class="all-done">🏁 ${t("all_rounds_done")}</div>`;
     }
     // админ: добавить раунд в конец (американо и пары — в любой момент, даже после финиша) и удалить любой раунд вместе со счётом
-    const canAdd = edit && cur === maxR && (tt.format === "americano" || (isTeamF(tt.format) && tt.format !== "playoff"));
-    const roundAdmin = edit && maxR ? `<div class="rnd-admin">${canAdd ? `<button class="btn sm" data-act="round-add" data-id="${tid}">+ ${t("round_add")}</button>` : ""}
+    // Админ раунда: + раунд (в т.ч. вернуть удалённый), пересобрать пары по прошлому раунду, очистить счета, очки раунда, замена, удалить
+    const stepF = STEP_F.includes(tt.format), g0 = byR(cur)[0], curT = g0 ? rTarget(tt, g0) : null, curScored = byR(cur).some(scoredG);
+    const canAdd = edit && cur === maxR && tt.format !== "playoff" && !(isK && hasKF) && (!stepF || (done(cur) && (fix || !controls)));
+    const canRebuild = edit && stepF && cur > 1 && done(cur - 1) && (!isK || !hasKF || (g0 && g0.label === "kf") || cur <= kR);
+    const roundAdmin = edit && maxR ? `<div class="rnd-admin">
+        ${canAdd ? `<button class="btn sm" data-act="round-add" data-id="${tid}">+ ${isK && maxR >= kR ? "👑 " + t("kotc_make_final") : t("round_add")}</button>` : ""}
+        ${canRebuild ? `<button class="btn sm ghost" data-act="round-rebuild" data-id="${tid}" data-val="${cur}">↻ ${t("round_rebuild")}</button>` : ""}
+        ${curScored ? `<button class="btn sm ghost" data-act="round-clear" data-id="${tid}" data-val="${cur}">🧹 ${t("round_clear")}</button>` : ""}
+        ${curT ? `<button class="btn sm ghost" data-act="round-pts" data-id="${tid}" data-val="${cur}">🎯 ${t("round_pts", { n: curT })}</button>` : ""}
         ${!fix && games.some(g => !scoredG(g)) ? `<button class="btn sm ghost" data-act="sub-open" data-id="${tid}">⇄ ${t("sub_btn")}</button>` : ""}
         <button class="btn sm ghost danger" data-act="round-del" data-id="${tid}" data-val="${cur}">🗑 ${t("round_del", { n: rLbl(cur) })}</button></div>` : "";
     const allDone = games.length && games.every(scoredG);
@@ -1095,7 +1117,7 @@ setLang(detectLang(BOOT.tgLang));
       <div class="seg live-tabs"><button class="${tab === "m" ? "active" : ""}" data-act="live-tab" data-val="m">${t("live_matches")}${desk ? " + " + t("live_table").toLowerCase() : ""}</button>${desk ? "" : `<button class="${tab === "t" ? "active" : ""}" data-act="live-tab" data-val="t">${t("live_table")}</button>`}<button class="${tab === "z" ? "active" : ""}" data-act="live-tab" data-val="z">🎲 ${t("tt_tab_raffle")}</button></div>
       ${tab === "z" ? raffleTabHtml(tt) : tab === "t" ? tableCard() : `${desk ? `<div class="live-grid"><div class="live-main">` : ""}
         <div class="chips-scroll rnd-chips">${chips}</div>
-        <h3 class="sub-h" style="margin-top:6px;">${isK && cur > kR ? "👑 " + t("kotc_final_m", { n: cur - kR }) : t("round_n", { n: cur }) + (planned > 1 ? ` <span class="tiny">/ ${isK ? kR : planned}</span>` : "")}</h3>
+        <h3 class="sub-h" style="margin-top:6px;">${isK && cur > kR ? "👑 " + t("kotc_final_m", { n: cur - kR }) : t("round_n", { n: cur }) + (planned > 1 ? ` <span class="tiny">/ ${isK ? kR : planned}</span>` : "")}${tt.s.rt && tt.s.rt[cur] ? ` <span class="rt-ovr">🎯 ${t(byR(cur)[0] && sumMode(tt, byR(cur)[0]) ? "sc_total" : "sc_race", { n: tt.s.rt[cur] })}</span>` : ""}</h3>
         ${edit && !fix && cur === firstOpen && nScored === 0 && !desk ? `<p class="tiny" style="margin:0 0 10px;">${t("live_hint_admin")}</p>` : ""}
         ${edit && desk ? `<p class="tiny kb-hint"><kbd>Tab</kbd> ${t("kb_tab")} · <kbd>Enter</kbd> ${t("kb_enter")} · <kbd>←</kbd><kbd>→</kbd> ${t("kb_rounds")}</p>` : ""}
         <div class="live-ms">${byR(cur).map(match).join("")}</div>
@@ -1114,7 +1136,7 @@ setLang(detectLang(BOOT.tgLang));
     if (a === g.scoreA && b === g.scoreB) { markOk(box, a != null); return true; }
     const tt = byId(state.tournaments, g.tournamentId);
     if ((tt.format === "playoff" || (tt.format === "kotc" && g.label !== "kf")) && a != null && a === b) { markOk(box, false, true); if (explicit) toast(t("need_winner")); return false; } // ничья: молча ждём правки второго поля, на ✓ — подсказка
-    const tgt = g.label === "kf" ? kotcCfg(tt).final_target : (tt.scoring && tt.scoring.mode === "total" ? tt.scoring.target : null);
+    const tgt = sumMode(tt, g) ? rTarget(tt, g) : null;
     if (a != null && tgt && a + b !== tgt && box.dataset.sumOk !== a + ":" + b) {
       if (!explicit) { markOk(box, false, true); return false; } // человек ещё правит второе число — спросим, когда нажмёт ✓
       if (box.dataset.asking) return false; // вопрос уже открыт
@@ -1170,21 +1192,25 @@ setLang(detectLang(BOOT.tgLang));
       const kR = tt.rounds || 10, last = gs.filter(g => g.round === maxR).sort((a, b) => posOf(a) - posOf(b));
       if (maxR >= kR && !kotcCfg(tt).final) return;
       if (maxR >= kR) { // финал: четверо на главном корте после последнего раунда
-        const kings = kotcRound(ids, last, last.length)[0].flat();
+        const smF = subMap(tt, kR + 1), kings = kotcRound(ids, last, last.length)[0].flat().map(smF);
         const rows = kotcFinal(kings).map(([a, b], i) => ({ id: freshGameId(tid, kR + 1 + i, 1), tournamentId: tid, round: kR + 1 + i, ...courtOf(tt.s.court_nums, 1), teamA: a, teamB: b, scoreA: null, scoreB: null, label: "kf" }));
         try { await db.saveGames(rows); state.view.liveRound = kR + 1; window.scrollTo(0, 0); await reload(); toast(t("kotc_final_ready")); } catch (e) { err(e); }
         return;
       }
     }
-    const ms = tt.format === "mexicano" ? mexicanoRound(ids, gs, courts, S) : tt.format === "kotc" ? kotcRound(ids, gs.filter(g => g.round === maxR).sort((a, b) => posOf(a) - posOf(b)), courts) : swissRound(ids, gs, courts, S, 2);
+    const sm = subMap(tt, maxR + 1), ids2 = [...new Set(ids.map(sm))];
+    const ms = tt.format === "mexicano" ? mexicanoRound(ids2, gs, courts, S) : tt.format === "kotc" ? kotcRound(ids2, gs.filter(g => g.round === maxR).sort((a, b) => posOf(a) - posOf(b)), courts) : swissRound(ids2, gs, courts, S, 2);
     if (!ms || !ms.length) return;
-    const r = maxR + 1, rows = ms.map(([a, b], i) => ({ id: freshGameId(tid, r, i + 1), tournamentId: tid, round: r, ...courtOf(tt.s.court_nums, i + 1), teamA: a, teamB: b, scoreA: null, scoreB: null, label: null }));
-    try { await db.saveGames(rows); if (tt.format !== "kotc" && r > (tt.rounds || 0)) await db.saveTournament(tRow(tt, { rounds: r })); state.view.liveRound = r; window.scrollTo(0, 0); await reload(); toast(t("round_ready", { n: r })); } catch (e) { err(e); }
+    const r = maxR + 1, rows = ms.map(([a, b], i) => ({ id: freshGameId(tid, r, i + 1), tournamentId: tid, round: r, ...courtOf(tt.s.court_nums, i + 1), teamA: a.map(sm), teamB: b.map(sm), scoreA: null, scoreB: null, label: null }));
+    // состав турнира не трогаем: выбывшие остаются в таблице со своими очками, расстановка идёт по заменам (ids2)
+    const addIds = ids2.filter(x => !ids.includes(x));
+    try { await db.saveGames(rows); if ((tt.format !== "kotc" && r > (tt.rounds || 0)) || addIds.length) await db.saveTournament(tRow(tt, { rounds: tt.format !== "kotc" && r > (tt.rounds || 0) ? r : tt.rounds, participantIds: ids.concat(addIds) })); state.view.liveRound = r; window.scrollTo(0, 0); await reload(); toast(t("round_ready", { n: r })); } catch (e) { err(e); }
   }
   // + раунд в конец: американо — честно с учётом всех прошлых раундов, пары — кто реже встречался
   async function addRound(tid) {
     const tt = byId(state.tournaments, tid); if (!tt) return; const gs = tGamesOf(tid), maxR = gs.length ? Math.max(...gs.map(g => g.round)) : 0, courts = tt.courts || 2;
-    const ms = tt.format === "americano" ? americanoNext(tt.participantIds || [], gs, courts) : teamNextRound(teamsFor(tt, gs), gs, courts);
+    const sm = subMap(tt, maxR + 1), ms0 = tt.format === "americano" ? americanoNext([...new Set((tt.participantIds || []).map(sm))], gs, courts) : teamNextRound(teamsFor(tt, gs).map(tm => tm.map(sm)), gs, courts);
+    const ms = ms0 && ms0.map(([a, b]) => [a.map(sm), b.map(sm)]);
     if (!ms || !ms.length) { toast(t("round_add_fail")); return; }
     const r = maxR + 1, rows = ms.map(([a, b], i) => ({ id: freshGameId(tid, r, i + 1), tournamentId: tid, round: r, ...courtOf(tt.s.court_nums, i + 1), teamA: a, teamB: b, scoreA: null, scoreB: null, label: null }));
     try { await db.saveGames(rows); if (r > (tt.rounds || 0)) await db.saveTournament(tRow(tt, { rounds: r })); state.view.liveRound = r; await reload(); toast(t("round_ready", { n: r })); } catch (e) { err(e); }
@@ -1198,28 +1224,113 @@ setLang(detectLang(BOOT.tgLang));
     const regs = regsOf(tid).filter(r => !used.has(r.playerId)).map(r => r.playerId);
     const others = state.players.filter(p => p.active && !used.has(p.id) && !regs.includes(p.id)).sort((a, b) => a.name.localeCompare(b.name)).map(p => p.id);
     const opt = id => `<option value="${id}">${esc(pnt(id))}</option>`;
+    const seg = (id, items, cur) => `<div class="seg sub-seg" id="${id}">${items.map(([v, l]) => `<button type="button" data-v="${v}" class="${v === cur ? "active" : ""}">${l}</button>`).join("")}</div>`;
     const d = sheet("⇄ " + t("sub_btn"), `<p class="tiny" style="margin:0 0 10px;">${t("sub_hint")}</p>
       <label class="field"><span class="lbl">${t("sub_out")}</span><select id="subOut"><option value="">—</option>${inPlay.map(opt).join("")}</select></label>
       <label class="field"><span class="lbl">${t("sub_in")}</span><select id="subIn"><option value="">—</option>${regs.length ? `<optgroup label="${t("sub_reg")}">${regs.map(opt).join("")}</optgroup>` : ""}<optgroup label="${t("sub_all")}">${others.map(opt).join("")}</optgroup></select></label>
+      <div class="sub-fld"><span class="lbl">${t("sub_why")}</span>${seg("subWhy", [["inj", "🚑 " + t("sub_why_inj")], ["dq", "⛔ " + t("sub_why_dq")], ["oth", "⇄ " + t("sub_why_oth")]], "inj")}</div>
+      <div class="sub-fld"><span class="lbl">${t("sub_when")}</span>${seg("subWhen", [["now", t("sub_when_now")], ["next", t("sub_when_next")]], "now")}<p class="tiny" id="subWhenHint" style="margin:6px 0 0;"></p></div>
+      <label class="chk-row" id="subPrizeRow"><input type="checkbox" id="subPrize" checked> <span>${t("sub_prize")}</span></label>
+      <p class="tiny" id="subWhyHint" style="margin:4px 0 12px;"></p>
       <button type="button" class="btn primary block" data-x="go">${t("sub_go")}</button>`);
+    const val = id => (d.querySelector(`#${id} button.active`) || {}).dataset.v;
+    const sync = () => { const why = val("subWhy"), when = val("subWhen"), o = d.querySelector("#subOut").value;
+      d.querySelector("#subPrizeRow").hidden = why === "dq";
+      d.querySelector("#subWhyHint").textContent = why === "dq" ? t("sub_dq_hint") : d.querySelector("#subPrize").checked ? t("sub_keep_hint") : t("sub_noprize_hint");
+      const curOpen = o ? Math.min(...open.filter(g => g.teamA.concat(g.teamB).includes(o)).map(g => g.round)) : null;
+      d.querySelector("#subWhenHint").textContent = !o ? "" : when === "now" ? t("sub_when_now_hint", { n: curOpen }) : t("sub_when_next_hint", { n: curOpen, m: curOpen + 1 }); };
+    d.querySelectorAll(".sub-seg button").forEach(b => b.onclick = () => { b.parentElement.querySelectorAll("button").forEach(x => x.classList.toggle("active", x === b)); sync(); });
+    d.querySelector("#subOut").onchange = sync; d.querySelector("#subPrize").onchange = sync; sync();
     d.querySelector('[data-x="go"]').onclick = async ev => { const o = d.querySelector("#subOut").value, n = d.querySelector("#subIn").value; if (!o || !n) { toast(t("sub_pick")); return; }
+      const why = val("subWhy"), when = val("subWhen"), prize = why === "dq" ? false : d.querySelector("#subPrize").checked;
+      const mine = open.filter(g => g.teamA.concat(g.teamB).includes(o)), maxR = Math.max(0, ...gs.map(g => g.round));
+      const curOpen = mine.length ? Math.min(...mine.map(g => g.round)) : maxR + 1, from = when === "next" && mine.length ? curOpen + 1 : curOpen;
       const btn = ev.currentTarget; btn.classList.add("busy");
       const sw = arr => arr.map(x => x === o ? n : x);
-      const rows = open.filter(g => g.teamA.concat(g.teamB).includes(o)).map(g => ({ ...g, teamA: sw(g.teamA), teamB: sw(g.teamB) }));
-      const pids = (tt.participantIds || []).map(x => x === o ? n : x);
-      try { await db.saveGames(rows); await db.saveTournament(tRow(tt, { participantIds: pids.includes(n) ? pids : pids.concat(n) })); d.remove(); await reload(); toast(t("sub_done", { a: pname(o), b: pname(n) })); }
+      const rows = mine.filter(g => g.round >= from).map(g => ({ ...g, teamA: sw(g.teamA), teamB: sw(g.teamB) }));
+      // выбывший остаётся в составе (его очки видны в таблице), новый добавляется; расстановка дальше идёт по замене
+      const pids = (tt.participantIds || []).slice(); if (!pids.includes(n)) pids.push(n);
+      const subs = subsOf(tt).concat([{ o, n, why, from, prize, at: new Date().toISOString() }]);
+      try { if (rows.length) await db.saveGames(rows); await db.saveTournament(tRow(tt, { participantIds: pids, s: { ...tt.s, subs } })); d.remove(); await reload(); toast(t("sub_done", { a: pname(o), b: pname(n) })); }
       catch (e) { btn.classList.remove("busy"); err(e); } };
   }
   // удалить любой раунд со счётом; следующие раунды сдвигаются на номер вниз
   async function deleteRound(tid, r) {
     const tt = byId(state.tournaments, tid); if (!tt) return; const gs = tGamesOf(tid), del = gs.filter(g => g.round === r); if (!del.length) return;
     const scored = del.some(scoredG); if (!(await ask(t(scored ? "round_del_q_sc" : "round_del_q", { n: r })))) return;
-    const later = gs.filter(g => g.round > r).map(g => ({ ...g, round: g.round - 1 })), maxR = Math.max(...gs.map(g => g.round)) - 1;
-    const isKs = tt.format === "kotc" && !del.some(g => g.label === "kf");
-    const newRounds = tt.format === "kotc" ? (isKs ? Math.max(1, (tt.rounds || 10) - 1) : tt.rounds) : STEP_F.includes(tt.format) ? Math.max(maxR, (tt.rounds || 0) - 1) : (tt.format === "playoff" ? tt.rounds : maxR);
+    const isKs = tt.format === "kotc" && !del.some(g => g.label === "kf"), kf = isKs ? gs.filter(g => g.label === "kf") : [];
+    if (kf.some(scoredG)) { toast(t("round_del_final_first"), 5000); return; } // финал собран по этим раундам — сначала его
+    kf.forEach(g => del.push(g));
+    const later = gs.filter(g => g.round > r && !kf.includes(g)).map(g => ({ ...g, round: g.round - 1 })), maxR = Math.max(0, ...gs.filter(g => !del.includes(g)).map(g => g.round)) - (gs.some(g => g.round > r && !kf.includes(g)) ? 1 : 0);
+    // план раундов не уменьшаем: удалённый раунд можно собрать заново кнопкой «+ раунд»; у американо/пар план = сколько осталось
+    const newRounds = tt.format === "kotc" || STEP_F.includes(tt.format) || tt.format === "playoff" ? tt.rounds : Math.max(1, maxR);
+    const rt = { ...((tt.s && tt.s.rt) || {}) }, rt2 = {}; Object.keys(rt).forEach(k => { const n = +k; if (n < r) rt2[n] = rt[k]; else if (n > r) rt2[n - 1] = rt[k]; });
     try { await db.deleteGames(del.map(g => g.id)); if (later.length) await db.saveGames(later);
-      if (newRounds !== tt.rounds) await db.saveTournament(tRow(tt, { rounds: newRounds }));
+      if (newRounds !== tt.rounds || JSON.stringify(rt) !== JSON.stringify(rt2)) await db.saveTournament(tRow(tt, { rounds: newRounds, s: { ...tt.s, rt: rt2 } }));
       state.view.liveRound = Math.max(1, Math.min(r, maxR)); await reload(); toast(t("round_deleted", { n: r })); } catch (e) { err(e); }
+  }
+  // очистить счета раунда; в форматах «по таблице» следующие раунды зависели от этих счетов — их убираем (если ещё не играли)
+  async function clearRound(tid, r) {
+    const tt = byId(state.tournaments, tid); if (!tt) return; const gs = tGamesOf(tid), cur = gs.filter(g => g.round === r);
+    const isKf = cur.some(g => g.label === "kf"), dep = STEP_F.includes(tt.format) && !isKf ? gs.filter(g => g.round > r) : [];
+    if (dep.some(scoredG)) { toast(t("round_clear_later", { n: r }), 5000); return; }
+    if (!(await ask(t(dep.length ? "round_clear_q_dep" : "round_clear_q", { n: r })))) return;
+    try { if (dep.length) { await db.deleteGames(dep.map(g => g.id)); state.games = state.games.filter(x => !dep.includes(x)); }
+      await db.saveGames(cur.map(g => ({ ...g, scoreA: null, scoreB: null }))); cur.forEach(g => { g.scoreA = null; g.scoreB = null; });
+      state.view.liveRound = r; await reload(); toast(t("round_cleared", { n: r })); } catch (e) { err(e); }
+  }
+  // пересобрать пары раунда по итогам предыдущего (поправили прошлый раунд); весь финал KotC — по 10-му раунду
+  async function rebuildRound(tid, r) {
+    const tt = byId(state.tournaments, tid); if (!tt) return; const gs = tGamesOf(tid);
+    const isKf = gs.some(g => g.round === r && g.label === "kf"), from = isKf ? Math.min(...gs.filter(g => g.label === "kf").map(g => g.round)) : r;
+    const drop = gs.filter(g => g.round >= from); if (!drop.length) return;
+    const prev = gs.filter(g => g.round === from - 1); if (!prev.length || !prev.every(scoredG)) { toast(t("fill_round_first", { n: from - 1 })); return; }
+    const sc = drop.filter(scoredG).length;
+    if (!(await ask(sc ? t("round_rebuild_q_sc", { n: from, k: sc }) : drop.some(g => g.round > from && !isKf) ? t("round_rebuild_q_later", { n: from }) : t("round_rebuild_q", { n: from })))) return;
+    try { await db.deleteGames(drop.map(g => g.id)); state.games = state.games.filter(x => !drop.includes(x)); await nextRound(tid); } catch (e) { err(e); }
+  }
+  // ручная правка состава матча (сыграли не с теми партнёрами): игрок из другого матча этого раунда меняется местами
+  function gameEditSheet(gid) {
+    const g = byId(state.games, gid); if (!g) return; const tt = byId(state.tournaments, g.tournamentId); if (!tt) return;
+    const gs = tGamesOf(tt.id), rg = gs.filter(x => x.round === g.round), inR = new Set(rg.flatMap(x => x.teamA.concat(x.teamB)));
+    const pool = [...new Set([...inR, ...(tt.participantIds || [])])].sort((a, b) => pname(a).localeCompare(pname(b)));
+    const O = g.teamA.concat(g.teamB), where = id => { const x = rg.find(m => m !== g && m.teamA.concat(m.teamB).includes(id)); return x ? courtLbl(x) : inR.has(id) ? "" : t("ge_rest"); };
+    const sel = (k, cur) => `<select data-k="${k}">${pool.map(id => `<option value="${id}" ${id === cur ? "selected" : ""}>${esc(pnt(id))}${id !== cur && where(id) ? " · " + esc(where(id)) : ""}</option>`).join("")}</select>`;
+    const d = sheet("✎ " + t("ge_title") + " · " + esc(courtLbl(g)), `<p class="tiny" style="margin:0 0 10px;">${t("ge_hint")}</p>
+      <div class="ge-grid"><div><span class="lbl">${t("ge_team")} 1</span>${sel(0, O[0])}${sel(1, O[1])}</div><div class="ge-vs">vs</div><div><span class="lbl">${t("ge_team")} 2</span>${sel(2, O[2])}${sel(3, O[3])}</div></div>
+      <p class="tiny" id="geNote" style="margin:10px 0 12px;"></p>
+      <button type="button" class="btn primary block" data-x="go">${t("save")}</button>`);
+    const read = () => [0, 1, 2, 3].map(k => d.querySelector(`select[data-k="${k}"]`).value);
+    const sync = () => { const N = read(), dup = new Set(N).size < 4, moved = N.filter(x => !O.includes(x));
+      d.querySelector("#geNote").textContent = dup ? t("ge_dup") : moved.length ? t("ge_swap", { list: moved.map(x => pname(x) + (where(x) ? " (" + where(x) + ")" : "")).join(", ") }) : "";
+      d.querySelector('[data-x="go"]').disabled = dup; };
+    d.querySelectorAll("select").forEach(x => x.onchange = sync); sync();
+    d.querySelector('[data-x="go"]').onclick = async ev => {
+      const N = read(); if (new Set(N).size < 4) return; if (N.join() === O.join()) { d.remove(); return; }
+      const out = O.filter(x => !N.includes(x)), add = N.filter(x => !O.includes(x)), rows = [{ ...g, teamA: [N[0], N[1]], teamB: [N[2], N[3]] }];
+      // кого забрали из другого матча этого раунда — на его место встаёт тот, кто ушёл из этого матча
+      add.forEach((x, i) => { const r = out[i], m = rg.find(q => q !== g && q.teamA.concat(q.teamB).includes(x)); if (!m || !r) return;
+        const row = rows.find(q => q.id === m.id) || (rows.push({ ...m, teamA: m.teamA.slice(), teamB: m.teamB.slice() }), rows[rows.length - 1]);
+        row.teamA = row.teamA.map(y => y === x ? r : y); row.teamB = row.teamB.map(y => y === x ? r : y); });
+      const btn = ev.currentTarget; btn.classList.add("busy");
+      try { await db.saveGames(rows); d.remove(); await reload(); toast(t("ge_done"));
+        const later = tGamesOf(tt.id).filter(x => x.round > g.round);
+        if (STEP_F.includes(tt.format) && later.length) {
+          if (later.some(scoredG)) toast(t("ge_later_played", { n: g.round }), 6000);
+          else if (await ask(t("ge_later_q", { n: g.round, m: g.round + 1 }))) { await db.deleteGames(later.map(x => x.id)); state.games = state.games.filter(x => !later.includes(x)); await nextRound(tt.id); }
+        } } catch (e) { btn.classList.remove("busy"); err(e); } };
+  }
+  // своё число очков для раунда (например, последний раунд короче)
+  function roundPtsSheet(tid, r) {
+    const tt = byId(state.tournaments, tid); if (!tt) return; const g0 = tGamesOf(tid).find(g => g.round === r); if (!g0) return;
+    const def = g0.label === "kf" ? kotcCfg(tt).final_target : ((tt.scoring && tt.scoring.target) || 21), curV = rTarget(tt, g0) || def;
+    const d = sheet("🎯 " + t("round_pts_title", { n: r }), `<p class="tiny" style="margin:0 0 10px;">${t(sumMode(tt, g0) ? "round_pts_hint_total" : "round_pts_hint_race", { d: def })}</p>
+      <label class="field"><span class="lbl">${t("round_pts_lbl")}</span><input type="number" id="rtVal" min="1" max="99" inputmode="numeric" value="${curV}"></label>
+      <div class="grid2"><button type="button" class="btn" data-x="reset">${t("round_pts_reset", { d: def })}</button><button type="button" class="btn primary" data-x="go">${t("save")}</button></div>`);
+    const save = async v => { const rt = { ...((tt.s && tt.s.rt) || {}) }; if (!v || v === def) delete rt[r]; else rt[r] = v;
+      try { await db.saveTournament(tRow(tt, { s: { ...tt.s, rt } })); d.remove(); await reload(); toast(t("round_pts_done", { n: r, v: v || def })); } catch (e) { err(e); } };
+    d.querySelector('[data-x="go"]').onclick = () => { const v = Math.round(+d.querySelector("#rtVal").value); if (!(v >= 1 && v <= 99)) { toast(t("round_pts_bad")); return; } save(v); };
+    d.querySelector('[data-x="reset"]').onclick = () => save(null);
   }
   async function removeLastRound(tid) {
     const gs = tGamesOf(tid), maxR = Math.max(...gs.map(g => g.round));
@@ -1298,6 +1409,7 @@ setLang(detectLang(BOOT.tgLang));
       rows = playerTable(ids, sg).filter(r => r.g > 0).map(r => ({ ids: [r.id], key: [r.pts, r.w, r.pts - r.pa].join() }));
     }
     if (only) rows = rows.map(r => ({ ...r, ids: r.ids.filter(id => only.has(id)) })).filter(r => r.ids.length);
+    const ex = subExcl(tt); if (ex.size) rows = rows.map(r => ({ ...r, ids: r.ids.filter(id => !ex.has(id)) })).filter(r => r.ids.length);
     const N = rows.reduce((a, r) => a + r.ids.length, 0), out = {};
     let i = 0, above = 0;
     while (i < rows.length) {
@@ -1950,6 +2062,7 @@ setLang(detectLang(BOOT.tgLang));
     document.querySelectorAll("nav.tabs button").forEach(b => { b.classList.toggle("active", b.dataset.tab === state.tab); if (b.dataset.tab === "admin") b.hidden = !canEdit(); });
     const labels = { games: G.label(), tournaments: t("tournaments"), season: t("season"), rating: t("rating"), admin: t("admin"), profile: t("profile") };
     document.querySelectorAll("nav.tabs button .lbl").forEach(l => l.textContent = labels[l.parentElement.dataset.tab]);
+    v.dataset.tab = state.view.t && (state.tab === "tournaments" || state.tab === "games") ? "t" : state.tab;
     updateNavAvatar(); updateNavBadges(); bind(v); fitHero(v);
     if (keep) { const box = v.querySelector(`.match[data-gid="${keep.gid}"]`); if (box) { let dirty = false;
       keep.vals.forEach(([sd, val, auto]) => { const x = box.querySelector(`input.sc-in[data-side="${sd}"]`); if (!x) return; if (x.value !== val) { x.value = val; dirty = true; if (auto) x.dataset.auto = auto; } });
@@ -2080,7 +2193,11 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "live-round") on(() => { state.view.liveRound = +el.dataset.val; render(); if (el.tagName === "BUTTON") { const c = document.querySelector(".rnd-chips"); if (c) c.scrollIntoView({ block: "start", behavior: "smooth" }); else window.scrollTo(0, 0); } });
       else if (a === "live-next") on(async () => { el.disabled = true; await nextRound(id); });
       else if (a === "live-remove") on(() => removeLastRound(id));
-      else if (a === "round-add") on(() => addRound(id));
+      else if (a === "round-add") on(() => { const x = byId(state.tournaments, id); return x && STEP_F.includes(x.format) ? nextRound(id) : addRound(id); });
+      else if (a === "round-rebuild") on(() => rebuildRound(id, +el.dataset.val));
+      else if (a === "game-edit") on(() => gameEditSheet(el.dataset.gid));
+      else if (a === "round-clear") on(() => clearRound(id, +el.dataset.val));
+      else if (a === "round-pts") on(() => roundPtsSheet(id, +el.dataset.val));
       else if (a === "sub-open") on(() => subSheet(id));
       else if (a === "round-del") on(() => deleteRound(id, +el.dataset.val));
       else if (a === "live-finish") on(() => finishRun(id));
@@ -2199,8 +2316,8 @@ setLang(detectLang(BOOT.tgLang));
     v.querySelectorAll("input.sc-in").forEach(inp => {
       const box = inp.closest(".match"), other = () => box.querySelector(`input.sc-in[data-side="${inp.dataset.side === "A" ? "B" : "A"}"]`);
       inp.oninput = () => { const g = byId(state.games, inp.dataset.gid), tt = g && byId(state.tournaments, g.tournamentId), sc = (tt && tt.scoring) || {};
-        const tgt = g && g.label === "kf" ? kotcCfg(tt).final_target : sc.target;
-        delete inp.dataset.auto; markOk(box, false, true); if (sc.mode !== "total" || !tgt || inp.value === "") return; const o = other();
+        const tgt = g && tt ? rTarget(tt, g) : null;
+        delete inp.dataset.auto; markOk(box, false, true); if (!g || !sumMode(tt, g) || !tgt || inp.value === "") return; const o = other();
         if (o.value === "" || o.dataset.auto) { const val = tgt - Math.round(+inp.value); if (val >= 0) { o.value = val; o.dataset.auto = "1"; } } };
       // переход между полями одного матча ничего не сохраняет (иначе уходит промежуточный счёт вроде автоподставленного 12:7);
       // ушли из матча — проверка в focusout ниже, ✓/Enter — явное сохранение
