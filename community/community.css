@@ -865,6 +865,10 @@ tr.sub-out td { opacity: .75; }
   table.rate-tbl td.lb-elo { font-size: 14px; }
 }
 
+.s-out-list { margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,.12); }
+.s-out-row { padding: 4px 0; }
+.s-out-row .lb-p { gap: 8px; opacity: .8; }
+
 /* ===== светлая тема ===== */
 /* сгенерировано из тёмных правил + ручные правки ниже */
 html[data-theme="light"] .lvb { border-radius: 8px; color: var(--ink); background: rgba(255,255,255,0.87); border: 1px solid rgba(40,30,20,0.156); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); }
@@ -1046,6 +1050,7 @@ html[data-theme="light"] .sub-tag.in { color: var(--court); border-radius: 6px; 
 html[data-theme="light"] .rt-ovr { color: var(--court); background: var(--orange-soft); border-radius: 999px; }
 html[data-theme="light"] .m-edit { border-radius: 50%; border: 1px solid rgba(40,30,20,0.138); background: rgba(255,255,255,0.71); color: var(--ink-3); }
 html[data-theme="light"] .test-tag { border-radius: 6px; color: #7CC6FF; background: rgba(124,198,255,.12); border: 1px dashed rgba(124,198,255,.5); }
+html[data-theme="light"] .s-out-list { border-top: 1px dashed rgba(40,30,20,0.138); }
 /* --- ручные правки светлой темы (сообщество) --- */
 html[data-theme="light"] .rf-ticket { background: linear-gradient(180deg, rgba(47,170,140,.14), rgba(242,106,12,.08)); border-color: rgba(30,140,115,.45); }
 html[data-theme="light"] .rf-ticket::before, html[data-theme="light"] .rf-ticket::after { background: #FBF7F2; border-color: rgba(30,140,115,.45); }
@@ -1089,3 +1094,4 @@ html[data-theme="light"] .live-grid .match:focus-within { border-color: rgba(255
 /* тестовый турнир */
 html[data-theme="light"] .test-tag { color: #1F6FB2; background: rgba(31,111,178,.08); border-color: rgba(31,111,178,.4); }
 html[data-theme="light"] .tf-test { border-color: rgba(31,111,178,.35); }
+html[data-theme="light"] .s-out-list { border-top-color: rgba(40,30,20,.14); }

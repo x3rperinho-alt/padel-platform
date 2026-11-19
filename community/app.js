@@ -1367,7 +1367,12 @@ setLang(detectLang(BOOT.tgLang));
     const ref = lo != null ? lo : hi != null ? hi - 0.001 : null; if (ref == null) return "D";
     return ref < 2.5 ? "D" : ref < 3.5 ? "C" : null; };
   const lgByLevel = pid => { const lv = lvNow(pid); return lv != null && lv >= 2.5 ? "C" : "D"; };
-  const splitLg = (tt, pid) => { const m = tt.s.season_lg || {}; return LEAGUES.includes(m[pid]) ? m[pid] : lgByLevel(pid); };
+  // переводы между лигами в сезоне (админ): league.season_out = { "<номер сезона>": { D: { pid: "ГГГГ-ММ-ДД" } } } — игрок убран из таблицы этой лиги
+  const seasonOut = (S, lg) => ((((state.league || {}).season_out || {})[S.n] || {})[lg]) || {};
+  const seasonOf = d => SEASONS.find(x => d && d >= x.start && d <= x.end);
+  const splitLg = (tt, pid) => { const m = tt.s.season_lg || {}; if (LEAGUES.includes(m[pid])) return m[pid];
+    const S = seasonOf(tt.date), since = S && seasonOut(S, "D")[pid]; if (since && tt.date >= since) return "C"; // перевели из D — в смешанных турнирах дальше в C
+    return lgByLevel(pid); };
   const splitFixed = (tt, pid) => LEAGUES.includes((tt.s.season_lg || {})[pid]);
   // итоговые места турнира: группы с одинаковым результатом делят место; beaten — сколько игроков ниже
   // only — множество игроков: места считаются только среди них (смешанный турнир — внутри своей лиги)
@@ -1430,11 +1435,11 @@ setLang(detectLang(BOOT.tgLang));
   function seasonTable(season, lg) {
     const ts = state.tournaments.filter(tt => tt.status === "played" && !isTestT(tt) && tt.date && tt.date >= season.start && tt.date <= season.end && (tLeague(tt) === lg || tLeague(tt) === "split"))
       .sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.seq - b.seq);
-    const by = {};
+    const by = {}, out = seasonOut(season, lg);
     ts.forEach(tt => { let only = null;
       if (tLeague(tt) === "split") { const ids = [...new Set(tGamesOf(tt.id).filter(scoredG).flatMap(g => g.teamA.concat(g.teamB)))]; only = new Set(ids.filter(id => splitLg(tt, id) === lg)); if (!only.size) return; }
       const pl = tournamentPlaces(tt, only); if (!pl) return;
-      Object.entries(pl).forEach(([id, r]) => { const x = by[id] = by[id] || { id, pts: 0, n: 0, wins: 0, pod: 0, list: [] }; x.pts += r.pts; x.n++; if (r.place === 1) x.wins++; if (r.place <= 3) x.pod++; x.list.push({ tt, ...r }); }); });
+      Object.entries(pl).forEach(([id, r]) => { if (out[id]) return; const x = by[id] = by[id] || { id, pts: 0, n: 0, wins: 0, pod: 0, list: [] }; x.pts += r.pts; x.n++; if (r.place === 1) x.wins++; if (r.place <= 3) x.pod++; x.list.push({ tt, ...r }); }); });
     const rows = Object.values(by).sort((a, b) => b.pts - a.pts || b.wins - a.wins || b.pod - a.pod || pname(a.id).localeCompare(pname(b.id)));
     rows.forEach((r, k) => { const pr = rows[k - 1]; r.pos = pr && pr.pts === r.pts && pr.wins === r.wins && pr.pod === r.pod ? pr.pos : k + 1; r.z = k < season.finalists; });
     return { ts: ts.filter(tt => tGamesOf(tt.id).some(scoredG) && Object.values(by).some(r => r.list.some(x => x.tt === tt))), rows };
@@ -1468,7 +1473,7 @@ setLang(detectLang(BOOT.tgLang));
           <td class="lb-name"><span class="lb-p">${avatarHtml(r.id, 28)}<span class="plink">${esc(pname(r.id))}</span>${lblHtml(r.id)}</span></td>
           <td>${r.n}</td><td class="lb-elo">${r.pts}<span class="s-chev ${open ? "open" : ""}">›</span></td></tr>
         ${open ? `<tr class="s-open-row"><td colspan="4">${detail(r)}<div class="s-det-foot"><span class="tiny">${t("s_total")}</span><b>${ptsWord(r.pts)}</b></div>
-          <button class="btn sm ghost" style="margin-top:8px;" data-act="open-profile" data-id="${r.id}">${t("open_profile_btn")}</button></td></tr>` : ""}`; }).join("")}</table>`
+          <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;"><button class="btn sm ghost" data-act="open-profile" data-id="${r.id}">${t("open_profile_btn")}</button>${isAdmin() ? `<button class="btn sm ghost" data-act="s-out" data-id="${r.id}" data-val="${lg}">${lg === "D" ? "⇧ " + t("s_out_btn_D") : "✕ " + t("s_out_btn", { lg })}</button>` : ""}</div></td></tr>` : ""}`; }).join("")}</table>`
       : `<div class="empty" style="padding:22px 6px;"><div class="ic">🏆</div>${started ? t("s_empty_lg", { lg }) : t("s_soon", { d: dateFmt(S.start) })}</div>`;
     const how = state.view.sHow;
     return `<div class="section-head"><h2>${t("season")}</h2></div>
@@ -1487,7 +1492,7 @@ setLang(detectLang(BOOT.tgLang));
       </div>
       ${lgChips}
       ${myCard}
-      <div class="card">${table}</div>
+      <div class="card">${table}${isAdmin() && Object.keys(seasonOut(S, lg)).length ? `<div class="s-out-list"><div class="tiny" style="margin-bottom:6px;">${t("s_out_title", { lg })}</div>${Object.entries(seasonOut(S, lg)).map(([pid, d]) => `<div class="row s-out-row"><span class="lb-p">${avatarHtml(pid, 24)}<span>${esc(pname(pid))}</span><span class="tiny">${t("s_out_since", { d: dateFmt(d) })}</span></span><button class="btn sm ghost" data-act="s-back" data-id="${pid}" data-val="${lg}">↩ ${t("s_back")}</button></div>`).join("")}</div>` : ""}</div>
       <div class="card s-how"><button class="rounds-toggle ${how ? "open" : ""}" data-act="s-how" style="margin:0;">${t("s_how")}<span class="chev">›</span></button>
         ${how ? `<div class="s-how-body">
           <div class="s-rule"><b class="un">+5</b><span>${t("s_r1")}</span></div>
@@ -2213,6 +2218,11 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "fix-done") on(() => { state.view.fix = null; state.view.liveRound = null; window.scrollTo(0, 0); render(); });
       else if (a === "s-league") on(() => { state.view.sLeague = el.dataset.val; state.view.sOpen = null; render(); });
       else if (a === "s-open") on(() => { state.view.sOpen = state.view.sOpen === id ? null : id; render(); });
+      else if (a === "s-out" || a === "s-back") on(async () => { const lg = el.dataset.val, S = curSeason(), all = JSON.parse(JSON.stringify((state.league || {}).season_out || {}));
+        const m = ((all[S.n] = all[S.n] || {})[lg] = all[S.n][lg] || {});
+        if (a === "s-out") { if (!(await ask(t(lg === "D" ? "s_out_q_D" : "s_out_q", { name: pname(id), lg })))) return; m[id] = today(); state.view.sOpen = null; }
+        else delete m[id];
+        await discSave({ season_out: all }); toast(t(a === "s-out" ? "s_out_done" : "s_back_done", { name: pname(id), lg })); });
       else if (a === "s-how") on(() => { state.view.sHow = !state.view.sHow; render(); });
       else if (a === "elo-how") on(() => { state.view.eloHow = !state.view.eloHow; render(); });
       else if (a === "lbl-toggle") on(() => { state.view.lblOpen = state.view.lblOpen === id ? null : id; render(); });
