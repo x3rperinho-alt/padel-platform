@@ -772,6 +772,33 @@ html[data-theme="light"] .theme-sw .sun { color: #fff; } html[data-theme="light"
 .prz-win { display: block; margin-top: 3px; font-size: 12.5px; color: #61D2B7; }
 .prz-more { display: block; width: 100%; margin-top: 8px; padding: 6px 0; background: none; border: 0; color: var(--ink-3); font: inherit; font-size: 12px; font-weight: 700; text-align: left; cursor: pointer; }
 
+/* ===== компьютер (Mac/ПК): идущий турнир — матчи сеткой, таблица сбоку ===== */
+input.sc-in::-webkit-outer-spin-button, input.sc-in::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input.sc-in { -moz-appearance: textfield; appearance: textfield; }
+.kb-hint { margin: 0 0 10px; }
+.kb-hint kbd { display: inline-block; min-width: 20px; padding: 1px 6px; margin: 0 2px; border-radius: 6px; border: 1px solid rgba(255,255,255,.18); border-bottom-width: 2px; font: 700 11px/1.5 "Manrope", sans-serif; text-align: center; color: var(--ink); background: rgba(255,255,255,.06); }
+.wrap:has(.live-grid) { max-width: 1240px; padding-left: 24px; padding-right: 24px; }
+.live-grid { display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: 22px; align-items: start; }
+.live-main { min-width: 0; }
+.live-ms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 4px; }
+.live-ms .match { margin: 0; }
+.live-grid .match .score input { width: 62px; height: 52px; }
+.live-grid .match:focus-within { border-color: rgba(255,122,26,.55); box-shadow: 0 0 0 3px rgba(255,122,26,.14), 0 8px 20px -14px rgba(0,0,0,.8); }
+.live-side { position: sticky; top: 14px; max-height: calc(100vh - 150px); overflow: auto; border-radius: 18px; }
+.live-side .card { margin: 0; }
+.live-side h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+@media (min-width: 1100px) and (hover: hover) {
+  nav.tabs { justify-content: center; }
+  nav.tabs button { flex: 0 0 112px; }
+}
+@media (min-width: 1500px) {
+  .wrap:has(.live-grid) { max-width: 1480px; }
+  .live-ms { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .live-grid { grid-template-columns: minmax(0, 1fr) 400px; }
+}
+
+.rt-off { margin: -2px 0 10px; padding: 7px 10px; border-radius: 10px; color: var(--court); background: var(--orange-soft); border: 1px solid rgba(255,122,26,.3); font-weight: 600; }
+
 /* ===== светлая тема ===== */
 /* сгенерировано из тёмных правил + ручные правки ниже */
 html[data-theme="light"] .lvb { border-radius: 8px; color: var(--ink); background: rgba(255,255,255,0.87); border: 1px solid rgba(40,30,20,0.156); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); }
@@ -946,6 +973,9 @@ html[data-theme="light"] .adm-tag { border-radius: 6px; color: #FF9A4A; backgrou
 html[data-theme="light"] .prz-ic { background: rgba(255,122,26,.10); }
 html[data-theme="light"] .prz-item.rf { border-style: dashed; border-color: rgba(97,210,183,.35); background: linear-gradient(135deg, rgba(97,210,183,.08), rgba(97,210,183,.02)); }
 html[data-theme="light"] .prz-more { background: none; border: 0; color: var(--ink-3); }
+html[data-theme="light"] .kb-hint kbd { border-radius: 6px; border: 1px solid rgba(40,30,20,0.192); border-bottom-width: 2px; color: var(--ink); background: rgba(255,255,255,0.79); }
+html[data-theme="light"] .live-grid .match:focus-within { border-color: rgba(255,122,26,.55); box-shadow: 0 0 0 3px rgba(255,122,26,.14), 0 8px 20px -14px rgba(60,40,20,0.128); }
+html[data-theme="light"] .rt-off { border-radius: 10px; color: var(--court); background: var(--orange-soft); border: 1px solid rgba(255,122,26,.3); }
 /* --- ручные правки светлой темы (сообщество) --- */
 html[data-theme="light"] .rf-ticket { background: linear-gradient(180deg, rgba(47,170,140,.14), rgba(242,106,12,.08)); border-color: rgba(30,140,115,.45); }
 html[data-theme="light"] .rf-ticket::before, html[data-theme="light"] .rf-ticket::after { background: #FBF7F2; border-color: rgba(30,140,115,.45); }
@@ -982,3 +1012,7 @@ html[data-theme="light"] .tf-pt-b .lg-lupadel, html[data-theme="light"] .prz-pt 
 html[data-theme="light"] .tf-pt-b { border-color: rgba(0,0,0,.14); background: rgba(0,0,0,.03); }
 html[data-theme="light"] .tf-pt-b.on { border-color: #E8650A; background: rgba(255,122,26,.12); box-shadow: 0 0 0 1px #E8650A inset; }
 html[data-theme="light"] .adm-tag { color: #B8510A; background: rgba(255,122,26,.12); border-color: rgba(184,81,10,.45); }
+
+/* компьютерный режим идущего турнира */
+html[data-theme="light"] .kb-hint kbd { border-color: rgba(40,30,20,.2); background: rgba(255,255,255,.8); color: var(--ink); }
+html[data-theme="light"] .live-grid .match:focus-within { border-color: rgba(255,122,26,.6); box-shadow: 0 0 0 3px rgba(255,122,26,.16), 0 8px 20px -14px rgba(40,30,20,.35); }

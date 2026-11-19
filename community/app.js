@@ -238,6 +238,8 @@ setLang(detectLang(BOOT.tgLang));
   const isField = el => !!el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !["checkbox", "radio", "file", "button", "submit"].includes(el.type)));
   // пока человек что-то вводит или выбирает в списке — фоновые обновления не перерисовывают экран (иначе список закрывается сам)
   const isBusy = el => isField(el) || (!!el && el.tagName === "SELECT");
+  // для живых обновлений поле счёта не помеха: render() возвращает курсор и введённые цифры (см. keep в render)
+  const isBusyBg = el => isBusy(el) && !(el.classList && el.classList.contains("sc-in"));
   let pendingRender = false;
   // подтверждение: в Telegram — родное окно; иначе — своё окно в приложении (системный confirm() в некоторых встроенных браузерах заблокирован и молча отвечает «нет»)
   const ask = msg => new Promise(res => {
@@ -252,7 +254,7 @@ setLang(detectLang(BOOT.tgLang));
   let savingN = 0, saveEpoch = 0; // сколько счетов сейчас сохраняется; номер «поколения» сохранений
   async function reload() { try { const ep = saveEpoch; const d = await db.loadAll();
       if (savingN || ep !== saveEpoch) { pendingLive = true; return; } // пока грузили, ушёл новый счёт — эти данные уже устарели
-      Object.assign(state, d); syncClubs(); cacheSoon(); if (isBusy(document.activeElement)) { pendingRender = true; return; } render(); } catch (e) { console.error(e); } }
+      Object.assign(state, d); syncClubs(); cacheSoon(); lastSync = Date.now(); if (isBusyBg(document.activeElement)) { pendingRender = true; return; } render(); } catch (e) { console.error(e); } }
   let cacheT; const cacheSoon = () => { clearTimeout(cacheT); cacheT = setTimeout(() => saveCache(BOOT.tgId, U, { league: state.league, players: state.players, tournaments: state.tournaments, games: state.games, registrations: state.registrations, admins: state.admins }), 1500); };
   // открылись из кэша — подменяем на свежие данные, как только они придут
   if (BOOT.fresh) BOOT.fresh.then(r => { if (!r) return; Object.assign(U, r.user);
@@ -263,9 +265,18 @@ setLang(detectLang(BOOT.tgLang));
     try { await save(); } catch (e) { revert(); render(); err(e); }
     finally { savingN--; if (pendingLive && !savingN && !isBusy(document.activeElement)) liveReload(); else cacheSoon(); }
   }
-  let reloadTimer, pendingLive = false;
-  const liveReload = () => { if (isBusy(document.activeElement) || savingN) { pendingLive = true; return; } pendingLive = false; reload(); };
-  db.subscribe(() => { clearTimeout(reloadTimer); reloadTimer = setTimeout(liveReload, 600); });
+  let reloadTimer, pendingLive = false, lastSync = Date.now(), rtUp = null;
+  const liveReload = () => { if (isBusyBg(document.activeElement) || savingN) { pendingLive = true; return; } pendingLive = false; reload(); };
+  // живые обновления: событие из базы → перечитать; канал упал и поднялся → перечитать (пропущенное не теряется)
+  const RT = db.subscribe(() => { lastSync = Date.now(); clearTimeout(reloadTimer); reloadTimer = setTimeout(liveReload, 500); },
+    (up, reconnected) => { const was = rtUp; rtUp = up; if (up && reconnected) liveReload(); if (was !== null && was !== up) setTimeout(() => { if (!isBusyBg(document.activeElement)) render(); }, 0); }); // показать/убрать плашку «нет связи»
+  // вернулись в приложение / проснулся ноутбук / появилась сеть — проверить канал и подтянуть свежее
+  let wakeAt = 0; const wake = () => { if (document.visibilityState === "hidden" || Date.now() - wakeAt < 3000) return; wakeAt = Date.now();
+    if (RT && RT.healthy && !RT.healthy()) RT.restart(); liveReload(); };
+  document.addEventListener("visibilitychange", wake); window.addEventListener("focus", wake); window.addEventListener("online", () => { wakeAt = 0; wake(); });
+  // подстраховка во время турнира: если 20 с не было ни одного события — тихо перечитываем
+  setInterval(() => { if (document.visibilityState !== "visible" || !state.tournaments.some(x => x.status === "live")) return;
+    if (Date.now() - lastSync > (rtUp ? 25000 : 8000)) { lastSync = Date.now(); liveReload(); } }, 4000);
   const timeRange = s => s.time ? esc(s.time) + (s.time_end ? "–" + esc(s.time_end) : "") : "";
   const regsOf = tid => state.registrations.filter(r => r.tournamentId === tid && r.status !== "cancelled").sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
   const myReg = tid => { const me = myPlayer(); return me ? regsOf(tid).find(r => r.playerId === me.id) : null; };
@@ -1024,6 +1035,9 @@ setLang(detectLang(BOOT.tgLang));
         <td class="lb-elo">${r.pts}</td><td>${r.w}-${r.l}${r.d ? "-" + r.d : ""}</td><td>${diff(r)}</td>
         <td class="tiny ${d >= 0 ? "up" : "down"}" style="font-size:13px;">${r.g ? (d >= 0 ? "+" : "") + Math.round(d) : "—"}</td></tr>`; }).join("")}</table>`;
   }
+  // широкий экран с мышкой (Mac/ПК): матчи сеткой + таблица сбоку, ввод с клавиатуры
+  const DESK_MQ = window.matchMedia ? matchMedia("(min-width: 1100px) and (hover: hover) and (pointer: fine)") : null;
+  const isDesk = () => !!(DESK_MQ && DESK_MQ.matches);
   function liveHtml(tt, fix) {
     const tid = tt.id, games = tGamesOf(tid), edit = canEditT(tt), me = myPlayer(), sc = tt.scoring || {};
     const maxR = games.length ? Math.max(...games.map(g => g.round)) : 0;
@@ -1031,7 +1045,8 @@ setLang(detectLang(BOOT.tgLang));
     const done = r => byR(r).length > 0 && byR(r).every(scoredG);
     let firstOpen = maxR; for (let r = 1; r <= maxR; r++) if (!done(r)) { firstOpen = r; break; }
     const cur = state.view.liveRound && state.view.liveRound <= maxR ? state.view.liveRound : firstOpen;
-    const tab = state.view.liveTab || "m";
+    const desk = isDesk();
+    let tab = state.view.liveTab || "m"; if (desk && tab === "t") tab = "m"; // на компьютере таблица всегда рядом
     const isK = tt.format === "kotc", isKF = isK && kotcCfg(tt).final, kR = tt.rounds || 10, hasKF = isK && games.some(g => g.label === "kf");
     const rLbl = r => isK && r > kR ? "Ф" + (r - kR) : String(r);
     const planned = isK ? kR + (isKF ? 3 : 0) : STEP_F.includes(tt.format) ? Math.max(tt.rounds || 0, maxR) : tt.format === "playoff" ? Math.max(maxR, Math.round(Math.log2(Math.max(2, teamsOf(tt).length)))) : maxR;
@@ -1042,7 +1057,7 @@ setLang(detectLang(BOOT.tgLang));
       const inp = s => `<input class="sc-in" type="number" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" min="0" max="99" data-gid="${g.id}" data-side="${s}" value="${(s === "A" ? g.scoreA : g.scoreB) ?? ""}" aria-label="${t("score")}">`;
       const box = v => `<span class="sbox">${v ?? "–"}</span>`;
       return `<div class="match live-m ${mine ? "mine" : ""} ${scoredG(g) ? "is-done" : ""}" data-gid="${g.id}">
-        <div class="court-lbl"><span>${lbl(g)}${esc(courtLbl(g))}${mine ? ` · <b class="your-m">${t("your_match")}</b>` : ""}</span>${edit ? `<button type="button" class="sc-ok ${scoredG(g) ? "saved" : ""}" aria-label="${t("save")}">✓</button>` : ""}</div>
+        <div class="court-lbl"><span>${lbl(g)}${esc(courtLbl(g))}${mine ? ` · <b class="your-m">${t("your_match")}</b>` : ""}</span>${edit ? `<button type="button" class="sc-ok ${scoredG(g) ? "saved" : ""}" tabindex="-1" aria-label="${t("save")}">✓</button>` : ""}</div>
         <div class="mrow"><div class="pair ${wa ? "winner" : ""}">${pl(g.teamA[0])}<small>${pl(g.teamA[1])}</small></div>
           <div class="score">${edit ? inp("A") : box(g.scoreA)}<span class="colon">:</span>${edit ? inp("B") : box(g.scoreB)}</div>
           <div class="pair right ${wb ? "winner" : ""}">${pl(g.teamB[0])}<small>${pl(g.teamB[1])}</small></div></div></div>`; };
@@ -1068,23 +1083,25 @@ setLang(detectLang(BOOT.tgLang));
         ${!fix && games.some(g => !scoredG(g)) ? `<button class="btn sm ghost" data-act="sub-open" data-id="${tid}">⇄ ${t("sub_btn")}</button>` : ""}
         <button class="btn sm ghost danger" data-act="round-del" data-id="${tid}" data-val="${cur}">🗑 ${t("round_del", { n: rLbl(cur) })}</button></div>` : "";
     const allDone = games.length && games.every(scoredG);
+    const tableCard = () => `<div class="card live-tbl"><h3>${t("standings")}${desk ? ` <span class="tiny">${t("scored_n", { a: nScored, b: games.length })}</span>` : ""}</h3>${nScored ? "" : `<p class="tiny">${t("no_scores_yet")}</p>`}${standingsHtml(tt, games)}</div>`;
     const finishCard = edit ? (fix
       ? `<div class="card"><button class="btn primary block" data-act="fix-done">${t("fix_done")}</button></div>`
       : `<div class="card live-end"><div class="row"><span class="tiny">${t("scored_n", { a: nScored, b: games.length })}</span>${nScored ? "" : `<button class="btn ghost sm danger" data-act="live-cancel" data-id="${tid}">${t("cancel_start")}</button>`}</div>
           <button class="btn ${allDone && (!STEP_F.includes(tt.format) || maxR >= planned) ? "primary" : ""} block" style="margin-top:10px;" data-act="live-finish" data-id="${tid}">🏁 ${t("finish_t")}</button></div>`) : "";
     return `
       <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${backLbl()}</button>${edit && !fix ? `<button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button>` : ""}</div>
-      <div class="live-head"><h2 class="t-title">${esc(tt.name)}</h2>${fix ? `<span class="t-status planned">✎ ${t("fix_scores_short")}</span>` : `<span class="t-status live"><i></i>${t("live")}</span>`}</div>
+      <div class="live-head"><h2 class="t-title">${esc(tt.name)}</h2>${fix ? `<span class="t-status planned">✎ ${t("fix_scores_short")}</span>` : `<span class="t-status live"><i></i>${t("live")}</span>`}</div>${rtUp === false ? `<p class="tiny rt-off">⟳ ${t("rt_off")}</p>` : ""}
       <p class="tiny" style="margin:-4px 0 12px;">${esc(fmtName(tt))}${scLbl ? " · " + scLbl : ""}${isKF ? " · " + t("kotc_final") + " " + t("sc_total", { n: kotcCfg(tt).final_target }) : ""}${tt.s.place ? " · " + esc(tt.s.place) : ""}${tt.s.time ? " · " + timeRange(tt.s) : ""}</p>
-      <div class="seg live-tabs"><button class="${tab === "m" ? "active" : ""}" data-act="live-tab" data-val="m">${t("live_matches")}</button><button class="${tab === "t" ? "active" : ""}" data-act="live-tab" data-val="t">${t("live_table")}</button><button class="${tab === "z" ? "active" : ""}" data-act="live-tab" data-val="z">🎲 ${t("tt_tab_raffle")}</button></div>
-      ${tab === "z" ? raffleTabHtml(tt) : tab === "t" ? `<div class="card"><h3>${t("standings")}</h3>${nScored ? "" : `<p class="tiny">${t("no_scores_yet")}</p>`}${standingsHtml(tt, games)}</div>` : `
+      <div class="seg live-tabs"><button class="${tab === "m" ? "active" : ""}" data-act="live-tab" data-val="m">${t("live_matches")}${desk ? " + " + t("live_table").toLowerCase() : ""}</button>${desk ? "" : `<button class="${tab === "t" ? "active" : ""}" data-act="live-tab" data-val="t">${t("live_table")}</button>`}<button class="${tab === "z" ? "active" : ""}" data-act="live-tab" data-val="z">🎲 ${t("tt_tab_raffle")}</button></div>
+      ${tab === "z" ? raffleTabHtml(tt) : tab === "t" ? tableCard() : `${desk ? `<div class="live-grid"><div class="live-main">` : ""}
         <div class="chips-scroll rnd-chips">${chips}</div>
         <h3 class="sub-h" style="margin-top:6px;">${isK && cur > kR ? "👑 " + t("kotc_final_m", { n: cur - kR }) : t("round_n", { n: cur }) + (planned > 1 ? ` <span class="tiny">/ ${isK ? kR : planned}</span>` : "")}</h3>
-        ${edit && !fix && cur === firstOpen && nScored === 0 ? `<p class="tiny" style="margin:0 0 10px;">${t("live_hint_admin")}</p>` : ""}
-        ${byR(cur).map(match).join("")}
+        ${edit && !fix && cur === firstOpen && nScored === 0 && !desk ? `<p class="tiny" style="margin:0 0 10px;">${t("live_hint_admin")}</p>` : ""}
+        ${edit && desk ? `<p class="tiny kb-hint"><kbd>Tab</kbd> ${t("kb_tab")} · <kbd>Enter</kbd> ${t("kb_enter")} · <kbd>←</kbd><kbd>→</kbd> ${t("kb_rounds")}</p>` : ""}
+        <div class="live-ms">${byR(cur).map(match).join("")}</div>
         ${resting.length ? `<p class="tiny rest-line">💤 ${t("rest")}: ${resting.join(", ")}</p>` : ""}
         ${controls ? `<div style="margin:12px 0;">${controls}</div>` : ""}
-        ${roundAdmin}`}
+        ${roundAdmin}${desk ? `</div><aside class="live-side">${tableCard()}</aside></div>` : ""}`}
       ${finishCard}`;
   }
   // сохранение счёта матча (читаем оба поля карточки)
@@ -1917,6 +1934,9 @@ setLang(detectLang(BOOT.tgLang));
 
   function render() { _EC = null; _DISC = null; pendingRender = false;
     const v = document.getElementById("view");
+    // если экран перерисовался, пока вводили счёт, — вернуть курсор и ещё не сохранённые цифры (ввод с компьютера быстрый)
+    const ae0 = document.activeElement, keep = ae0 && ae0.classList && ae0.classList.contains("sc-in") && v.contains(ae0) ? { gid: ae0.dataset.gid, side: ae0.dataset.side,
+      vals: [...ae0.closest(".match").querySelectorAll("input.sc-in")].map(x => [x.dataset.side, x.value, x.dataset.auto]) } : null;
     const me = myPlayer(); LBL = {};
     if (me && state._onb && state._onb.retest && state._onb.step != null) v.innerHTML = viewQuiz(state._onb);
     else if (!me && state.tab !== "admin") v.innerHTML = viewOnboarding();
@@ -1931,6 +1951,9 @@ setLang(detectLang(BOOT.tgLang));
     const labels = { games: G.label(), tournaments: t("tournaments"), season: t("season"), rating: t("rating"), admin: t("admin"), profile: t("profile") };
     document.querySelectorAll("nav.tabs button .lbl").forEach(l => l.textContent = labels[l.parentElement.dataset.tab]);
     updateNavAvatar(); updateNavBadges(); bind(v); fitHero(v);
+    if (keep) { const box = v.querySelector(`.match[data-gid="${keep.gid}"]`); if (box) { let dirty = false;
+      keep.vals.forEach(([sd, val, auto]) => { const x = box.querySelector(`input.sc-in[data-side="${sd}"]`); if (!x) return; if (x.value !== val) { x.value = val; dirty = true; if (auto) x.dataset.auto = auto; } });
+      if (dirty) markOk(box, false, true); const f = box.querySelector(`input.sc-in[data-side="${keep.side}"]`); if (f) { f.dataset.nosel = "1"; f.focus({ preventScroll: true }); delete f.dataset.nosel; } } }
   }
   // длинное имя в профиле: уменьшаем шрифт, пока самое длинное слово не влезет, — вместо переноса посреди слова и наезда на Эло
   function fitHero(root) {
@@ -1944,6 +1967,15 @@ setLang(detectLang(BOOT.tgLang));
   }
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fitHero());
   window.addEventListener("resize", () => fitHero());
+  if (DESK_MQ && DESK_MQ.addEventListener) DESK_MQ.addEventListener("change", () => { if (isBusy(document.activeElement)) pendingRender = true; else render(); });
+  document.addEventListener("keydown", e => {
+    if (e.metaKey || e.ctrlKey || e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+    const ae = document.activeElement; if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT" || ae.isContentEditable)) return;
+    if (document.querySelector(".ask-modal, .sheet-bg")) return;
+    const chips = [...document.querySelectorAll(".rnd-chips .rnd-chip:not(.future)")], i = chips.findIndex(c => c.classList.contains("active"));
+    const nx = chips[i + (e.key === "ArrowRight" ? 1 : -1)]; if (i < 0 || !nx) return;
+    e.preventDefault(); nx.click();
+  });
   function updateNavBadges() {
     const pb = document.querySelector('nav.tabs button[data-tab="profile"]'); if (pb) { let dot = pb.querySelector(".need-dot"); if (needBd()) { if (!dot) { dot = document.createElement("i"); dot.className = "need-dot nav"; pb.appendChild(dot); } } else if (dot) dot.remove(); }
     const lv = canEdit() ? state.players.filter(p => p.levelStatus === "pending").length : 0;
@@ -2173,6 +2205,8 @@ setLang(detectLang(BOOT.tgLang));
       // переход между полями одного матча ничего не сохраняет (иначе уходит промежуточный счёт вроде автоподставленного 12:7);
       // ушли из матча — проверка в focusout ниже, ✓/Enter — явное сохранение
       inp.onchange = () => setTimeout(() => { if (document.activeElement === inp) saveScoreFrom(box); }, 0);
+      inp.onfocus = () => { if (!isDesk() || inp.dataset.nosel) return; const v0 = inp.value; try { inp.select(); } catch (e) {} setTimeout(() => { if (document.activeElement === inp && inp.value === v0) try { inp.select(); } catch (e) {} }, 0); }; // на компьютере новое число сразу заменяет старое
+      inp.onwheel = e => { if (document.activeElement === inp) e.preventDefault(); }; // тачпад Mac не крутит счёт
       const ok = box.querySelector(".sc-ok");
       if (!box.dataset.foBound) { box.dataset.foBound = "1"; // ушли из матча совсем (другое поле, Enter, тап мимо) — проверяем счёт как по ✓
         box.addEventListener("focusout", e => { if (e.relatedTarget && box.contains(e.relatedTarget)) return;

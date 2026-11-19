@@ -160,10 +160,28 @@ export function createDb(cfg) {
     const { error } = await sb.storage.from("prizes").upload(path, blob, { contentType: "image/jpeg", upsert: false }); if (error) throw error;
     return sb.storage.from("prizes").getPublicUrl(path).data.publicUrl;
   }
-  function subscribe(onChange) {
-    const ch = sb.channel("league-" + L);
-    for (const t of ["players", "tournaments", "games", "registrations"]) ch.on("postgres_changes", { event: "*", schema: "public", table: t, filter: "league_id=eq." + L }, () => onChange(t));
-    ch.subscribe(); return () => sb.removeChannel(ch);
+  // Живые обновления. Канал сам переподключается (сон ноутбука, фон телефона, смена сети, протухший токен);
+  // onStatus(up, reconnected): после переподключения приложение один раз перечитывает данные — пропущенные события не теряются.
+  function subscribe(onChange, onStatus) {
+    let ch = null, dead = false, wasUp = false, retry = 0, timer = null;
+    const open = async () => {
+      if (dead) return; clearTimeout(timer);
+      try { await ensureSession(); const { data } = await sb.auth.getSession(); if (data && data.session && sb.realtime && sb.realtime.setAuth) sb.realtime.setAuth(data.session.access_token); } catch (e) {}
+      const old = ch, c = sb.channel("league-" + L + "-" + Date.now().toString(36)); ch = c;
+      if (old) { try { sb.removeChannel(old); } catch (e) {} }
+      for (const t of ["players", "tournaments", "games", "registrations"]) c.on("postgres_changes", { event: "*", schema: "public", table: t, filter: "league_id=eq." + L }, () => onChange(t));
+      c.subscribe(status => {
+        if (c !== ch || dead) return; // старый канал, который мы сами закрыли
+        if (status === "SUBSCRIBED") { retry = 0; const re = wasUp; wasUp = true; if (onStatus) onStatus(true, re); }
+        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          if (onStatus) onStatus(false, false);
+          timer = setTimeout(open, Math.min(30000, 1000 * 2 ** retry++)); wasUp = true; // при следующем SUBSCRIBED — перечитать данные
+        }
+      });
+    };
+    open();
+    return { close: () => { dead = true; clearTimeout(timer); if (ch) sb.removeChannel(ch); }, restart: () => { retry = 0; open(); },
+      healthy: () => !!ch && ch.state === "joined" };
   }
 
   return { sb, league: L, session, signInTelegram, signInGoogle, signInEmail, signOut, me, ensureProfile, joinOpen, loadAll,
