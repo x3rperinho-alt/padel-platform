@@ -44,6 +44,9 @@ setLang(detectLang(BOOT.tgLang));
   // дружеский турнир из вкладки «Игры» ведёт тот, кто его создал (плюс админы)
   const canEditT = tt => canEdit() || (!!tt && !!tt.s && tt.s.kind === "ftour" && tt.status !== "played" && !!myPlayer() && tt.s.created_by === myPlayer().id); // после завершения — только админ (как в базе)
   const isGameT = tt => !!(tt && tt.s && ["match", "friendly", "ftour"].includes(tt.s.kind));
+  // тестовый турнир: видят только админы; в Эло, статистику, ачивки, сезон и скидки не идёт
+  const isTestT = tt => !!(tt && tt.s && tt.s.test);
+  const testIds = () => new Set(state.tournaments.filter(isTestT).map(tt => tt.id));
 
   // ---------- «на главный экран»: в Telegram — родная функция (откроет мини-приложение с входом), в браузере Android — установка PWA ----------
   const tgApp = window.Telegram && window.Telegram.WebApp;
@@ -137,7 +140,8 @@ setLang(detectLang(BOOT.tgLang));
   // ---------- Эло: старт из анкеты, K удвоен пока не подтверждён (меньше 3 турниров и не подтверждён админом) ----------
   function orderedGames() {
     const tOrder = {}; state.tournaments.forEach((tt, i) => tOrder[tt.id] = i);
-    return state.games.slice().sort((a, b) => (tOrder[a.tournamentId] || 0) - (tOrder[b.tournamentId] || 0) || a.round - b.round || (a.court || 0) - (b.court || 0));
+    const tst = testIds();
+    return state.games.filter(g => !tst.has(g.tournamentId)).sort((a, b) => (tOrder[a.tournamentId] || 0) - (tOrder[b.tournamentId] || 0) || a.round - b.round || (a.court || 0) - (b.court || 0));
   }
   function computeElo() {
     const r = {}, tp = {}, st = {}, seq = {}, adj = {};
@@ -184,7 +188,8 @@ setLang(detectLang(BOOT.tgLang));
     const lastT = tIds[tIds.length - 1] || null;
     return { ratings: r, stats: st, unconfirmed, tcount, seq, tsum, adj, lastT };
   }
-  const board = () => { const E = computeElo(); return { E, list: state.players.filter(p => p.active && p.levelStatus === "ok").sort((a, b) => E.ratings[b.id] - E.ratings[a.id]) }; };
+  // в общем рейтинге — только те, кто сыграл хотя бы одну игру (записываться и попадать в турниры можно и без этого)
+  const board = () => { const E = computeElo(); return { E, list: state.players.filter(p => p.active && p.levelStatus === "ok" && ((E.stats[p.id] || {}).g || 0) > 0).sort((a, b) => E.ratings[b.id] - E.ratings[a.id]) }; };
 
   // ---------- общие кусочки ----------
   const HOME_IC = `<svg class="home-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.5 9v11h13V9"/><path d="M12 11.5v5M9.5 14h5"/></svg>`;
@@ -400,7 +405,7 @@ setLang(detectLang(BOOT.tgLang));
     const podium = P ? Array.from({ length: nPl }, (_, k) => Object.keys(P).filter(id => P[id].place === k + 1)).map((ids, k) => ids.length ? `<span>${k < 3 ? ["🥇", "🥈", "🥉"][k] : k + 1 + "."} ${ids.map(id => esc(pname(id))).join(" + ")}</span>` : "").filter(Boolean) : [];
     return `<div class="t-row" data-act="open-t" data-id="${tt.id}">
       <div class="t-row-date">${d ? `<b>${d.getDate()}</b><span>${d.toLocaleDateString(LC, { month: "short" }).replace(".", "")}</span>` : "<b>—</b>"}</div>
-      <div class="t-row-main"><div class="t-row-name">${esc(tt.name)}</div>
+      <div class="t-row-main"><div class="t-row-name">${esc(tt.name)}${isTestT(tt) ? `<span class="test-tag">🧪 ${t("test_tag")}</span>` : ""}</div>
         <div class="t-row-meta">${[tt.s.place && esc(tt.s.place), esc(fmtName(tt)), n ? n + " " + t("players").toLowerCase() : ""].filter(Boolean).join(" · ")}</div>
         ${podium.length ? `<div class="t-row-win">${podium.join("")}</div>` : ""}</div>
       ${ptSquare(tt, "past") || `<span class="t-row-go">›</span>`}</div>`;
@@ -420,7 +425,7 @@ setLang(detectLang(BOOT.tgLang));
     const nPr = (tt.s.prizes || []).filter(x => x && (x.text || x.photo)).length;
     return `<div class="tile t-tile ct ct2 ${nofit ? "nofit" : ""}" data-act="open-t" data-id="${tt.id}">
       <div class="ct2-top"><div class="ct2-info">
-        <div class="ct2-title"><span class="lvb ${letterClass(rl.replace(/^[≤≥] ?/, ""))} ct2-lv">${esc(rl)}</span><span class="t-tile-name">${esc(tt.name)}</span></div>
+        <div class="ct2-title"><span class="lvb ${letterClass(rl.replace(/^[≤≥] ?/, ""))} ct2-lv">${esc(rl)}</span><span class="t-tile-name">${esc(tt.name)}</span>${isTestT(tt) ? `<span class="test-tag">🧪 ${t("test_tag")}</span>` : ""}</div>
         <div class="ct2-when">${when}${tt.s.time ? " · " + timeRange(tt.s) : ""}</div>
         <div class="ct2-meta">${[tt.s.place && "📍 " + esc(tt.s.place), esc(fmtName(tt)), t(pairs ? "entry_pairs" : "entry_solo")].filter(Boolean).join(" · ")}</div>
         ${nPr || rfItems(tt).length ? `<div class="pt-tag">${nPr ? `🏆 ${prizePlaces(nPr)}` : ""}${nPr && rfItems(tt).length ? " · " : ""}${rfItems(tt).length ? `🎲 ${t("raffle_short")}` : ""}</div>` : ""}</div>
@@ -431,7 +436,7 @@ setLang(detectLang(BOOT.tgLang));
   }
   function viewTournaments() {
     if (state.view.t) return viewTournamentDetail(state.view.t);
-    const list = state.tournaments.filter(tt => !isGameT(tt)), up = list.filter(isUpcoming), past = list.filter(tt => !isUpcoming(tt)).sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.seq - a.seq);
+    const list = state.tournaments.filter(tt => !isGameT(tt) && (!isTestT(tt) || canEdit())), up = list.filter(isUpcoming), past = list.filter(tt => !isUpcoming(tt)).sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.seq - a.seq);
     const tab = state.view.tTab === "past" ? "past" : "up";
     const LC = { uk: "uk-UA", ru: "ru-RU", en: "en-GB" }[getLang()] || "uk-UA";
     // прошедшие — по месяцам
@@ -446,7 +451,7 @@ setLang(detectLang(BOOT.tgLang));
   }
   function viewTournamentDetail(tid) {
     if (state.view.editT === tid && state._tf) return tournamentFormHtml(state._tf);
-    const tt = byId(state.tournaments, tid); if (!tt) { state.view.t = null; return viewTournaments(); }
+    const tt = byId(state.tournaments, tid); if (!tt || (isTestT(tt) && !canEdit())) { state.view.t = null; return viewTournaments(); }
     if (state.view.editT === tid) return tournamentFormHtml(tt);
     if (state.view.run === tid && state._run && canEditT(tt)) return runSetupHtml(tt);
     if (tt.status === "live" || (state.view.fix === tid && canEditT(tt))) return liveHtml(tt, tt.status !== "live");
@@ -495,7 +500,7 @@ setLang(detectLang(BOOT.tgLang));
     return `
       <div class="section-head"><button class="btn ghost sm back" data-act="t-back">‹ ${backLbl()}</button>${canEditT(tt) ? `<button class="btn sm" data-act="edit-t" data-id="${tid}">${t("edit")}</button>` : ""}</div>
       <div class="t-head"><h2 class="t-title">${esc(tt.name)}</h2>
-        <div class="t-chips"><span class="lvb ${letterClass(rangeLabel(tt.s).replace(/^[≤≥] ?/, ""))}">${esc(lvTag(tt.s))}</span><span class="t-chip">${esc(fmtName(tt))}</span>${tt.s.reg_open ? `<span class="t-status live"><i></i>${t("reg_open")}</span>` : `<span class="t-status planned"><i></i>${t("reg_closed")}</span>`}</div></div>
+        <div class="t-chips">${isTestT(tt) ? `<span class="test-tag">🧪 ${t("test_tag")}</span>` : ""}<span class="lvb ${letterClass(rangeLabel(tt.s).replace(/^[≤≥] ?/, ""))}">${esc(lvTag(tt.s))}</span><span class="t-chip">${esc(fmtName(tt))}</span>${tt.s.reg_open ? `<span class="t-status live"><i></i>${t("reg_open")}</span>` : `<span class="t-status planned"><i></i>${t("reg_closed")}</span>`}</div></div>
       ${hasRaffle(tt) || canEditT(tt) ? tTabs(tid, [["i", t("tt_tab_info")], ["r", "🎲 " + t("tt_tab_raffle")]], ttTab(tid, "i", ["i", "r"])) : ""}
       ${ttTab(tid, "i", ["i", "r"]) === "r" && (hasRaffle(tt) || canEditT(tt)) ? raffleTabHtml(tt) : `<div class="t-cols"><div class="t-col">
       <div class="card t-info">
@@ -522,7 +527,7 @@ setLang(detectLang(BOOT.tgLang));
       ${splitCardHtml(tt, main.map(r => r.playerId))}
       ${tt.s.kind === "ftour" && tt.s.created_by ? `<div class="card"><span class="tiny">${t("organizer_lbl")}:</span> ${pl(tt.s.created_by)}</div>` : ""}
       ${canEditT(tt) && tt.status !== "played" ? runCardHtml(tt) : ""}
-      ${canEditT(tt) && state.group && tt.status === "scheduled" && isUpcoming(tt) ? `<button class="btn block" style="margin-bottom:12px;" data-act="t-announce" data-id="${esc(tid)}">${t("announce_btn")}</button>` : ""}
+      ${canEditT(tt) && state.group && tt.status === "scheduled" && isUpcoming(tt) && !isTestT(tt) ? `<button class="btn block" style="margin-bottom:12px;" data-act="t-announce" data-id="${esc(tid)}">${t("announce_btn")}</button>` : ""}
       ${isAdmin() ? `<div class="card"><h3>${t("add_player")}</h3><input id="addRegQ" data-act="reg-q" data-id="${tid}" type="search" autocomplete="off" placeholder="${t("search")}" value="${esc(state._addQ || "")}" style="margin-top:8px;"><div class="row" style="margin-top:8px;gap:8px;"><select id="addRegSel" style="flex:1;min-width:0;">${addRegOptions(tid, state._addQ || "")}</select>${addTeamSel}<button class="btn" data-act="reg-add" data-id="${tid}">+</button></div>
         <p class="tiny" style="margin:10px 0 0;">${t("score_later")}</p></div>` : ""}</div></div>`}`;
   }
@@ -1356,7 +1361,7 @@ setLang(detectLang(BOOT.tgLang));
   const LEAGUES = ["D", "C"];
   // лига турнира: вручную из настроек или по уровню допуска
   // "split" — смешанный турнир (D+ / C−): каждый игрок получает очки в своей лиге (лигу игрока назначает админ, по умолчанию — по уровню)
-  const tLeague = tt => { const v = tt.s.season_league; if (v === "none" || isGameT(tt)) return null; if (LEAGUES.includes(v) || v === "split") return v;
+  const tLeague = tt => { const v = tt.s.season_league; if (v === "none" || isGameT(tt) || isTestT(tt)) return null; if (LEAGUES.includes(v) || v === "split") return v;
     const lo = tt.s.level_min != null ? +tt.s.level_min : null, hi = tt.s.level_max != null ? +tt.s.level_max : null;
     if (lo != null && hi != null && lo < 2.5 && hi >= 2.5 && hi < 3.5) return "split";
     const ref = lo != null ? lo : hi != null ? hi - 0.001 : null; if (ref == null) return "D";
@@ -1423,7 +1428,7 @@ setLang(detectLang(BOOT.tgLang));
   }
   // таблица сезона для лиги
   function seasonTable(season, lg) {
-    const ts = state.tournaments.filter(tt => tt.status === "played" && tt.date && tt.date >= season.start && tt.date <= season.end && (tLeague(tt) === lg || tLeague(tt) === "split"))
+    const ts = state.tournaments.filter(tt => tt.status === "played" && !isTestT(tt) && tt.date && tt.date >= season.start && tt.date <= season.end && (tLeague(tt) === lg || tLeague(tt) === "split"))
       .sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.seq - b.seq);
     const by = {};
     ts.forEach(tt => { let only = null;
@@ -1499,7 +1504,7 @@ setLang(detectLang(BOOT.tgLang));
   // ---------- секретные номинации (видит только админ) ----------
   function nominationsHtml() {
     const S = curSeason(), E = computeElo();
-    const ts = state.tournaments.filter(tt => tt.status === "played" && tt.date >= S.start && tt.date <= S.end && tLeague(tt));
+    const ts = state.tournaments.filter(tt => tt.status === "played" && !isTestT(tt) && tt.date >= S.start && tt.date <= S.end && tLeague(tt));
     const tids = new Set(ts.map(tt => tt.id)), sg = state.games.filter(g => tids.has(g.tournamentId) && scoredG(g));
     const cnt = {}, wins = {}; ts.forEach(tt => { const pl = tournamentPlaces(tt); if (!pl) return; Object.entries(pl).forEach(([id, r]) => { cnt[id] = (cnt[id] || 0) + 1; if (r.place === 1) wins[id] = (wins[id] || 0) + 1; }); });
     const elo = {}; Object.entries(E.seq).forEach(([id, arr]) => arr.forEach(x => { if (tids.has(x.g.tournamentId)) elo[id] = (elo[id] || 0) + x.d; }));
@@ -1574,7 +1579,8 @@ setLang(detectLang(BOOT.tgLang));
           ${(s.raffle_items || []).length ? `<p class="tiny" style="margin:6px 0 0;">${t("rf_items_hint")}</p>` : ""}
         </div>
         <label class="row tf-toggle"><span>${t("t_approval")}<br><span class="tiny">${t("t_approval_hint")}</span></span><input type="checkbox" id="tfApproval" ${s.approval ? "checked" : ""}></label>`}
-        ${f.isNew ? (state.group ? `<label class="row tf-toggle"><span>${t("t_announce")}<br><span class="tiny">${t("t_announce_hint", { g: esc(state.group) })}</span></span><input type="checkbox" id="tfAnnounce" ${f.announce !== false ? "checked" : ""}></label>`
+        <label class="row tf-toggle tf-test"><span>🧪 ${t("t_test")}<br><span class="tiny">${t("t_test_hint")}</span></span><input type="checkbox" id="tfTest" data-act="tf-pairs" ${s.test ? "checked" : ""}></label>
+        ${f.isNew && !s.test ? (state.group ? `<label class="row tf-toggle"><span>${t("t_announce")}<br><span class="tiny">${t("t_announce_hint", { g: esc(state.group) })}</span></span><input type="checkbox" id="tfAnnounce" ${f.announce !== false ? "checked" : ""}></label>`
           : `<p class="tiny" style="margin:4px 0 0;">📣 ${t("no_group_hint")}</p>`) : ""}
         <div class="pf-actions" style="margin-top:14px;justify-content:space-between;">
           ${f.isNew ? "<span></span>" : `<button class="btn sm ghost danger" data-act="tf-delete">${t("delete")}</button>`}
@@ -1587,6 +1593,7 @@ setLang(detectLang(BOOT.tgLang));
     f.name = g("tfName").value.trim(); f.date = g("tfDate").value; f.courts = +g("tfCourts").value || 1;
     if (g("tfSeason")) f.s.season_league = g("tfSeason").value;
     if (g("tfAnnounce")) f.announce = g("tfAnnounce").checked;
+    if (g("tfTest")) { if (g("tfTest").checked) { f.s.test = true; f.announce = false; } else delete f.s.test; }
     (f.s.prizes || []).forEach((x, i) => { const el = g("tfPrz" + i); if (el) x.text = el.value.replace(/\s+/g, " ").trim(); });
     if (g("tfFmtNote")) f.s.format_note = g("tfFmtNote").value.trim();
     if (g("tfKRounds")) { const n = (id, d, lo, hi) => { const v = +g(id).value; return v ? Math.max(lo, Math.min(hi, v)) : d; };
@@ -1611,7 +1618,7 @@ setLang(detectLang(BOOT.tgLang));
     const fmt = isKf(f.format) ? "kotc" : f.format; if (fmt === "kotc") f.s.kotc = { ...(f.s.kotc || {}), final: f.format === "kotc_am" };
     try { const old = byId(state.tournaments, f.id) || {};
       await db.saveTournament({ id: f.id, seq: f.seq || old.seq || Date.now() % 1e9, name: f.name, date: f.date, status: f.status, format: fmt, courts: f.courts, s: f.s, participantIds: old.participantIds, teams: old.teams, scoring: old.scoring, rounds: old.rounds }); state._tf = null; state.view.editT = null; state.view.t = f.id;
-      if (f.isNew && f.announce !== false && state.group) { try { await db.announceTournament(f.id); db.kick(); } catch (e) { console.error(e); } }
+      if (f.isNew && f.announce !== false && state.group && !f.s.test) { try { await db.announceTournament(f.id); db.kick(); } catch (e) { console.error(e); } }
       await reload(); toast(t("saved")); } catch (e) { err(e); }
   }
 
@@ -1624,16 +1631,16 @@ setLang(detectLang(BOOT.tgLang));
     return `<div class="section-head"><h2>${t("rating")}</h2></div>
       <div class="chips-wrap" style="margin-bottom:12px;">${groups.map(([k, l]) => `<span class="chip sm ${grp===k?'active':''}" data-act="lv-group" data-val="${k}">${l}</span>`).join("")}</div>
       <div class="card">
-        <p class="tiny" style="margin:0 0 8px;">${t("rating_hint", { n: CONFIRM_N })}</p>
+        <p class="tiny" style="margin:0 0 8px;">${t("rating_hint", { n: CONFIRM_N })} ${t("rating_first_game")}</p>
         <button type="button" class="fold-h" style="margin:2px 0 10px;font-size:13px;" data-act="elo-how"><span>ⓘ ${t("elo_how")}</span><span class="chev ${state.view.eloHow ? "open" : ""}">›</span></button>
         ${state.view.eloHow ? `<div class="elo-how">${t("elo_how_body").split("\n").map(x => `<p>${esc(x)}</p>`).join("")}</div>` : ""}
-        <table class="tbl"><tr><th></th><th>${t("players")}</th><th></th><th>Elo</th><th>${t("games")}</th><th>W-L</th></tr>
+        <table class="tbl rate-tbl"><tr><th></th><th>${t("players")}</th><th></th><th>Elo</th><th class="rt-g">${t("games")}</th><th>W-L</th></tr>
         ${rows.map((p, i) => { const s = E.stats[p.id]; return `<tr class="${meCls(p.id)}">
-          <td><span class="pos-badge ${medalCls(i + 1)}">${i+1}</span></td>
-          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 30)}<span class="plink">${esc(p.name)}</span>${lblHtml(p.id)}${admTag(p.id)}</span></td>
-          <td>${levelBadge(E.ratings[p.id] / 1000)}</td>
+          <td class="rt-pos"><span class="pos-badge ${medalCls(i + 1)}">${i+1}</span></td>
+          <td class="lb-name"><span class="lb-p" data-act="open-profile" data-id="${p.id}">${avatarHtml(p.id, 30)}<span class="plink">${esc(p.name)}</span>${lblHtml(p.id)}</span></td>
+          <td class="rt-lv">${levelBadge(E.ratings[p.id] / 1000)}</td>
           <td class="lb-elo ${E.unconfirmed[p.id]?'unc':''}">${Math.round(E.ratings[p.id])}</td>
-          <td>${s.g}</td><td>${s.g ? s.w + "-" + s.l : "—"}</td></tr>`; }).join("")}
+          <td class="rt-g">${s.g}</td><td class="rt-wl">${s.g ? s.w + "-" + s.l : "—"}</td></tr>`; }).join("")}
         </table></div>`;
   }
 
@@ -1782,7 +1789,7 @@ setLang(detectLang(BOOT.tgLang));
     if (!pid || !byId(state.players, pid)) return viewOnboarding();
     const p = byId(state.players, pid), { E, list } = board(); const s = E.stats[pid]; const rank = list.findIndex(x => x.id === pid);
     const mine = my && my.id === pid, nav = !!state.view.pid;
-    const upcoming = state.registrations.filter(r => r.playerId === pid && r.status !== "cancelled").map(r => ({ r, tt: byId(state.tournaments, r.tournamentId) })).filter(x => x.tt && isUpcoming(x.tt) && x.tt.format !== "match");
+    const upcoming = state.registrations.filter(r => r.playerId === pid && r.status !== "cancelled").map(r => ({ r, tt: byId(state.tournaments, r.tournamentId) })).filter(x => x.tt && isUpcoming(x.tt) && x.tt.format !== "match" && (!isTestT(x.tt) || canEdit()));
     const head = nav ? `<div class="section-head"><button class="btn ghost sm back" data-act="p-back">‹ ${t("back")}</button><h2 style="flex:1;text-align:right;">${t("profile")}</h2></div>` : `<div class="section-head"><h2>${t("profile")}</h2></div>`;
     if (state.view.editP === pid && (mine || canEdit())) return head + profileEditHtml(p);
     const bdCard = mine && needBd() ? `<div class="bd-need"><span class="bd-need-ic">🎂</span><div><b>${t("bd_need")}</b><p class="tiny">${t("bd_need_sub")}</p></div><button class="btn sm primary" data-act="p-edit-bd" data-id="${pid}">${t("bd_fill")}</button></div>` : "";
@@ -1901,7 +1908,7 @@ setLang(detectLang(BOOT.tgLang));
   function discList() { if (_DISC) return _DISC; return (_DISC = discListRaw()); }
   function discListRaw() {
     const L = state.league || {}, used = L.disc_used || {}, hidden = new Set(L.disc_hidden || []), list = [];
-    state.tournaments.filter(tt => !isGameT(tt) && (tt.status === "played" || tt.status === "live")).forEach(tt => {
+    state.tournaments.filter(tt => !isGameT(tt) && !isTestT(tt) && (tt.status === "played" || tt.status === "live")).forEach(tt => {
       const pp = discPlacePrizes(tt);
       if (Object.keys(pp).length) { const P = tournamentPlaces(tt); if (P) Object.entries(P).forEach(([pid, r]) => { if (pp[r.place]) list.push({ k: tt.id + ":" + pid, pid, tt, why: r.place, prize: pp[r.place] }); }); }
       (tt.s.raffles || []).forEach(r => { if (r.winner && DISC_RE.test(r.prize || "")) list.push({ k: tt.id + ":" + r.winner + ":rf", pid: r.winner, tt, why: "rf", prize: r.prize }); });
@@ -1922,7 +1929,7 @@ setLang(detectLang(BOOT.tgLang));
         <div class="disc-ctl"><label class="disc-chk"><input type="checkbox" data-act="disc-used" data-val="${esc(x.k)}" ${x.used ? "checked" : ""}><span>${x.used ? t("disc_used_on", { d: dateFmt(x.used) }) : t("disc_used")}</span></label>
           <button class="icon-btn" data-act="disc-del" data-val="${esc(x.k)}" title="${t("delete")}">✕</button></div></div>`;
     const players = state.players.filter(p => p.active).sort((a, b) => a.name.localeCompare(b.name));
-    const ts = state.tournaments.filter(tt => !isGameT(tt) && tt.status === "played").sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    const ts = state.tournaments.filter(tt => !isGameT(tt) && !isTestT(tt) && tt.status === "played").sort((a, b) => (b.date || "").localeCompare(a.date || ""));
     return `<div class="card"><h3>🎟 ${t("disc_title")}</h3><p class="tiny" style="margin:4px 0 10px;">${t("disc_hint")}</p>
       <label class="row tf-toggle" style="margin:0 0 12px;"><span>${t("disc_tag_opt")}<br><span class="tiny">${t("disc_tag_opt_hint")}</span></span><input type="checkbox" data-act="disc-tag" ${(state.league || {}).disc_tag ? "checked" : ""}></label>
       <div class="seg" style="margin-bottom:10px;"><button class="${state.view.discAll ? "" : "active"}" data-act="disc-filter" data-val="">${t("disc_open")} <span class="seg-n">${open.length}</span></button><button class="${state.view.discAll ? "active" : ""}" data-act="disc-filter" data-val="1">${t("disc_all")} <span class="seg-n">${all.length}</span></button></div>

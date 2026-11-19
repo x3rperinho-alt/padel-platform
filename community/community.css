@@ -840,6 +840,31 @@ tr.sub-out td { opacity: .75; }
 .ge-grid .lbl { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .ge-vs { font-weight: 800; color: var(--ink-3); padding-top: 18px; }
 
+.test-tag { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 2px 7px; border-radius: 6px; font: 800 10.5px/1.4 "Manrope", sans-serif; letter-spacing: .06em; color: #7CC6FF; background: rgba(124,198,255,.12); border: 1px dashed rgba(124,198,255,.5); vertical-align: middle; white-space: nowrap; }
+.t-chips .test-tag { margin-left: 0; }
+.tf-test { border: 1px dashed rgba(124,198,255,.35); border-radius: 12px; padding: 10px 12px; }
+
+/* рейтинг на телефоне: та же таблица, но без колонки «ігор» (видно по W-L) и плотнее — помещается без прокрутки вбок */
+@media (max-width: 560px) {
+  .card:has(table.rate-tbl) { overflow-x: visible; }
+  table.rate-tbl { table-layout: fixed; width: 100%; font-size: 13px; }
+  table.rate-tbl .rt-g { display: none; }
+  table.rate-tbl th, table.rate-tbl td { padding-left: 3px; padding-right: 3px; }
+  table.rate-tbl th:first-child, table.rate-tbl td.rt-pos { width: 30px; padding-left: 0; }
+  table.rate-tbl th:nth-child(3), table.rate-tbl td.rt-lv { width: 40px; text-align: center; }
+  table.rate-tbl th:nth-child(4), table.rate-tbl td.lb-elo { width: 48px; text-align: right; }
+  table.rate-tbl th:last-child, table.rate-tbl td.rt-wl { width: 40px; text-align: right; padding-right: 0; }
+  table.rate-tbl td.lb-name { overflow: hidden; }
+  table.rate-tbl .lb-p { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+  table.rate-tbl .lb-p .avatar { width: 26px !important; height: 26px !important; flex: none; }
+  table.rate-tbl .lb-p .plink { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.rate-tbl .lb-p > .nm-lbl { flex: 0 10 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  table.rate-tbl .lb-p .adm-tag { flex: none; overflow: visible; font-size: 9px; padding: 1px 4px; }
+  table.rate-tbl .pos-badge { width: 24px; height: 24px; font-size: 11px; }
+  table.rate-tbl .lvb { min-width: 0; height: 22px; padding: 0 5px; font-size: 10.5px; border-radius: 7px; }
+  table.rate-tbl td.lb-elo { font-size: 14px; }
+}
+
 /* ===== светлая тема ===== */
 /* сгенерировано из тёмных правил + ручные правки ниже */
 html[data-theme="light"] .lvb { border-radius: 8px; color: var(--ink); background: rgba(255,255,255,0.87); border: 1px solid rgba(40,30,20,0.156); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); }
@@ -1020,6 +1045,7 @@ html[data-theme="light"] .rt-off { border-radius: 10px; color: var(--court); bac
 html[data-theme="light"] .sub-tag.in { color: var(--court); border-radius: 6px; background: var(--orange-soft); }
 html[data-theme="light"] .rt-ovr { color: var(--court); background: var(--orange-soft); border-radius: 999px; }
 html[data-theme="light"] .m-edit { border-radius: 50%; border: 1px solid rgba(40,30,20,0.138); background: rgba(255,255,255,0.71); color: var(--ink-3); }
+html[data-theme="light"] .test-tag { border-radius: 6px; color: #7CC6FF; background: rgba(124,198,255,.12); border: 1px dashed rgba(124,198,255,.5); }
 /* --- ручные правки светлой темы (сообщество) --- */
 html[data-theme="light"] .rf-ticket { background: linear-gradient(180deg, rgba(47,170,140,.14), rgba(242,106,12,.08)); border-color: rgba(30,140,115,.45); }
 html[data-theme="light"] .rf-ticket::before, html[data-theme="light"] .rf-ticket::after { background: #FBF7F2; border-color: rgba(30,140,115,.45); }
@@ -1060,3 +1086,6 @@ html[data-theme="light"] .adm-tag { color: #B8510A; background: rgba(255,122,26,
 /* компьютерный режим идущего турнира */
 html[data-theme="light"] .kb-hint kbd { border-color: rgba(40,30,20,.2); background: rgba(255,255,255,.8); color: var(--ink); }
 html[data-theme="light"] .live-grid .match:focus-within { border-color: rgba(255,122,26,.6); box-shadow: 0 0 0 3px rgba(255,122,26,.16), 0 8px 20px -14px rgba(40,30,20,.35); }
+/* тестовый турнир */
+html[data-theme="light"] .test-tag { color: #1F6FB2; background: rgba(31,111,178,.08); border-color: rgba(31,111,178,.4); }
+html[data-theme="light"] .tf-test { border-color: rgba(31,111,178,.35); }
