@@ -188,8 +188,9 @@ setLang(detectLang(BOOT.tgLang));
     const lastT = tIds[tIds.length - 1] || null;
     return { ratings: r, stats: st, unconfirmed, tcount, seq, tsum, adj, lastT };
   }
-  // в общем рейтинге — только те, кто сыграл хотя бы одну игру (записываться и попадать в турниры можно и без этого)
-  const board = () => { const E = computeElo(); return { E, list: state.players.filter(p => p.active && p.levelStatus === "ok" && ((E.stats[p.id] || {}).g || 0) > 0).sort((a, b) => E.ratings[b.id] - E.ratings[a.id]) }; };
+  // рейтинг: по умолчанию все; с переключателем «только активные» — те, кто сыграл хотя бы одну игру
+  const board = onlyActive => { const E = computeElo(); return { E, list: state.players.filter(p => p.active && p.levelStatus === "ok" && (!onlyActive || ((E.stats[p.id] || {}).g || 0) > 0)).sort((a, b) => E.ratings[b.id] - E.ratings[a.id]) }; };
+  const rActive = () => { if (state.view.rActive == null) { try { state.view.rActive = localStorage.getItem("r_active") === "1"; } catch (e) { state.view.rActive = false; } } return state.view.rActive; };
 
   // ---------- общие кусочки ----------
   const HOME_IC = `<svg class="home-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.5 9v11h13V9"/><path d="M12 11.5v5M9.5 14h5"/></svg>`;
@@ -1629,14 +1630,15 @@ setLang(detectLang(BOOT.tgLang));
 
   // ---------- рейтинг ----------
   function viewRating() {
-    const { E, list } = board();
+    const { E, list } = board(rActive());
     const grp = state.view.lvGroup || "all";
     const groups = [["all", t("all_levels")], ["A", "A"], ["B", "B"], ["C", "C"], ["D", "D"]];
     const rows = list.filter(p => grp === "all" || letter(E.ratings[p.id] / 1000)[0] === grp);
     return `<div class="section-head"><h2>${t("rating")}</h2></div>
-      <div class="chips-wrap" style="margin-bottom:12px;">${groups.map(([k, l]) => `<span class="chip sm ${grp===k?'active':''}" data-act="lv-group" data-val="${k}">${l}</span>`).join("")}</div>
+      <div class="chips-wrap" style="margin-bottom:10px;">${groups.map(([k, l]) => `<span class="chip sm ${grp===k?'active':''}" data-act="lv-group" data-val="${k}">${l}</span>`).join("")}</div>
+      <label class="r-active"><input type="checkbox" data-act="r-active" ${rActive() ? "checked" : ""}><span>${t("r_active_only")}</span></label>
       <div class="card">
-        <p class="tiny" style="margin:0 0 8px;">${t("rating_hint", { n: CONFIRM_N })} ${t("rating_first_game")}</p>
+        <p class="tiny" style="margin:0 0 8px;">${t("rating_hint", { n: CONFIRM_N })}</p>
         <button type="button" class="fold-h" style="margin:2px 0 10px;font-size:13px;" data-act="elo-how"><span>ⓘ ${t("elo_how")}</span><span class="chev ${state.view.eloHow ? "open" : ""}">›</span></button>
         ${state.view.eloHow ? `<div class="elo-how">${t("elo_how_body").split("\n").map(x => `<p>${esc(x)}</p>`).join("")}</div>` : ""}
         <table class="tbl rate-tbl"><tr><th></th><th>${t("players")}</th><th></th><th>Elo</th><th class="rt-g">${t("games")}</th><th>W-L</th></tr>
@@ -2234,6 +2236,7 @@ setLang(detectLang(BOOT.tgLang));
       else if (a === "toggle-ach") on(() => { state.view.achOpen = state.view.achOpen === id ? null : id; render(); });
       else if (a === "mh-all") on(() => { state.view.mhAll = state.view.mhAll === id ? null : id; render(); });
       else if (a === "lv-group") on(() => { state.view.lvGroup = el.dataset.val; render(); });
+      else if (a === "r-active") el.onchange = () => { state.view.rActive = el.checked; try { localStorage.setItem("r_active", el.checked ? "1" : "0"); } catch (e) {} render(); };
       else if (a === "open-profile") on(() => openProfile(id));
       else if (a === "p-back") on(() => { const b = state.view.pBack || "rating"; state.view.pid = null; state.view.editP = null; state.tab = b === "profile" ? "rating" : b; render(); });
       else if (a === "p-edit-bd") on(() => { state._pf = null; state.view.editP = id; render(); const f = document.getElementById("pfBd"); if (f) f.scrollIntoView({ block: "center", behavior: "smooth" }); });
