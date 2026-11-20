@@ -790,7 +790,7 @@ input.sc-in { -moz-appearance: textfield; appearance: textfield; }
   .live-ms .match { margin: 0; }
   nav.tabs { justify-content: center; }
   nav.tabs button { flex: 0 0 112px; }
-  #view[data-tab="rating"], #view[data-tab="season"] { max-width: 900px; margin: 0 auto; }
+  #view[data-tab="rating"], #view[data-tab="season"], #view[data-tab="profile"] { max-width: 900px; margin: 0 auto; } /* профиль — одной колонкой (колонки в Safari/Telegram ломали порядок карточек) */
   /* списки турниров и игр — плитки в 2 колонки */
   #view .stack:has(> .tile) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
   #view .stack:has(> .tile) > .tile { margin: 0; }
@@ -798,9 +798,6 @@ input.sc-in { -moz-appearance: textfield; appearance: textfield; }
   .t-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
   .t-col { min-width: 0; }
   /* профиль — карточки в две колонки */
-  #view[data-tab="profile"] { columns: 2; column-gap: 16px; }
-  #view[data-tab="profile"] > * { break-inside: avoid; }
-  #view[data-tab="profile"] > .section-head, #view[data-tab="profile"] > .card.hero, #view[data-tab="profile"] > .bd-need, #view[data-tab="profile"] > .lvl-banner { column-span: all; }
   #view[data-tab="admin"] div:has(> .adm-row) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
   /* админ: карточки игроков сеткой */
   #view[data-tab="admin"]:has(> .rv-card) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; align-items: start; }
